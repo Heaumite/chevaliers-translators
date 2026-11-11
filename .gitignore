@@ -1,0 +1,14 @@
+# Compilations (Linux, Windows) et paquets de distribution : jamais dans le dépôt.
+/app/target/
+/app/target-win/
+/dist/
+/a-signer/
+/signes/
+__pycache__/
+*.pyc
+# Fichiers de travail de Windows et des éditeurs.
+Thumbs.db
+desktop.ini
+.vs/
+.vscode/
+*.swp

@@ -1,0 +1,69 @@
+# Comparatif des modèles (S4b) : messages de chat de jeu, langue d'origine, langues visées.
+# Colonnes séparées par une tabulation : origine, cibles (séparées par des virgules), message.
+# Les 22 autres langues sont toutes visées, avec beaucoup de paires sans l'anglais.
+fr	en,de,pl,el	Salut tout le monde, quelqu'un pour faire le donjon des Mortemines ?
+fr	es,ru,sv,hr	LF tank et heal pour Cœur du Magma, on part dans 10 min
+fr	it,cs,no,uk	Je vends [Lame de la Perdition] 50 po, mp moi
+fr	nl,hu,bg,fi	Désolé j'ai déco, vous pouvez me réinviter svp ?
+fr	pt,sk,ro,da	Attention au pull, attendez que le tank marque les cibles
+fr	sr,sl,de,en	gg tout le monde, merci pour le groupe !
+fr	ru,es,el,sv	Quelqu'un sait où trouver le maître de forge ?
+fr	pl,it,uk,hr	La guilde recrute des joueurs détendus, on raid le mercredi et le dimanche soir.
+fr	cs,no,hu,nl	brb 5 min, je mange
+fr	bg,fi,pt,sk	Il me manque deux cuirs épais pour finir la quête, quelqu'un en a ?
+en	fr,de,ru,el	LFM Molten Core, need 1 tank and 2 healers, PST
+en	es,pl,sv,ro	WTS [Thunderfury, Blessed Blade of the Windseeker], whisper me offers
+en	it,cs,uk,da	Sorry, I was AFK, did we wipe on the last boss?
+en	nl,hu,bg,fi	Can someone summon me? I'm stuck in Ironforge.
+en	pt,sk,hr,no	Don't stand in the fire, and kill the adds first!
+en	sr,sl,fr,de	Thanks for the run guys, see you tomorrow.
+en	ru,es,el,it	Is anyone selling mining picks? The vendor is out of stock.
+en	pl,sv,uk,cs	Our guild is looking for a raid leader with experience in Naxxramas.
+en	ro,fi,hu,nl	lol that was close, I had 3% HP left
+en	bg,da,pt,sk	Where do I turn in this quest? The map marker disappeared.
+de	fr,en,pl,it	Hallo zusammen, sucht jemand noch Leute für die Todesminen?
+de	es,ru,cs,el	Suche Gruppe für die Quest im Schlingendorntal, bin Stufe 38.
+de	nl,sv,hr,ro	Verkaufe [Arkanitbarren] für 20 Gold das Stück, bei Interesse anflüstern.
+de	pt,hu,uk,no	Kann mich bitte jemand einladen? Ich hatte einen Verbindungsabbruch.
+de	bg,sk,fi,da	Vorsicht, der Boss macht gleich einen Flächenangriff, alle raus aus der Mitte!
+de	sr,sl,fr,en	Danke für die Gruppe, war echt lustig mit euch.
+de	ru,es,el,pl	Weiß jemand, wo man in Orgrimmar die Schmiedekunst lernt?
+de	it,cs,uk,sv	Unsere Gilde sucht noch Heiler für den Raid am Freitagabend.
+de	hr,no,hu,nl	bin kurz afk, Essen ist fertig
+de	bg,fi,pt,ro	Mir fehlen noch zwei Felle, hat die jemand übrig?
+es	fr,en,de,pl	Hola a todos, ¿alguien para hacer las Minas de la Muerte?
+es	it,ru,sv,hr	Busco grupo para Núcleo de Magma, soy sanador con buen equipo.
+es	nl,cs,el,uk	Vendo [Hoja de la Perdición] por 50 de oro, susurradme.
+es	pt,hu,bg,no	Perdón, se me cayó internet, ¿me volvéis a invitar?
+es	ro,sk,fi,da	¡Cuidado con los adds, matadlos antes de que lleguen al sanador!
+es	sr,sl,en,de	Gracias por el grupo, ha sido genial.
+es	ru,fr,it,sv	¿Alguien sabe dónde está el instructor de herrería en Ventormenta?
+es	pl,el,uk,cs	Nuestra hermandad recluta jugadores tranquilos para raids los fines de semana.
+es	hr,no,hu,nl	vuelvo en 5 min, voy al baño
+es	bg,fi,pt,ro	Me faltan dos pieles gruesas para la misión, ¿alguien tiene?
+ru	fr,en,de,pl	Всем привет, кто пойдёт в Мёртвые копи?
+ru	es,it,cs,el	Ищу группу в Огненные Недра, я хил, шмот нормальный.
+ru	nl,sv,hr,ro	Продам [Слиток арканита] по 20 золотых, пишите в личку.
+ru	pt,hu,uk,no	Извините, у меня вылетела игра, пригласите снова, пожалуйста.
+ru	bg,sk,fi,da	Осторожно, не стойте в огне и сначала убейте аддов!
+ru	sr,sl,fr,en	Спасибо за группу, было весело.
+ru	es,de,el,pl	Кто-нибудь знает, где учитель кузнечного дела в Оргриммаре?
+ru	it,cs,uk,sv	Наша гильдия набирает спокойных игроков, рейды по средам.
+ru	hr,no,hu,nl	отойду на 5 минут, ужин
+ru	bg,fi,pt,ro	Мне не хватает двух толстых шкур для задания, у кого есть?
+pl	fr,en,de,ru	Cześć wszystkim, ktoś chętny na Kopalnie Śmierci?
+pl	es,it,cs,el	Szukam grupy do Rdzenia Magmy, jestem healerem.
+pl	nl,sv,hr,ro	Sprzedam [Sztabka arkanitu] po 20 złota, piszcie na priv.
+pl	pt,hu,uk,no	Sorki, wywaliło mnie z gry, możecie mnie zaprosić jeszcze raz?
+pl	bg,sk,fi,da	Uważajcie na pull, poczekajcie aż tank oznaczy cele!
+pl	sr,sl,fr,en	Dzięki za grupę, było super.
+pl	ru,es,el,de	Wie ktoś, gdzie jest trener kowalstwa w Ironforge?
+pl	it,cs,uk,sv	Nasza gildia rekrutuje spokojnych graczy na rajdy w weekendy.
+pl	hr,no,hu,nl	zw 5 min, idę coś zjeść
+pl	bg,fi,pt,ro	Brakuje mi dwóch grubych skór do questa, ma ktoś?
+# Messages italiens : version low seulement (6 langues : fr, en, es, it, de, ru).
+it	low	Ciao a tutti, qualcuno per fare le Miniere della Morte?
+it	low	Cerco gruppo per il Nucleo Ardente, sono un guaritore con un buon equipaggiamento.
+it	low	Vendo [Lama della Perdizione] a 50 oro, scrivetemi in privato.
+it	low	Scusate, mi è crashato il gioco, potete reinvitarmi?
+it	low	torno tra 5 min, vado a mangiare

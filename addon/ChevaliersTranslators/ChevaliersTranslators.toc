@@ -1,0 +1,14 @@
+## Interface: 120105, 16001, 11509, 20506, 50504
+## Title: Chevaliers Translators
+## Notes: Traduction du chat entre les langues européennes, sur ton PC. /chevaliers
+## Author: Chevaliers Translators
+## Version: 0.14.3
+## SavedVariables: ChevaliersTranslatorsDB
+## IconTexture: Interface\AddOns\ChevaliersTranslators\Media\Logo
+## X-License: GPL-3.0-or-later
+## X-Website: https://github.com/Heaumite/chevaliers-translators
+
+Encoder.lua
+Banner.lua
+Core.lua
+Mirror.lua

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuration d'artefact SignPath (à coller dans le projet « chevaliers-translators » de SignPath,
+  slug « executables »). L'artefact envoyé par GitHub Actions est le zip produit par
+  actions/upload-artifact : ChevaliersTranslators.exe et ct-outils.exe à sa racine.
+  Métadonnées imposées (conditions de SignPath Foundation) : nom du produit et version identiques
+  à ceux du projet ; la version (quatre nombres, « 0.14.3.0 ») est passée par le workflow.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file-set product-name="Chevaliers Translators" product-version="${version}" file-version="${version}">
+      <include path="ChevaliersTranslators.exe" />
+      <include path="ct-outils.exe" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

@@ -1,0 +1,140 @@
+# Dictionnaire des termes du jeu (Chevaliers Translators), modifiable.
+#
+# Règle (09/11/2026) : un message dont la langue détectée n'est pas celle du client est traduit
+# en entier dans la langue du client ; les acronymes et le jargon du jeu le sont par ce
+# dictionnaire, les noms de donjons, raids et lieux prennent le nom que leur donne le client.
+#
+# Section « noms » : noms propres du jeu, un par ligne, une colonne par langue (en tête : les codes).
+# Plusieurs écritures séparées par « | » : la première est celle qui est écrite dans la traduction,
+# les autres sont reconnues aussi (abréviations comprises). Case vide : nom inconnu dans cette
+# langue, le nom d'origine reste. Dans un message, un nom reconnu (dans la langue du message ou en
+# anglais) est remplacé par son nom dans la langue du lecteur, sans passer par le modèle.
+#
+# Section « jargon » : acronymes et mots du jeu, même présentation. Reconnus sous leur forme
+# anglaise (et, dans la langue du message, sous une forme en capitales : « MP », « DD »), écrits
+# dans la langue du lecteur, comme au milieu d'une phrase (majuscule ajoutée en début de phrase).
+# Case vide : le mot reste tel quel.
+#
+# Une forme précédée de « = » n'est reconnue qu'écrite exactement ainsi (« =IF » : Ironforge,
+# pas le mot anglais « if » ; « =AH » : hôtel des ventes, pas « ah »).
+#
+# Section « garder » : mots que le modèle ne doit pas traduire. Ils restent tels quels.
+[noms]
+en	fr	de	es	it	ru	pt
+Molten Core|=MC	Cœur du Magma	Geschmolzener Kern	Núcleo de Magma	Nucleo Ardente	Огненные Недра	Núcleo Derretido
+Onyxia's Lair|Ony	Repaire d'Onyxia	Onyxias Hort	Guarida de Onyxia		Логово Ониксии	Covil da Onyxia
+Blackwing Lair|BWL	Repaire de l'Aile noire	Pechschwingenhort	Guarida Alanegra		Логово Крыла Тьмы
+Zul'Gurub|ZG	Zul'Gurub	Zul'Gurub	Zul'Gurub	Zul'Gurub	Зул'Гуруб	Zul'Gurub
+Naxxramas|Naxx	Naxxramas	Naxxramas	Naxxramas	Naxxramas	Наксрамас	Naxxramas
+Ruins of Ahn'Qiraj|AQ20	Ruines d'Ahn'Qiraj	Ruinen von Ahn'Qiraj	Ruinas de Ahn'Qiraj		Руины Ан'Киража
+Temple of Ahn'Qiraj|AQ40	Temple d'Ahn'Qiraj	Tempel von Ahn'Qiraj	Templo de Ahn'Qiraj		Храм Ан'Киража
+Ragefire Chasm|RFC	Gouffre de Ragefeu	Der Flammenschlund|Flammenschlund	Sima Ígnea		Огненная пропасть
+Wailing Caverns|=WC	Cavernes des lamentations	Die Höhlen des Wehklagens|Höhlen des Wehklagens	Cuevas de los Lamentos		Пещеры Стенаний
+The Deadmines|Deadmines|=VC	Les Mortemines|Mortemines	Die Todesminen|Todesminen	Las Minas de la Muerte|Minas de la Muerte	Le Miniere della Morte|Miniere della Morte	Мертвые копи|Мёртвые копи
+Shadowfang Keep|SFK	Donjon d'Ombrecroc	Burg Schattenfang	Castillo de Colmillo Oscuro		Крепость Темного Клыка
+Blackfathom Deeps|BFD	Profondeurs de Brassenoire	Tiefschwarze Grotte	Cavernas de Brazanegra		Непроглядная Пучина
+The Stockade|Stockade|Stockades	La Prison|Prison	Das Verlies|Verlies
+Razorfen Kraul|RFK	Kraal de Tranchebauge	Kral der Klingenhauer
+Razorfen Downs|RFD	Souilles de Tranchebauge	Hügel der Klingenhauer
+Scarlet Monastery|=SM	Monastère écarlate	Das Scharlachrote Kloster|Scharlachrotes Kloster	Monasterio Escarlata		Монастырь Алого ордена
+Sunken Temple|=ST	Le temple d'Atal'Hakkar|Temple d'Atal'Hakkar	Der Tempel von Atal'Hakkar|Versunkener Tempel
+Blackrock Depths|BRD	Profondeurs de Rochenoire	Schwarzfelstiefen	Profundidades de Roca Negra		Глубины Черной горы
+Blackrock Spire|=BRS	Pic de Rochenoire	Schwarzfelsspitze
+Dire Maul	Hache-Tripes	Düsterbruch
+Stranglethorn Vale|STV|Stranglethorn	Vallée de Strangleronce|Strangleronce	Schlingendorntal	Vega de Tuercespina		Тернистая долина
+Stormwind City|Stormwind|=SW	Hurlevent	Sturmwind	Ventormenta		Штормград	Ventobravo
+Ironforge|=IF	Forgefer	Eisenschmiede	Forjaz		Стальгорн	Altaforja
+Undercity|=UC	Fossoyeuse	Unterstadt	Entrañas		Подгород	Cidade Baixa
+Thunder Bluff|=TB	Les Pitons-du-Tonnerre|Pitons-du-Tonnerre	Donnerfels	Cima del Trueno		Громовой Утес	Penhasco do Trovão
+Silvermoon City|Silvermoon	Lune-d'Argent	Silbermond	Lunargenta		Луносвет	Luaprata
+The Exodar|Exodar	L'Exodar|Exodar	Die Exodar|Exodar	El Exodar|Exodar		Экзодар	Exodar
+Elwynn Forest|Elwynn	Forêt d'Elwynn	Wald von Elwynn	Bosque de Elwynn		Элвиннский лес
+Westfall	Marche de l'Ouest	Westfall	Páramos de Poniente		Западный Край
+Duskwood	Bois de la Pénombre	Dämmerwald	Bosque del Ocaso		Сумеречный лес
+Redridge Mountains|Redridge	Les Carmines|Carmines	Rotkammgebirge
+Wetlands	Les Paluns|Paluns	Sumpfland
+Arathi Highlands|Arathi	Hautes-terres d'Arathi	Arathihochland
+Hillsbrad Foothills|Hillsbrad	Contreforts de Hautebrande	Vorgebirge des Hügellands
+Alterac Mountains	Montagnes d'Alterac	Alteracgebirge
+Western Plaguelands|WPL	Maleterres de l'Ouest	Westliche Pestländer
+Eastern Plaguelands|EPL	Maleterres de l'Est	Östliche Pestländer
+Tirisfal Glades|Tirisfal	Clairières de Tirisfal	Tirisfal
+Silverpine Forest|Silverpine	Forêt des Pins-Argentés	Silberwald
+Badlands	Terres ingrates	Ödland
+Searing Gorge	Gorge des Vents brûlants	Sengende Schlucht
+Burning Steppes	Steppes ardentes	Brennende Steppe
+Swamp of Sorrows	Marais des Chagrins	Sümpfe des Elends
+Blasted Lands	Terres foudroyées	Verwüstete Lande
+Deadwind Pass	Défilé de Deuillevent	Gebirgspass der Totenwinde
+The Barrens|Barrens	Les Tarides|Tarides	Brachland
+Darkshore	Sombrivage	Dunkelküste
+Ashenvale	Orneval	Eschental
+Stonetalon Mountains|Stonetalon	Les Serres-Rocheuses|Serres-Rocheuses	Steinkrallengebirge
+Desolace	Désolace	Desolace
+Thousand Needles	Mille pointes	Tausend Nadeln
+Dustwallow Marsh|Dustwallow	Marécage d'Âprefange	Düstermarschen
+Feralas	Féralas	Feralas
+Un'Goro Crater|Un'Goro	Cratère d'Un'Goro	Krater von Un'Goro
+Felwood	Gangrebois	Teufelswald
+Winterspring	Berceau-de-l'Hiver	Winterquell
+Moonglade	Reflet-de-Lune	Mondlichtung
+Eversong Woods|Eversong	Bois des Chants éternels	Immersangwald
+Isle of Quel'Danas|Quel'Danas	Île de Quel'Danas	Insel von Quel'Danas
+Voidstorm	Tempête du Vide
+Windrunner Spire|WRS	Flèche de Coursevent|La flèche de Coursevent
+Magisters' Terrace|Magister's Terrace|MGT	Terrasse des Magistères|La terrasse des Magistères	Terrasse der Magister
+Murder Row	Allée du meurtre|L'Allée du meurtre
+Den of Nalorakk	Antre de Nalorakk|L'antre de Nalorakk
+Maisara Caverns	Cavernes de Maisara|Les cavernes de Maisara
+The Blinding Vale|Blinding Vale	Val Aveuglant|Le val Aveuglant
+Nexus-Point Xenas|NPX	Point-nexus Xenas|Le point-nexus Xenas
+Voidscar Arena	Arène de la Cicatrice du Vide|L'arène de la Cicatrice du Vide
+The Voidspire|Voidspire	Flèche du Vide
+The Dreamrift|Dreamrift	Faille du Rêve
+March on Quel'Danas	Marche sur Quel'Danas
+Algeth'ar Academy|=AA	Académie d'Algeth'ar
+Seat of the Triumvirate|SotT	Siège du Triumvirat
+Skyreach	Orée-du-Ciel
+Pit of Saron|=PoS	Fosse de Saron	Grube von Saron
+[jargon]
+en	fr	de	es	it	ru	pt
+WTS	vends	verkaufe	vendo	vendo	продам	vendo
+WTB	achète	kaufe	compro	compro	куплю	compro
+WTT	échange	tausche	cambio	scambio	обменяю	troco
+LFG	cherche un groupe	suche Gruppe	busco grupo	cerco gruppo	ищу группу	procuro grupo
+LFM	cherche des joueurs	suche Mitspieler	busco jugadores	cerco giocatori	ищем игроков	procuro jogadores
+LF	cherche	suche	busco	cerco	ищу	procuro
+PST|PM me|W me|whisper me	MP	/w	MD	PM	ЛС	MP
+pls|plz|pliz	stp	bitte	porfa	per favore	пожалуйста	pfv
+ty|thx|tyvm|thanks	merci	danke	gracias	grazie	спасибо	obrigado
+np	pas de souci	kein Problem	de nada	figurati	без проблем	de nada
+brb	je reviens	bin gleich zurück	ahora vuelvo	torno subito	сейчас вернусь	já volto
+afk	absent	AFK	ausente	AFK	АФК	ausente
+wp	bien joué	gut gespielt	bien jugado	ben giocato	хорошо сыграно	bem jogado
+gz|grats|gratz|congrats	félicitations	Glückwunsch	felicidades	complimenti	поздравляю	parabéns
+idk	je ne sais pas	weiß nicht	no sé	non so	не знаю	não sei
+imo	à mon avis	meiner Meinung nach	en mi opinión	secondo me	по-моему	na minha opinião
+btw	au fait	übrigens	por cierto	comunque	кстати	aliás
+omw	j'arrive	bin unterwegs	voy	arrivo	иду	tô indo
+nvm	laisse tomber	egal	olvídalo	lascia stare	неважно	deixa pra lá
+ofc	bien sûr	natürlich	claro	certo	конечно	claro
+asap	dès que possible	so schnell wie möglich	lo antes posible	il prima possibile	как можно скорее	o quanto antes
+atm	en ce moment	gerade	ahora mismo	al momento	сейчас	agora
+ppl	gens	Leute	gente	gente	люди	pessoal
+rdy	prêt	bereit	listo	pronto	готов	pronto
+lvl	niveau	Level	nivel	livello	уровень	nível
+dmg	dégâts	Schaden	daño	danni	урон	dano
+mats	compos	Mats	materiales	materiali	реагенты	materiais
+tank	tank	Tank	tanque	tank	танк	tanque
+tanks	tanks	Tanks	tanques	tank	танки	tanques
+heal|healer	heal	Heiler	healer	healer	хил	healer
+heals|healers	heals	Heiler	healers	healer	хилы	healers
+dps|=DD	DPS	DD	DPS	DPS	ДД	DPS
+M+|mplus|mythic plus	MM+	M+	M+	M+	M+	M+
+=HC|hc|heroic	HM	HC	heroico	eroica	героик	heroico
+LFR	RdR	LFR	BdB	LFR	ЛФР	LFR
+=AH	HV	AH	casa de subastas	casa d'aste	аукцион	casa de leilões
+delve	gouffre	Tiefe	profundidad	scorribanda	вылазка	imersão
+delves	gouffres	Tiefen	profundidades	scorribande	вылазки	imersões
+[garder]
+craft crafts recraft crafter ilvl

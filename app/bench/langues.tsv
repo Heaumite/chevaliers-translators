@@ -1,0 +1,140 @@
+# Détection de la langue : messages de chat courts, langue attendue.
+# Écrits pour le test (pas tirés d'un corpus) ; les mots du jeu y restent comme en vrai.
+fr	Salut tout le monde, quelqu'un pour faire le donjon ?
+fr	Je cherche une guilde pour raid le soir
+fr	merci pour le groupe, bonne soirée
+fr	quelqu'un peut m'aider pour cette quête ?
+fr	je reviens dans 5 minutes, attendez moi
+fr	il nous faut encore un soigneur
+en	Hey everyone, anyone up for a dungeon run?
+en	Looking for a guild that raids in the evening
+en	thanks for the group, have a good night
+en	can someone help me with this quest?
+en	back in 5 minutes, wait for me please
+en	we still need one more healer
+de	Hallo zusammen, hat jemand Lust auf einen Dungeon?
+de	Ich suche eine Gilde, die abends raidet
+de	danke für die Gruppe, schönen Abend noch
+de	kann mir jemand bei dieser Quest helfen?
+de	bin in 5 Minuten zurück, wartet bitte
+de	wir brauchen noch einen Heiler
+es	Hola a todos, ¿alguien para una mazmorra?
+es	Busco una hermandad que haga bandas por la noche
+es	gracias por el grupo, buenas noches
+es	¿alguien me puede ayudar con esta misión?
+es	vuelvo en 5 minutos, esperadme por favor
+es	todavía necesitamos un sanador
+it	Ciao a tutti, qualcuno per un dungeon?
+it	Cerco una gilda che faccia raid la sera
+it	grazie per il gruppo, buona serata
+it	qualcuno mi può aiutare con questa missione?
+it	torno tra 5 minuti, aspettatemi per favore
+it	ci serve ancora un curatore
+pt	Olá a todos, alguém para uma masmorra?
+pt	Procuro uma guilda que faça raides à noite
+pt	obrigado pelo grupo, boa noite
+pt	alguém me pode ajudar com esta missão?
+pt	volto em 5 minutos, esperem por mim
+pt	ainda precisamos de um curandeiro
+nl	Hallo allemaal, iemand zin in een kerker?
+nl	Ik zoek een gilde die 's avonds raidt
+nl	bedankt voor de groep, fijne avond nog
+nl	kan iemand me helpen met deze quest?
+nl	ben over 5 minuten terug, wacht even op mij
+nl	we hebben nog een healer nodig
+pl	Cześć wszystkim, ktoś na lochy?
+pl	Szukam gildii, która rajduje wieczorami
+pl	dzięki za grupę, miłego wieczoru
+pl	czy ktoś może mi pomóc z tym zadaniem?
+pl	wracam za 5 minut, poczekajcie na mnie
+pl	potrzebujemy jeszcze jednego healera
+cs	Ahoj všichni, nechce někdo jít do dungeonu?
+cs	Hledám guildu, která raiduje večer
+cs	díky za skupinu, hezký večer
+cs	může mi někdo pomoct s tímhle questem?
+cs	jsem zpátky za 5 minut, počkejte na mě
+cs	ještě potřebujeme jednoho healera
+sk	Ahojte všetci, nejde niekto do dungeonu?
+sk	Hľadám guildu, ktorá raiduje večer
+sk	vďaka za skupinu, pekný večer
+sk	môže mi niekto pomôcť s touto úlohou?
+sk	som späť o 5 minút, počkajte na mňa
+sk	ešte potrebujeme jedného liečiteľa
+hu	Sziasztok, valaki jön dungeonba?
+hu	Guildet keresek, ami esténként raidel
+hu	köszi a csoportot, szép estét
+hu	tud valaki segíteni ebben a küldetésben?
+hu	5 perc múlva jövök, várjatok meg
+hu	még kell egy gyógyító
+ro	Salut tuturor, vine cineva într-un dungeon?
+ro	Caut o breaslă care face raiduri seara
+ro	mulțumesc pentru grup, seară bună
+ro	mă poate ajuta cineva cu această misiune?
+ro	revin în 5 minute, așteptați-mă vă rog
+ro	mai avem nevoie de un vindecător
+bg	Здравейте всички, някой за подземие?
+bg	Търся гилдия, която прави рейдове вечер
+bg	благодаря за групата, приятна вечер
+bg	може ли някой да ми помогне с тази мисия?
+bg	връщам се след 5 минути, изчакайте ме
+bg	трябва ни още един лечител
+el	Γεια σας, θέλει κανείς για μπουντρούμι;
+el	Ψάχνω συντεχνία που κάνει raid το βράδυ
+el	ευχαριστώ για την ομάδα, καλό βράδυ
+el	μπορεί κάποιος να με βοηθήσει με αυτή την αποστολή;
+el	επιστρέφω σε 5 λεπτά, περιμένετε με
+el	χρειαζόμαστε ακόμα έναν θεραπευτή
+hr	Bok svima, ide li netko u tamnicu?
+hr	Tražim ceh koji raida navečer
+hr	hvala na grupi, ugodna večer
+hr	može li mi netko pomoći s ovim zadatkom?
+hr	vraćam se za 5 minuta, pričekajte me
+hr	trebamo još jednog iscjelitelja
+sr	Здраво свима, иде ли неко у тамницу?
+sr	Тражим гилду која раидује увече
+sr	хвала на групи, пријатно вече
+sr	може ли ми неко помоћи са овим задатком?
+sr	враћам се за 5 минута, сачекајте ме
+sr	треба нам још један исцелитељ
+sl	Živjo vsi, gre kdo v ječo?
+sl	Iščem ceh, ki raida zvečer
+sl	hvala za skupino, lep večer
+sl	mi lahko kdo pomaga s to nalogo?
+sl	vrnem se čez 5 minut, počakajte me
+sl	potrebujemo še enega zdravilca
+uk	Привіт усім, хтось піде в підземелля?
+uk	Шукаю гільдію, яка рейдить увечері
+uk	дякую за групу, гарного вечора
+uk	хтось може допомогти мені з цим завданням?
+uk	повернуся за 5 хвилин, зачекайте мене
+uk	нам ще потрібен цілитель
+ru	Всем привет, кто пойдет в подземелье?
+ru	Ищу гильдию, которая рейдит по вечерам
+ru	спасибо за группу, хорошего вечера
+ru	кто-нибудь может помочь мне с этим заданием?
+ru	вернусь через 5 минут, подождите меня
+ru	нам еще нужен лекарь
+sv	Hej allihop, någon som vill köra en dungeon?
+sv	Jag letar efter ett guild som raidar på kvällarna
+sv	tack för gruppen, ha en trevlig kväll
+sv	kan någon hjälpa mig med det här uppdraget?
+sv	är tillbaka om 5 minuter, vänta på mig
+sv	vi behöver en healer till
+no	Hei alle sammen, noen som vil ta en dungeon?
+no	Jeg ser etter et guild som raider på kveldene
+no	takk for gruppen, ha en fin kveld
+no	kan noen hjelpe meg med dette oppdraget?
+no	er tilbake om 5 minutter, vent på meg
+no	vi trenger en healer til
+fi	Moi kaikki, lähteekö joku luolastoon?
+fi	Etsin killaa, joka raidaa iltaisin
+fi	kiitos ryhmästä, hyvää illanjatkoa
+fi	voiko joku auttaa minua tässä tehtävässä?
+fi	palaan 5 minuutin päästä, odottakaa minua
+fi	tarvitsemme vielä yhden parantajan
+da	Hej alle sammen, er der nogen der vil tage en dungeon?
+da	Jeg leder efter et guild der raider om aftenen
+da	tak for gruppen, hav en god aften
+da	kan nogen hjælpe mig med denne quest?
+da	er tilbage om 5 minutter, vent på mig
+da	vi mangler stadig en healer

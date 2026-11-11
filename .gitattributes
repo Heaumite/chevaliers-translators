@@ -1,0 +1,11 @@
+# Fins de ligne LF partout, même sous Windows : les tests comparent le texte de l'addon (.toc,
+# Core.lua) intégré à l'application, et les vecteurs de l'encodeur.
+* text=auto eol=lf
+# Fichiers binaires : jamais convertis.
+*.tga binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.res binary
+*.gguf binary
+*.zip binary

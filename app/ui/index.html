@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chevaliers Translators</title>
+<link rel="icon" href="/logo.png">
+<style>
+@font-face {
+  font-family: "CT Friz";
+  src: url("/police.ttf") format("truetype");
+  font-display: swap;
+}
+/* Couleurs tirées de la bannière et du logo : champ noir de la bannière, fer et filigrane d'or
+   du cadre, or et gueules du médaillon (d'or à deux lions de gueules), sinople de la forêt,
+   pourpre des drapés. Toujours sombre, comme la bannière. */
+:root {
+  --sable: #0e0d0a;
+  --fer: #191712;
+  --fer-haut: #221f18;
+  --filet: #3a3121;
+  --filet-doux: #29241a;
+  --parchemin: #ece2c6;
+  --terne: #a89e85;
+  --or: #c9a55a;
+  --or-clair: #e6c77e;
+  --or-sombre: #6e5428;
+  --or-encre: #1c1408;
+  --medaillon: #f0d000;
+  --gueules: #c4161c;
+  --gueules-texte: #ec5a52;
+  --drape: #7a1216;
+  --sinople: #3d5e1b;
+  --sinople-texte: #93c25a;
+  --libre: rgba(236, 226, 198, 0.06);
+  --hatch: rgba(0, 0, 0, 0.32);
+  --display: "CT Friz", "Friz Quadrata", "Friz Quadrata TT", Albertus, Constantia, Cambria, Georgia, serif;
+  --body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, "Noto Sans", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--sable); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--parchemin);
+  font: 15px/1.55 var(--body);
+  -webkit-font-smoothing: antialiased;
+  /* Lueur de la forêt de la bannière, en haut à droite, sur le champ noir. */
+  background:
+    radial-gradient(ellipse 70% 45% at 92% 0%, rgba(79, 122, 34, 0.16), transparent 70%),
+    var(--sable);
+}
+.wrap { max-width: 1000px; margin: 0 auto; padding: 22px 28px 28px; }
+button { font: inherit; }
+:focus-visible { outline: 2px solid var(--or-clair); outline-offset: 2px; border-radius: 3px; }
+
+/* Bannière (1024x256) : médaillon à gauche, champ sombre du cadre où s'écrit le titre. */
+header {
+  position: relative; display: flex; align-items: center; gap: 14px;
+  aspect-ratio: 4 / 1; max-height: 190px; width: 100%;
+  padding: 0 7% 0 30%; margin-bottom: 8px;
+  background: var(--sable) url("/banniere.jpg") left center / cover no-repeat;
+}
+.brand { font-family: var(--display); font-size: clamp(17px, 3.2vw, 30px); letter-spacing: 0.03em; line-height: 1.15;
+  color: var(--or-clair); text-shadow: 0 1px 0 #000, 0 0 14px rgba(0, 0, 0, 0.9); }
+.brand small { display: block; margin-top: 6px; font-family: var(--body); font-size: clamp(11px, 1.6vw, 14.5px); color: #cfc3a2; letter-spacing: 0.01em; }
+.demo { position: absolute; top: 9%; right: 3%; font-size: 13px; color: var(--or-clair); border: 1px solid var(--or); border-radius: 3px; padding: 2px 10px; background: rgba(0, 0, 0, 0.55); }
+
+/* Titres en Friz Quadrata (la police de WoW), or du filigrane. */
+h1, h2, h3 { font-family: var(--display); font-weight: normal; color: var(--or-clair); }
+
+/* Carte graphique pendant le jeu */
+.card { padding: 22px 0 8px; }
+.card h1 { font-size: 30px; line-height: 1.15; margin: 0 0 6px; letter-spacing: 0.01em; }
+.card p.lead { margin: 0 0 16px; color: var(--terne); max-width: 70ch; }
+.card p.lead strong { color: var(--parchemin); font-weight: 600; }
+/* Jauge sertie comme une barre de fer : liseré de filigrane. */
+.gauge { display: flex; height: 44px; overflow: hidden; background: var(--libre);
+  border: 1px solid var(--or-sombre); box-shadow: inset 0 0 0 1px #000, 0 0 0 1px #000; }
+.seg { height: 100%; transition: width 220ms ease; min-width: 0; }
+.seg + .seg { box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.6); }
+/* Hachures héraldiques (Petra Sancta) : sable quadrillé, sinople en barre, or pointillé,
+   gueules vertical, argent uni. La couleur n'est jamais seule à porter le sens. */
+.t-sable { background-color: #4a463c; background-image: repeating-linear-gradient(0deg, var(--hatch) 0 1px, transparent 1px 6px), repeating-linear-gradient(90deg, var(--hatch) 0 1px, transparent 1px 6px); }
+.t-vert { background-color: var(--sinople); background-image: repeating-linear-gradient(45deg, var(--hatch) 0 1px, transparent 1px 6px); }
+.t-or { background-color: var(--medaillon); background-image: radial-gradient(rgba(0, 0, 0, 0.28) 1.1px, transparent 1.5px); background-size: 6px 6px; }
+.t-gules { background-color: var(--gueules); background-image: repeating-linear-gradient(90deg, var(--hatch) 0 1px, transparent 1px 5px); }
+.t-argent { background: var(--libre); box-shadow: inset 0 0 0 1px var(--filet); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--terne); }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend b { color: var(--parchemin); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sw { width: 18px; height: 12px; flex: none; outline: 1px solid #000; }
+.notes { margin: 12px 0 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--terne); }
+.notes li + li { margin-top: 4px; }
+.fallback { margin: 14px 0 0; padding: 10px 14px; border-left: 3px solid var(--gueules); background: var(--fer); font-size: 14px; }
+
+/* Titre de section : filet d'or qui s'efface de part et d'autre, losange au centre, comme
+   l'ornement du haut du cadre de la bannière. */
+.models { margin-top: 30px; }
+.models h2 { display: flex; align-items: center; gap: 14px; font-size: 21px; margin: 0 0 4px; }
+.models h2::before, .models h2::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--or) 70%, var(--or-clair)); }
+.models h2::after { transform: scaleX(-1); }
+.models > p { margin: 0 auto 14px; color: var(--terne); font-size: 14px; text-align: center; max-width: 72ch; }
+
+/* Liste : une plaque de fer bordée de filigrane. */
+#list { background: var(--fer); border: 1px solid var(--filet); box-shadow: 0 0 0 1px #000; }
+.row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 150px 220px;
+  gap: 18px;
+  align-items: start;
+  padding: 18px 18px 18px 14px;
+  border-left: 4px solid transparent;
+}
+.row + .row { border-top: 1px solid var(--filet-doux); }
+/* Modèle actif : bande pourpre des drapés et fer plus clair. */
+.row.active { border-left-color: var(--drape); background: linear-gradient(90deg, rgba(122, 18, 22, 0.22), transparent 45%), var(--fer-haut); }
+.row.off { color: var(--terne); }
+/* Qualité : les losanges d'or de l'anneau du médaillon. */
+.studs { display: flex; gap: 4px; padding-top: 6px; }
+.name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.name h3 { font-size: 20px; margin: 0; line-height: 1.2; }
+.row.off .name h3 { color: var(--terne); }
+.tag { font-size: 12.5px; font-weight: 600; padding: 1px 9px; border-radius: 3px; white-space: nowrap; }
+.tag.low { color: var(--parchemin); box-shadow: inset 0 0 0 1px var(--terne); }
+/* High : aux armes du logo, d'or au lion de gueules. */
+.tag.high { background: var(--medaillon); color: #8a0c12; }
+.tag.advised { color: var(--or-clair); box-shadow: inset 0 0 0 1px var(--or); }
+.estim { margin: 4px 0 0; font-size: 13.5px; color: var(--parchemin); max-width: 64ch; }
+.estim b { font-weight: 600; }
+.chain { margin: 12px 0 0; font-size: 13.5px; color: var(--terne); }
+.chain b { color: var(--parchemin); font-weight: 600; }
+.facts { margin: 3px 0 0; font-size: 14px; color: var(--terne); }
+.why { margin: 6px 0 0; font-size: 13.5px; color: var(--terne); max-width: 64ch; }
+.why.bad { color: var(--gueules-texte); }
+.trial { margin: 4px 0 0; font-size: 13.5px; }
+.trial.ok { color: var(--sinople-texte); }
+.trial.bad { color: var(--gueules-texte); }
+.trial.none { color: var(--terne); }
+.vram { font-size: 13.5px; color: var(--terne); }
+.vram b { display: block; font-size: 19px; color: var(--parchemin); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.row.off .vram b { color: var(--terne); }
+.mini { height: 6px; margin-top: 8px; background: var(--libre); box-shadow: inset 0 0 0 1px var(--filet); overflow: hidden; }
+.mini > i { display: block; height: 100%; }
+.action { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+/* Boutons : plaques de métal. Principal : or du filigrane ; secondaire : fer serti d'or. */
+.btn {
+  appearance: none; border: 1px solid #000; border-radius: 3px; padding: 9px 14px; cursor: pointer;
+  font-weight: 600; font-size: 14.5px; text-align: center; line-height: 1.25;
+}
+.btn.primary { background: linear-gradient(180deg, var(--or-clair), var(--or) 55%, #a8843f); color: var(--or-encre);
+  box-shadow: inset 0 1px 0 rgba(255, 244, 210, 0.55), 0 0 0 1px var(--or-sombre); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.primary:active { background: linear-gradient(180deg, #a8843f, var(--or)); }
+.btn.secondary { background: linear-gradient(180deg, #2a261d, #1b1913); color: var(--parchemin); box-shadow: inset 0 0 0 1px var(--or-sombre); }
+.btn.secondary:hover { box-shadow: inset 0 0 0 1px var(--or); color: var(--or-clair); }
+.btn:disabled { opacity: 0.45; cursor: default; filter: none; }
+.link { appearance: none; background: none; border: 0; padding: 0; color: var(--terne); font-size: 13.5px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; align-self: flex-start; }
+.link:hover { color: var(--parchemin); }
+.link.danger { color: var(--gueules-texte); }
+/* Actif : le médaillon lui-même. */
+.is-active { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 17px; color: var(--or-clair); padding: 4px 0; }
+.is-active img { width: 30px; height: 30px; filter: drop-shadow(0 1px 2px #000); }
+.unavailable { font-size: 14px; color: var(--terne); padding-top: 6px; }
+.progress { font-size: 13.5px; color: var(--terne); font-variant-numeric: tabular-nums; }
+.bar { height: 8px; background: var(--libre); box-shadow: inset 0 0 0 1px var(--filet); overflow: hidden; margin-bottom: 6px; }
+.bar > i { display: block; height: 100%; width: 0; transition: width 300ms linear; }
+.err { font-size: 13.5px; color: var(--gueules-texte); }
+
+/* Pied */
+footer { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--filet-doux); display: grid; grid-template-columns: 1fr auto; gap: 6px 24px; font-size: 13.5px; color: var(--terne); }
+footer .engine { color: var(--parchemin); }
+footer .engine.wait { color: var(--terne); }
+footer .path { overflow-wrap: anywhere; }
+.lost { position: fixed; inset: auto 0 0 0; padding: 12px 20px; background: var(--drape); border-top: 1px solid var(--gueules); color: var(--parchemin); font-weight: 600; text-align: center; display: none; }
+.lost.on { display: block; }
+
+@media (max-width: 760px) {
+  .wrap { padding: 16px; }
+  .row { grid-template-columns: 54px minmax(0, 1fr); }
+  .vram, .action { grid-column: 2; }
+  .card h1 { font-size: 25px; }
+  footer { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .demo { top: auto; bottom: 8%; font-size: 11.5px; padding: 1px 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seg, .bar > i { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">Chevaliers Translators<small>Modèles de traduction</small></div>
+    <span class="demo" id="demo" hidden>Démonstration</span>
+  </header>
+
+  <section class="card" aria-labelledby="gpu">
+    <h1 id="gpu">Analyse de votre PC…</h1>
+    <p class="lead" id="lead"></p>
+    <div class="gauge" id="gauge" role="img"></div>
+    <ul class="legend" id="legend"></ul>
+    <ul class="notes" id="notes"></ul>
+    <p class="chain" id="chain" hidden></p>
+    <div class="fallback" id="fallback" hidden></div>
+  </section>
+
+  <section class="models" aria-labelledby="mh">
+    <h2 id="mh">Modèles de traduction</h2>
+    <p>Du plus léger au plus lourd en mémoire vidéo. Un seul modèle est actif à la fois ; si le modèle actif ne peut pas tourner, le pack low prend le relais.</p>
+    <div id="list"></div>
+  </section>
+
+  <footer>
+    <div class="engine wait" id="engine">Moteur de traduction…</div>
+    <div id="disk"></div>
+    <div class="path" id="folder"></div>
+    <div id="version"></div>
+  </footer>
+</div>
+<div class="lost" id="lost" role="alert">L'application s'est arrêtée. Relancez-la pour gérer les modèles.</div>
+
+<script>
+const JETON = "__JETON__";
+const GIB = 1024 ** 3;
+const $ = (id) => document.getElementById(id);
+const nf1 = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const go = (b) => nf1.format(b / GIB) + "\u00a0Go";
+const go2 = (b) => nf2.format(b / GIB) + "\u00a0Go";
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let state = null;
+let preview = null;
+const keys = new Map();
+const confirmDelete = new Set();
+
+// Losange d'or (clous de l'anneau du médaillon) : plein ou vide.
+function stud(filled) {
+  const fill = filled ? "var(--or-clair)" : "none";
+  const stroke = filled ? "var(--or-sombre)" : "var(--terne)";
+  return `<svg width="15" height="17" viewBox="0 0 15 17" aria-hidden="true"><path d="M7.5 1 13.5 8.5 7.5 16 1.5 8.5z" fill="${fill}" stroke="${stroke}" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+}
+
+function shownModel() {
+  if (!state) return null;
+  return state.modeles.find((m) => m.id === preview) || state.modeles.find((m) => m.actif) || state.modeles[0];
+}
+
+function renderGauge() {
+  const c = state.carte;
+  const m = shownModel();
+  if (!c) {
+    $("gpu").textContent = "Pas de carte graphique utilisable";
+    $("lead").innerHTML = `La traduction tournera sur le processeur (${esc(state.processeur.nom)}, ${state.processeur.fils} fils de calcul), plus lentement.`;
+    $("gauge").hidden = true;
+    $("legend").innerHTML = "";
+    return;
+  }
+  $("gauge").hidden = false;
+  $("gpu").textContent = c.nom;
+  const usable = Math.max(0, c.libre_jeu - c.marge);
+  $("lead").innerHTML = `${go(c.total)} de mémoire vidéo. Pendant le jeu, <strong>${go(c.libre_jeu)} restent libres</strong> d'après l'estimation : un modèle jusqu'à <strong>${go(usable)}</strong> tient sans gêner WoW. Plus gros, il est pris quand WoW laisse la place : sous ${go(c.marge)} libres (saturation), la traduction redescend d'un cran, et remonte quand la place revient.`;
+  const need = m ? m.empreinte : 0;
+  const fits = m && need + c.marge <= c.libre_jeu;
+  const model = m && m.lieu !== "cpu" ? need : 0;
+  const free = c.total - c.autres - c.wow - model - c.marge;
+  const pct = (b) => (Math.max(0, b) / c.total) * 100 + "%";
+  const segs = [
+    ["t-sable", c.autres, "Windows et autres programmes"],
+    ["t-vert", c.wow, c.wow_mesure ? "WoW (mesuré)" : "WoW (référence, raids compris)"],
+    [fits ? "t-or" : "t-gules", model, m ? m.nom + (fits ? "" : " (seulement quand WoW laisse la place)") : "Modèle"],
+    ["t-gules", c.marge, "Seuil de saturation"],
+    ["t-argent", free, "Libre"],
+  ];
+  const g = $("gauge");
+  if (g.children.length !== segs.length) g.innerHTML = segs.map(() => '<div class="seg"></div>').join("");
+  segs.forEach(([cls, b], i) => {
+    const el = g.children[i];
+    el.className = "seg " + cls;
+    el.style.width = pct(b);
+  });
+  g.setAttribute("aria-label", segs.filter(([, b]) => b > 0).map(([, b, l]) => `${l} ${go(b)}`).join(", "));
+  const legend = segs.map(([cls, b, label], i) => {
+    if (i === 2 && m && m.lieu === "cpu") return `<li><span class="sw t-argent"></span>${esc(m.nom)} <b>sur le processeur</b></li>`;
+    if (b <= 0 && i !== 4) return "";
+    const val = i === 4 && free < 0 ? `manque ${go(-free)}` : go(Math.max(0, b));
+    return `<li><span class="sw ${cls}"></span>${esc(label)} <b>${val}</b></li>`;
+  });
+  $("legend").innerHTML = legend.join("");
+}
+
+function trialLine(m) {
+  // Déjà dit dans la raison (modèle écarté par son test en jeu) : pas de doublon.
+  if (m.essai && m.raison && m.raison.includes(m.essai.resume)) return "";
+  if (m.essai) {
+    const where = m.lieu === "cpu" ? "sur le processeur" : "sur la carte";
+    const cls = m.essai.verdict === "ok" ? "ok" : "bad";
+    return `<p class="trial ${cls}">Test en jeu ${where} : ${esc(m.essai.resume)}</p>`;
+  }
+  if (!m.lieu) return "";
+  return `<p class="trial none">Pas encore testé en jeu sur ce PC.</p>`;
+}
+
+// Estimation sans test : temps par message, messages par minute sous 5 % de baisse, niveau.
+function estimLine(m) {
+  const e = m.estimation;
+  if (!e || (e.niveau === "non" && !m.lieu)) return "";
+  const where = e.lieu === "cpu" ? "sur le processeur" : "sur la carte";
+  const rank = m.rang ? ` Étape ${m.rang} de la chaîne de repli.` : "";
+  return `<p class="estim">Estimation ${where} : <b>${esc(e.niveau)}</b> - ${esc(e.raison)} (${esc(e.source)}).${rank}</p>`;
+}
+
+function rowKey(m) {
+  const d = m.dl;
+  return JSON.stringify([m.installe, m.actif, m.high, m.conseille, m.rang, m.estimation && m.estimation.raison,
+    m.lieu, m.raison, m.essai && m.essai.resume, m.empreinte,
+    d && d.etat, d && d.message, confirmDelete.has(m.id), state.carte && state.carte.libre_jeu]);
+}
+
+function actionHtml(m) {
+  const d = m.dl;
+  if (d && d.etat === "en_cours") {
+    return `<div class="progress" data-progress="${m.id}">
+      <div class="bar"><i class="t-or"></i></div><span></span></div>
+      <button class="link" data-act="annuler" data-id="${m.id}">Annuler</button>`;
+  }
+  let html = "";
+  if (m.installe) {
+    if (m.actif) {
+      html += `<div class="is-active"><img src="/logo.png" alt=""> Actif</div>`;
+    } else if (m.lieu) {
+      html += `<button class="btn secondary" data-act="activer" data-id="${m.id}">Activer</button>`;
+    } else {
+      html += `<button class="btn secondary" disabled>Activer</button>`;
+    }
+    if (!m.low) {
+      html += confirmDelete.has(m.id)
+        ? `<button class="link danger" data-act="supprimer" data-id="${m.id}">Confirmer : supprimer ${go2(m.taille)}</button>`
+        : `<button class="link" data-ask="${m.id}">Supprimer le fichier</button>`;
+    }
+    return html;
+  }
+  if (!m.lieu) return `<div class="unavailable">Indisponible sur ce PC</div>`;
+  if (d && d.etat === "erreur") html += `<p class="err">${esc(d.message)}</p>`;
+  const label = d && (d.etat === "annule" || d.etat === "erreur") && d.recu > 0
+    ? `Reprendre (${go2(d.total - d.recu)} restants)`
+    : `Télécharger (${go2(m.taille)})`;
+  html += `<button class="btn primary" data-act="telecharger" data-id="${m.id}">${label}</button>`;
+  return html;
+}
+
+function rowHtml(m) {
+  const c = state.carte;
+  const studs = [1, 2, 3].map((i) => stud(i <= m.qualite)).join("");
+  const tags = (m.low ? `<span class="tag low">Low</span>` : "") + (m.high ? `<span class="tag high">High</span>` : "")
+    + (m.conseille && !m.low ? `<span class="tag advised">Conseillé</span>` : "");
+  const tagText = m.low ? "Par défaut, et dernier repli." : m.high ? "Le meilleur modèle pour votre PC, d'après l'estimation." : "";
+  const facts = `${m.nb_langues === 23 ? "Les 23 langues" : esc(m.langues)}, licence ${esc(m.licence)}, fichier de ${go2(m.taille)}.`;
+  const bad = !m.lieu;
+  let vram;
+  if (m.lieu === "cpu") {
+    vram = `<b>Processeur</b>${state.processeur.fils} fils de calcul, plus lent`;
+  } else {
+    const ratio = c ? Math.min(1, m.empreinte / Math.max(1, c.libre_jeu - c.marge)) : 0;
+    // Rouge : plus gros que la place estimée pendant le jeu (pris seulement quand WoW la laisse) ;
+    // gris : écarté par son test.
+    const tooBig = c && m.empreinte + c.marge > c.libre_jeu;
+    const tint = tooBig ? "t-gules" : bad ? "t-sable" : "t-or";
+    vram = `<b>${go(m.empreinte)}</b>de mémoire vidéo (${m.mesuree ? "mesuré" : "estimé"})
+      ${c ? `<div class="mini" aria-hidden="true"><i class="${tint}" style="width:${ratio * 100}%"></i></div>` : ""}`;
+  }
+  return `<div class="row${m.actif ? " active" : ""}${bad ? " off" : ""}" data-row="${m.id}">
+    <div class="studs" role="img" aria-label="Qualité ${m.qualite} sur 3">${studs}</div>
+    <div>
+      <div class="name"><h3>${esc(m.nom)}</h3>${tags}</div>
+      <p class="facts">${tagText ? esc(tagText) + " " : ""}${facts}</p>
+      <p class="why${bad ? " bad" : ""}">${esc(cap(m.raison))}.</p>
+      ${estimLine(m)}
+      ${trialLine(m)}
+    </div>
+    <div class="vram">${vram}</div>
+    <div class="action">${actionHtml(m)}</div>
+  </div>`;
+}
+
+function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function updateProgress() {
+  for (const el of document.querySelectorAll("[data-progress]")) {
+    const m = state.modeles.find((x) => x.id === el.dataset.progress) || (el.dataset.progress === "moteur" ? state.moteur : null);
+    const d = m && m.dl;
+    if (!d) continue;
+    const p = d.total ? d.recu / d.total : 0;
+    el.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+    const speed = d.debit > 0 ? `, ${Math.round(d.debit / 1048576)}\u00a0Mo/s` : "";
+    const retry = d.message ? ` Reprise après : ${d.message}.` : "";
+    el.querySelector("span").textContent = `${Math.floor(p * 100)}\u00a0% : ${go2(d.recu)} sur ${go2(d.total)}${speed}.${retry}`;
+  }
+}
+
+function render() {
+  $("demo").hidden = !state.demo;
+  renderGauge();
+  $("notes").innerHTML = state.notes.map((n) => `<li>${esc(n)}</li>`).join("");
+  const est = state.estimation;
+  const ch = $("chain");
+  ch.hidden = !est || !est.chaine.length;
+  if (est && est.chaine.length) {
+    const more = est.a_telecharger > 0 ? ` Modèles conseillés à télécharger : ${go2(est.a_telecharger)}.` : "";
+    ch.innerHTML = `<b>Chaîne de repli :</b> ${est.chaine.map(esc).join(" → ")}.${more}<br>WoW : ${esc(est.conditions)}.`;
+  }
+  const fb = $("fallback");
+  fb.hidden = !state.repli;
+  if (state.repli) fb.textContent = `Le pack low a pris le relais : ${state.repli}.`;
+
+  const list = $("list");
+  const ids = state.modeles.map((m) => m.id).join();
+  if (list.dataset.ids !== ids) { list.innerHTML = ""; keys.clear(); list.dataset.ids = ids; }
+  for (const m of state.modeles) {
+    const k = rowKey(m);
+    let row = list.querySelector(`[data-row="${m.id}"]`);
+    if (row && keys.get(m.id) === k) continue;
+    const focused = document.activeElement && row && row.contains(document.activeElement) ? document.activeElement.dataset.act || document.activeElement.dataset.ask : null;
+    const tmp = document.createElement("div");
+    tmp.innerHTML = rowHtml(m);
+    const fresh = tmp.firstElementChild;
+    if (row) row.replaceWith(fresh); else list.appendChild(fresh);
+    keys.set(m.id, k);
+    if (focused) {
+      const again = fresh.querySelector(`[data-act="${focused}"],[data-ask]`);
+      if (again) again.focus();
+    }
+  }
+  const e = state.moteur;
+  const eng = $("engine");
+  if (e.dl && e.dl.etat === "en_cours") {
+    eng.className = "engine wait";
+    if (!eng.querySelector("[data-progress]")) eng.innerHTML = `Téléchargement du moteur de traduction (${esc(e.nom)})<div class="progress" data-progress="moteur"><div class="bar"><i class="t-or"></i></div><span></span></div>`;
+  } else if (e.pret) {
+    eng.className = "engine";
+    eng.textContent = `Moteur de traduction prêt (llama.cpp, ${e.nom === "vulkan" ? "Vulkan, toutes cartes graphiques" : e.nom}).`;
+  } else {
+    eng.className = "engine wait";
+    eng.textContent = e.dl && e.dl.etat === "erreur" ? `Moteur de traduction : ${e.dl.message}` : "Moteur de traduction absent.";
+  }
+  $("folder").textContent = `Dossier des modèles : ${state.dossier}`;
+  $("disk").textContent = state.disque_libre != null ? `${go(state.disque_libre)} libres sur ce disque` : "";
+  $("version").textContent = `Version ${state.version}`;
+  updateProgress();
+}
+
+let failures = 0;
+async function poll() {
+  try {
+    const r = await fetch("/api/etat", { cache: "no-store" });
+    state = await r.json();
+    failures = 0;
+    $("lost").classList.remove("on");
+    render();
+  } catch (e) {
+    if (++failures >= 4) $("lost").classList.add("on");
+  }
+}
+
+async function act(action, id) {
+  try {
+    const r = await fetch(`/api/${action}?id=${encodeURIComponent(id)}`, { method: "POST", headers: { "X-CT-Jeton": JETON } });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      alertRow(id, e.erreur || "Action impossible.");
+    }
+  } finally {
+    poll();
+  }
+}
+
+function alertRow(id, msg) {
+  const row = document.querySelector(`[data-row="${id}"] .action`);
+  if (!row) return;
+  const p = document.createElement("p");
+  p.className = "err";
+  p.textContent = msg;
+  row.prepend(p);
+  keys.delete(id);
+}
+
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("button");
+  if (!t) return;
+  if (t.dataset.ask) {
+    confirmDelete.add(t.dataset.ask);
+    const id = t.dataset.ask;
+    setTimeout(() => { confirmDelete.delete(id); keys.delete(id); if (state) render(); }, 5000);
+    keys.delete(id);
+    render();
+    return;
+  }
+  if (t.dataset.act) {
+    if (t.dataset.act === "supprimer") confirmDelete.delete(t.dataset.id);
+    t.disabled = true;
+    act(t.dataset.act, t.dataset.id);
+  }
+});
+document.addEventListener("mouseover", (ev) => {
+  const row = ev.target.closest("[data-row]");
+  const id = row ? row.dataset.row : null;
+  if (id !== preview) { preview = id; if (state) renderGauge(); }
+});
+document.addEventListener("focusin", (ev) => {
+  const row = ev.target.closest("[data-row]");
+  if (row && row.dataset.row !== preview) { preview = row.dataset.row; if (state) renderGauge(); }
+});
+
+poll();
+setInterval(poll, 800);
+</script>
+</body>
+</html>

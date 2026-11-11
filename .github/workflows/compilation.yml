@@ -1,0 +1,116 @@
+# Compilation, tests et publication de Chevaliers Translators.
+#
+# - À chaque envoi sur main et à chaque demande de fusion : tests Linux (Rust et harnais de
+#   l'addon), puis tests et compilation sous Windows.
+# - À chaque étiquette vX.Y.Z (même numéro que app/Cargo.toml) : en plus, signature des
+#   exécutables par SignPath Foundation (dès que le projet est accepté et configuré, voir
+#   docs/SIGNPATH.md ; avant, la version est publiée non signée), paquet de distribution et
+#   publication de la version sur GitHub (Releases).
+name: Compilation
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  linux:
+    name: Tests Linux et harnais de l'addon
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Outils du harnais (Lua 5.1 et LuaJIT par lupa, polices)
+        run: |
+          pip install lupa
+          sudo apt-get update
+          sudo apt-get install -y fonts-liberation fonts-dejavu-core
+      - name: Vecteurs de l'encodeur (Lua 5.1 et LuaJIT identiques, fichier du dépôt à jour)
+        run: |
+          python outils/lua_harness.py vectors .
+          git diff --exit-code app/tests/lua_vectors.txt
+      - name: Tests Rust
+        working-directory: app
+        run: cargo test --release
+      - name: Compilation
+        working-directory: app
+        run: cargo build --release
+      - name: Harnais de l'addon (API de WoW imitée, trames décodées par ct-outils)
+        run: python outils/lua_harness.py mock . app/target/release/ct-outils
+
+  windows:
+    name: Windows (tests, compilation, signature, publication)
+    needs: linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Tests Windows
+        working-directory: app
+        run: cargo test --release
+      - name: Compilation
+        working-directory: app
+        run: cargo build --release
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "pe=$v.0" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref }}" -like "refs/tags/v*" -and "${{ github.ref_name }}" -ne "v$v") {
+            throw "étiquette ${{ github.ref_name }}, mais le projet est en version $v (app/Cargo.toml)"
+          }
+      - name: Exécutables à signer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force a-signer | Out-Null
+          Copy-Item app/target/release/ChevaliersTranslators.exe, app/target/release/ct-outils.exe a-signer/
+      - name: Envoi des exécutables non signés
+        id: unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: executables-${{ steps.version.outputs.version }}
+          path: a-signer/
+          if-no-files-found: error
+      - name: Signature par SignPath Foundation
+        if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: chevaliers-translators
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: executables
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          # Chaque version est approuvée à la main dans SignPath : jusqu'à 2 h d'attente.
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signes
+          parameters: |
+            version: ${{ toJSON(steps.version.outputs.pe) }}
+      - name: Paquet de distribution
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $dir = if (Test-Path signes/ChevaliersTranslators.exe) { "signes" } else { "a-signer" }
+          Write-Host "Exécutable du paquet : $dir"
+          ./outils/paquet.ps1 -Exe "$dir/ChevaliersTranslators.exe"
+      - name: Publication de la version
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: |
+            Paquet : décompresser dans `World of Warcraft\_retail_\Interface\AddOns` (ou une autre version du jeu), puis lancer `ChevaliersTranslators.exe`. Empreinte SHA-256 dans le fichier `.sha256`.
+            Politique de signature du code : https://github.com/${{ github.repository }}/blob/main/docs/CODE_SIGNING_POLICY.md
+          generate_release_notes: true
