@@ -26,6 +26,10 @@ local FLAG_VISIBLE, FLAG_CALAGE, FLAG_OFFICIAL, FLAG_FADE, FLAG_TRUNC = 1, 2, 4,
 local FLAG_ROWS = 32
 -- 0.14, dispositif télévision : texte du jeu laissé visible, recouvert par le chat traduit.
 local FLAG_COVER = 64
+-- 0.14.4 : hauteur réelle de chaque ligne (une icône dans le texte, comme la qualité d'un objet,
+-- agrandit la ligne chez WoW) : écart à la hauteur théorique, un octet par ligne.
+local FLAG_HEIGHTS = 128
+local function HasFlag(flags, bit) return floor(flags / bit) % 2 == 1 end
 local POLL = 0.05        -- lecture des fenêtres : 20 fois par seconde
 local MIN_INTERVAL = 0.1 -- au plus 10 descriptions par seconde et par fenêtre
 local REFRESH = 15       -- description renvoyée même sans changement (0.13.3 : 15 s au lieu de 3, bandeau immobile au repos)
@@ -274,6 +278,18 @@ local function Rows(fs)
   return 1
 end
 
+-- Écart entre la hauteur réelle d'une ligne de chat et sa hauteur théorique (lignes à l'écran,
+-- hauteur de ligne, espacement), en quarts de pixel (−127..127) ; −128 : inconnu (valeur secrète).
+-- Une icône plus haute que le texte (qualité d'un objet fabriqué, atlas) agrandit la ligne : sans
+-- cet écart, l'application plaçait les messages des joueurs sur les lignes de WoW (0.14.3).
+local function HeightDelta(fs, rows, lineH, spacing, k)
+  if not fs.GetHeight then return -128 end
+  local ok, hgt = pcall(fs.GetHeight, fs)
+  if not ok or IsSecret(hgt) or type(hgt) ~= "number" or hgt <= 0 then return -128 end
+  local d = floor((hgt - (rows * lineH + (rows - 1) * spacing)) * k * 4 + 0.5)
+  return max(-127, min(127, d))
+end
+
 local function FontFlagsCode(flags)
   flags = flags or ""
   local code = 0
@@ -341,9 +357,10 @@ local function Describe(i, cf, now)
         local ts = info.timestamp
         if IsSecret(ts) then ts = nil end
         e.info, e.base, e.rows = info, max(tonumber(ts) or 0, override), Rows(fs)
+        e.hd = HeightDelta(fs, e.rows, lineH, spacing, k)
         e.id = e.gap and 0 or LineId(info)
       end
-      flags = FLAG_VISIBLE + FLAG_ROWS
+      flags = FLAG_VISIBLE + FLAG_ROWS + FLAG_HEIGHTS
       if M.mode == "calage" then flags = flags + FLAG_CALAGE end
       if secret or CT.InLockdown() then flags = flags + FLAG_OFFICIAL end
       if canFade then flags = flags + FLAG_FADE end
@@ -360,11 +377,11 @@ local function Describe(i, cf, now)
       sig = flags * 7 + view.l * 3 + view.b * 5 + view.w * 11 + view.h * 13
         + floor(view.size * 10) * 17 + floor(view.lineH * 10) * 19 + view.fflags * 23 + #path * 29
       for j = 1, n do
-        sig = (sig * 31 + lines[j].id * 37 + floor(lines[j].base * 10) + lines[j].rows * 41) % 2147483647
+        sig = (sig * 31 + lines[j].id * 37 + floor(lines[j].base * 10) + lines[j].rows * 41 + (lines[j].hd + 128) * 43) % 2147483647
       end
     end
   end
-  local hide = active and M.mode == "on" and flags % 8 < FLAG_OFFICIAL and flags < FLAG_COVER
+  local hide = active and M.mode == "on" and flags % 8 < FLAG_OFFICIAL and not HasFlag(flags, FLAG_COVER)
   SetOfficialHidden(cf, hide)
   M.chatRects[i] = (active and view and flags % 8 < FLAG_OFFICIAL) and { view.l, view.b, view.w, view.h } or nil
   return active, flags, n, view, sig
@@ -634,7 +651,8 @@ local function SendView(i, cf, now, flags, n, view)
   U8(p, i)
   local path = view and view.path:sub(1, 120) or ""
   local fixed = 28 + #path
-  local room = max(0, floor((maxp - fixed) / 4))
+  -- Par ligne : numéro, âge et lignes à l'écran (4 octets), écart de hauteur (1 octet).
+  local room = max(0, floor((maxp - fixed) / 5))
   if n > room then
     n = room
     flags = flags + FLAG_TRUNC
@@ -658,6 +676,8 @@ local function SendView(i, cf, now, flags, n, view)
     end
     -- Pixels par unité de l'interface : taille des icônes (0.12.3).
     U16(p, view.k * 1000)
+    -- Écart de hauteur de chaque ligne (0.14.4).
+    for j = 1, n do U8(p, (lines[j].hd or -128) % 256) end
   end
   CT.Enqueue(CT.FRAME_MVIEW, p, #p)
   M.stats.views = M.stats.views + 1

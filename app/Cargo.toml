@@ -1,6 +1,6 @@
 [package]
 name = "chevaliers-translators"
-version = "0.14.3"
+version = "0.14.4"
 edition = "2021"
 description = "Chevaliers Translators - traduction du chat de World of Warcraft sur le PC du joueur"
 license = "GPL-3.0-or-later"

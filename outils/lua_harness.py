@@ -706,6 +706,12 @@ def mock(root, binary):
     assert "retrait 10.8 px (mesuré)" in out, "mise en page"
     assert "rapport police/jeu" in out
     assert "ChatFrame2" not in out, "le journal de combat a été touché"
+    # 0.14.4 : ligne plus haute chez WoW (icône de qualité dans le texte) : l'écart de hauteur part
+    # avec la description, l'application garde les lignes des joueurs à leur place.
+    lua.execute("ChatFrame1.visibleLines[1].GetHeight = function(self) return 15.5 * self:GetNumLines() + 6 end")
+    out = feed(collect("hauteur"), os.path.join(work, "hauteur"))
+    assert "1 ligne(s) plus haute(s) chez WoW (icônes)" in out, out
+    lua.execute("ChatFrame1.visibleLines[1].GetHeight = nil")
     # Bulle d'aide posée sur le chat : son rectangle part à l'application.
     g.GameTooltip.visible = True
     out = feed(collect("bulle"), os.path.join(work, "bulle"))

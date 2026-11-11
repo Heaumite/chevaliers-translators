@@ -21,6 +21,10 @@ pub const FLAG_ROWS: u8 = 32;
 /// 0.14, dispositif télévision : le texte du chat du jeu n'est pas caché ; le chat traduit le
 /// recouvre (plaque sombre sous les lignes des joueurs).
 pub const FLAG_COVER: u8 = 64;
+/// 0.14.4 : hauteur réelle de chaque ligne chez WoW (une icône dans le texte, comme la qualité d'un
+/// objet, agrandit la ligne) : écart à la hauteur théorique en quarts de pixel, un octet par ligne
+/// après l'échelle de l'interface (−128 : inconnu).
+pub const FLAG_HEIGHTS: u8 = 128;
 /// Plaque du dispositif télévision : champ noir de la bannière, presque opaque.
 pub const PLATE: Rgb = [14, 13, 10];
 pub const PLATE_ALPHA: f32 = 0.94;
@@ -54,6 +58,8 @@ pub struct View {
     pub received: Instant,
     /// Pixels par unité de l'interface (taille des icônes) ; 0 : addon antérieur à la 0.12.3.
     pub ui_k: f32,
+    /// Écart de chaque ligne à sa hauteur théorique chez WoW, en pixels (`None` : inconnu).
+    pub height_delta: Vec<Option<f32>>,
 }
 
 impl View {
@@ -100,6 +106,7 @@ pub fn parse_view(p: &[u8], received: Instant) -> Result<View, String> {
         rows: Vec::new(),
         received,
         ui_k: 0.0,
+        height_delta: Vec::new(),
     };
     if v.flags & FLAG_VISIBLE == 0 {
         return Ok(v);
@@ -141,6 +148,9 @@ pub fn parse_view(p: &[u8], received: Instant) -> Result<View, String> {
     let k = start + 4 * n;
     if p.len() >= k + 2 {
         v.ui_k = u16_at(k) as f32 / 1000.0;
+    }
+    if v.flags & FLAG_HEIGHTS != 0 && p.len() >= k + 2 + n {
+        v.height_delta = p[k + 2..k + 2 + n].iter().map(|&b| (b != 0x80).then_some(b as i8 as f32 / 4.0)).collect();
     }
     Ok(v)
 }
@@ -838,6 +848,12 @@ pub fn render(
     let mixed = v.lines.iter().any(|(id, _)| *id == 0);
     let slot_of = |k: usize| -> usize { if mixed { v.rows.get(k).copied().unwrap_or(0) as usize } else { 0 } };
     let height_of = |k: f32| k * line_h + (k - 1.0) * v.spacing;
+    // Hauteur de la ligne `i` chez WoW (0.14.4) : ses lignes à l'écran, plus l'écart mesuré par
+    // l'addon (icône plus haute que le texte...).
+    let wow_height = |i: usize, rows: usize| -> f32 {
+        let rows = v.rows.get(i).copied().filter(|r| *r > 0).map_or(rows, |r| r as usize).max(1);
+        (height_of(rows as f32) + v.height_delta.get(i).copied().flatten().unwrap_or(0.0)).max(1.0)
+    };
     // Lignes coupées à la largeur, police à sa taille (jamais réduite : 0.13.3, tailles égales).
     type Laid = Option<(Vec<Vec<(f32, Item)>>, Rgb)>;
     let laid: Vec<Laid> = v
@@ -865,7 +881,9 @@ pub fn render(
     // laissées au-dessus pour que la ligne de WoW suivante reste à sa place.
     let n = v.lines.len();
     let mut plan: Vec<Option<usize>> = vec![None; n];
-    let mut extra = vec![0usize; n];
+    // Place laissée vide au-dessus d'une ligne (pixels), pour que la ligne de WoW suivante reste
+    // exactement à sa place.
+    let mut extra = vec![0f32; n];
     let anchor = |i: usize| v.lines[i].0 == 0 || (skip(v.lines[i].0) && slot_of(i) > 0);
     if mixed {
         let mut i = 0;
@@ -874,14 +892,18 @@ pub fn render(
                 i += 1;
                 continue;
             }
+            // Place du groupe chez WoW, en pixels (hauteurs réelles, 0.14.4), puis en lignes.
             let mut j = i;
-            let mut room = 0usize;
+            let (mut room_px, mut count) = (0f32, 0usize);
             while j < n && !anchor(j) {
                 if laid[j].is_some() {
-                    room += slot_of(j).max(1);
+                    room_px += wow_height(j, slot_of(j).max(1));
+                    count += 1;
                 }
                 j += 1;
             }
+            room_px += v.spacing * count.saturating_sub(1) as f32;
+            let room = ((room_px + v.spacing) / pitch + 0.1).floor().max(0.0) as usize;
             let mut used = 0usize;
             let mut last = None;
             for (k, l) in laid.iter().enumerate().take(j).skip(i) {
@@ -898,7 +920,7 @@ pub fn render(
                 last = Some(k);
             }
             if let Some(k) = last {
-                extra[k] = room.saturating_sub(used);
+                extra[k] = (room_px - height_of(used.max(1) as f32)).max(0.0);
             }
             i = j;
         }
@@ -912,8 +934,9 @@ pub fn render(
         }
         let slot = slot_of(li);
         if anchor(li) {
-            // Place laissée à WoW, ou réservée à une ligne qui attend sa traduction.
-            bottom -= height_of(slot.max(1) as f32) + v.spacing;
+            // Place laissée à WoW, ou réservée à une ligne qui attend sa traduction : sa hauteur
+            // réelle chez WoW.
+            bottom -= wow_height(li, slot.max(1)) + v.spacing;
             continue;
         }
         let Some((mut rows, color)) = laid[li].clone() else { continue };
@@ -936,7 +959,7 @@ pub fn render(
         let k = rows.len().max(1) as f32;
         let top = bottom - height_of(k);
         placed.push((li, rows, top, alpha));
-        bottom = top - v.spacing - extra[li] as f32 * pitch;
+        bottom = top - v.spacing - extra[li];
     }
     // Dispositif télévision (0.14) : le texte du jeu reste dessous. Une plaque sombre, sur toute
     // la largeur de la fenêtre, couvre les lignes des joueurs à la place que WoW leur donne et
@@ -956,11 +979,8 @@ pub fn render(
             if ob <= 0.0 {
                 break;
             }
-            let k = match v.rows.get(li).copied().unwrap_or(0) {
-                0 => laid[li].as_ref().map_or(1, |(r, _)| r.len().max(1)),
-                r => r as usize,
-            };
-            let top = ob - height_of(k as f32);
+            let k = laid[li].as_ref().map_or(1, |(r, _)| r.len().max(1));
+            let top = ob - wow_height(li, k);
             if *id != 0 {
                 fill(top, ob, po * v.alpha(*age0, now));
             }
@@ -1789,6 +1809,35 @@ pub mod tests {
         // sa taille (0.13.3), Hans coupé à une ligne (un jambage peut toucher le pixel du bas).
         assert!(!ink.is_empty());
         assert!(ink.iter().all(|&y| (44..=64).contains(&y)), "{ink:?}");
+    }
+
+    #[test]
+    fn taller_wow_lines_keep_players_lines_in_their_own_place() {
+        let Some(font) = test_font() else { return };
+        let t0 = Instant::now();
+        let mut m = Mirror::new();
+        m.book.set_primary("Fonts\\ARIALN.TTF", Some(font)).unwrap();
+        m.on_line(1, "FFFFFF\u{1F}[Romon] chuchote : oups");
+        // De bas en haut : « Seiyya crée : [Flacon…] » (WoW, une icône de qualité : 6 px de plus
+        // que ses 16 px), Romon (1 ligne), une autre ligne de WoW avec icône (0.14.4, retour du
+        // 11/11 : Romon était dessiné sur la ligne de WoW du dessous).
+        let mut p = view_payload(1, FLAG_VISIBLE | FLAG_ROWS | FLAG_HEIGHTS, [10, 20, 300, 80], "Fonts\\ARIALN.TTF", &[(0, 4096), (1, 4096), (0, 4096)]);
+        p.extend_from_slice(&1000u16.to_be_bytes());
+        p.extend_from_slice(&[24, 0, 24]);
+        let v = parse_view(&p, t0).unwrap();
+        assert_eq!(v.height_delta, vec![Some(6.0), Some(0.0), Some(6.0)]);
+        m.on_view(v);
+        let ups = m.tick(Instant::now() + GRACE);
+        let cv = ups[0].canvas.as_ref().unwrap();
+        let ink: Vec<usize> = (0..cv.h).filter(|y| (0..cv.w).any(|x| cv.px[y * cv.w + x] >> 24 > 128)).collect();
+        // Ligne de WoW du bas : 58..80 ; Romon : 42..58 ; rien sur les lignes de WoW.
+        assert!(!ink.is_empty());
+        assert!(ink.iter().all(|&y| (40..=58).contains(&y)), "{ink:?}");
+        // Écart inconnu (valeur secrète, −128) : hauteur théorique.
+        let mut p = view_payload(1, FLAG_VISIBLE | FLAG_ROWS | FLAG_HEIGHTS, [10, 20, 300, 80], "Fonts\\ARIALN.TTF", &[(0, 4096)]);
+        p.extend_from_slice(&1000u16.to_be_bytes());
+        p.push(0x80);
+        assert_eq!(parse_view(&p, t0).unwrap().height_delta, vec![None]);
     }
 
     #[test]

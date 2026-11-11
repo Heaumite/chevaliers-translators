@@ -803,7 +803,7 @@ impl Live {
                         crate::say!("[miroir] ChatFrame{} : caché", v.frame);
                     } else {
                         crate::say!(
-                            "[miroir] ChatFrame{} : {}x{} px en ({}, {}), {} {:.1} px, ligne {:.1} px, ombre {:.1},{:.1}, {} lignes{}{}{}{}",
+                            "[miroir] ChatFrame{} : {}x{} px en ({}, {}), {} {:.1} px, ligne {:.1} px, ombre {:.1},{:.1}, {} lignes{}{}{}{}{}",
                             v.frame,
                             v.width,
                             v.height,
@@ -819,6 +819,10 @@ impl Live {
                             if v.flags & mirror::FLAG_OFFICIAL != 0 { ", texte officiel (verrouillage ou ligne secrète)" } else { "" },
                             if v.flags & mirror::FLAG_TRUNC != 0 { ", liste tronquée" } else { "" },
                             if v.flags & mirror::FLAG_COVER != 0 { ", dispositif télévision (texte du jeu recouvert)" } else { "" },
+                            {
+                                let taller = v.height_delta.iter().filter(|d| d.is_some_and(|d| d > 1.0)).count();
+                                if taller > 0 { format!(", {taller} ligne(s) plus haute(s) chez WoW (icônes)") } else { String::new() }
+                            },
                         );
                     }
                 }

@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.14.3)
+# Chevaliers Translators (v0.14.4)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -94,6 +94,16 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## Correctif 0.14.4 (11/11/2026)
+
+- **Messages redessinés sur les lignes du jeu** : quand le chat mêle des lignes du jeu avec une
+  icône (« Seiyya crée : [Flacon des Magistères fugace] », icône de qualité) et des messages de
+  joueurs, ceux-ci étaient redessinés un peu trop bas, sur les lignes du jeu. Une icône plus haute
+  que le texte agrandit la ligne chez WoW ; l'application comptait toutes les lignes à la même
+  hauteur. L'addon envoie maintenant la hauteur réelle de chaque ligne (écart à la hauteur
+  théorique, au quart de pixel ; inconnue si WoW la rend secrète) et les lignes des joueurs gardent
+  exactement leur place. Journal : `[miroir] ChatFrame1 : …, N ligne(s) plus haute(s) chez WoW`.
 
 ## Nouveautés 0.14.3 (11/11/2026) : préparation de la signature par SignPath Foundation
 
@@ -268,15 +278,16 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.3.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.4.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.14.3)
+## Vérifié avant livraison (0.14.4)
 
-- 116 tests Rust sous Linux (115 sous Windows) : dont, en 0.14.3, la règle de la première
+- 117 tests Rust sous Linux (116 sous Windows) : dont, en 0.14.4, les lignes du jeu plus hautes
+  (icône) qui gardent les messages des joueurs à leur place ; en 0.14.3, la règle de la première
   installation (WoW compté 7 Go), la désinstallation (addon et
   présence retirés de chaque version, autres addons gardés ; réglages et données sur demande) ; en 0.14.2, le gouverneur de la mémoire
   vidéo (descente près de la saturation, même en combat ; remontée hors combat après une minute de
@@ -289,7 +300,8 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
 - Harnais Lua : encodeur identique sous Lua 5.1 et LuaJIT (62 vecteurs) ; trames peintes décodées
   par `ct-outils` ; valeurs secrètes, verrouillage du chat et relais après le combat ; bandeau
   immobile au repos ; valeurs secrètes jamais testées avant contrôle (relecture des sources, et
-  absence et instance secrètes en champ de bataille) ; réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
+  absence et instance secrètes en champ de bataille) ; ligne plus haute chez WoW signalée à
+  l'application ; réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
   `/chevaliers tele off` puis `auto` ; retour à l'écran de PC (texte caché).
@@ -298,14 +310,14 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
 
-## Test de la 0.14.3 (PowerShell)
+## Test de la 0.14.4 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
 | Lancement | aucune console ; médaillon près de l'horloge et sur l'exécutable ; infobulle « En attente de World of Warcraft » |
-| Installation | journal : addon 0.14.3 posé dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Installation | journal : addon 0.14.4 posé dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
 | Téléchargements | infobulle de l'icône : pourcentage ; WoW ouvert : « débit bridé » ; à la fin : bulle « Modèles de traduction prêts » |
 | Télévision | WoW sur la télé : « Écran de télévision » à la connexion ; chat traduit sur plaque sombre ; `/chevaliers tele off` le cache comme sur un écran de PC |
 | Combat | rien de dessiné pendant le combat ; à la fin, chat traduit et bilan |

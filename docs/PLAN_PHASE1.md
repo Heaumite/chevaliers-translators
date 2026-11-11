@@ -85,6 +85,10 @@ par SignPath Foundation : GitHub Actions (tests, compilation, signature, publica
 de signature, désinstallation depuis le menu de l'icône ; démarches dans `docs/SIGNPATH.md`.
 Retours du 11/11 midi : erreur Lua en champ de bataille (absence secrète) corrigée ; premier
 modèle choisi avec WoW compté 7 Go à la première installation, puis d'après les mesures réelles.
+**0.14.4 (11/11 soir)** : messages des joueurs redessinés sur les lignes du jeu quand celles-ci
+portent une icône (plus hautes) : hauteur réelle de chaque ligne envoyée par l'addon. Première
+publication sur GitHub (`Heaumite/chevaliers-translators`, version v0.14.3 publiée par GitHub
+Actions le 11/11).
 **0.15** : mises à jour des modèles suivies sur Hugging Face, vérifiées WoW fermé puis essayées
 pendant une absence (AFK) avant d'être proposées.
 
