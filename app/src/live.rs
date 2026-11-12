@@ -757,7 +757,9 @@ impl Live {
                     text
                 };
                 if let Some(m) = self.mirror.as_mut() {
-                    if m.on_line(id, &text) {
+                    // Lignes du jeu (bit de poids fort, addon 0.14.5) : redessinées sans traduction,
+                    // pas recopiées au journal.
+                    if m.on_line(id, &text) && a.chan & 0x80 == 0 {
                         crate::say!("[miroir {}] {}", a.chan, mirror::plain(&mirror::parse_line_body(&text).text));
                     }
                 }

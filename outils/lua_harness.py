@@ -739,13 +739,14 @@ def mock(root, binary):
     raid = "On tape la cible |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_8:0|t en premier, merci"
     g.FIRE("CHAT_MSG_SAY", raid, "Chef-Hyjal", "Commun", "", "", "", 0, 0, "", 7, 3, "Player-4")
     g.ADD(f"[Chef] dit : {raid}", "SAY")
-    # Butin et système : laissés à WoW (ni texte ni mesure envoyés, juste leur place).
+    # Butin, système, créatures : redessinés aussi depuis la 0.14.5 (sans traduction, pas recopiés
+    # au journal), pour qu'une traduction plus longue prenne la place qu'il lui faut.
     g.ADD("Zalom crée : [Flacon des Magistères fugace].", "LOOT", 1, 1, 0)
     g.ADD("Vous avez appris un nouveau sort : [Imposition des mains].", "SYSTEM", 1, 1, 0)
     g.ADD("Résident de Lune-d'Argent dit : Vous semblez être quelqu'un de bien.", "MONSTER_SAY", 1, 1, 0.6)
     lua.execute("for _, fs in ipairs(ChatFrame1.visibleLines) do if fs.messageInfo then _G.ALPHAS = (_G.ALPHAS or '') .. fs:GetAlpha() end end")
     print("Opacité des lignes (bas en haut) :", g.ALPHAS)
-    assert g.ALPHAS.startswith("11100"), "créatures, butin et système doivent rester dessinés par WoW, les joueurs cachés"
+    assert g.ALPHAS.startswith("00000"), "toutes les lignes lisibles doivent être cachées (redessinées par l'application)"
     busy = collect("busy")
     out = feed(busy, os.path.join(work, "busy"))
     cited = ct.Mirror.stats.cited or 0
@@ -760,7 +761,9 @@ def mock(root, binary):
     assert "[icône] atlas Professions-ChatIcon-Quality-Tier3 : fichier 4559321, 34x30" in out, "atlas non décrit"
     assert "[icône] texture Interface\\TargetingFrame\\UI-RaidTargetingIcon_8 : fichier 137008" in out, "texture non décrite"
     assert "trame(s) manquée(s)" not in out
-    assert "Zalom crée" not in out and "Imposition des mains" not in out and "Résident" not in out, "ligne laissée à WoW envoyée"
+    assert "Zalom crée" not in out and "Imposition des mains" not in out and "Résident" not in out, "ligne du jeu recopiée au journal"
+    sent = lua.eval("(function() local t = {} for _, v in pairs(CT_TABLE.Mirror.texts) do t[#t + 1] = v end return table.concat(t, '\\n') end)()")
+    assert "Zalom crée" in sent and "Imposition des mains" in sent and "Résident" in sent, "ligne du jeu non envoyée"
     if os.environ.get("CT_MIROIR_COPIE"):
         shutil.copy(os.path.join(work, "busy", sorted(os.listdir(os.path.join(work, "busy")))[-1]),
                     os.environ["CT_MIROIR_COPIE"].replace(".bmp", "_icones.bmp"))

@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.14.4)
+# Chevaliers Translators (v0.14.5)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -94,6 +94,19 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.14.5 (12/11/2026) : phrases entières
+
+- **Plus de traduction coupée par « … »** : quand une traduction était plus longue que l'original
+  et que des lignes du jeu l'encadraient (« Vous créez : [Cuir léger]. » au-dessus, « Hyène
+  Jappecroc meurt… » en dessous), elle n'avait que la place de l'original et finissait coupée.
+  Désormais toutes les lignes lisibles du chat sont redessinées par l'application, celles du jeu
+  comprises (butin, artisanat, système, créatures, messages des addons), sans traduction et avec
+  leurs couleurs, liens et icônes : la traduction prend les lignes qu'il lui faut et les plus
+  anciennes remontent, comme dans WoW. Seules les lignes secrètes (instances, combat) restent
+  dessinées par WoW ; entre elles, la place reste celle de l'original.
+- Les lignes du jeu passent par le bandeau (un peu plus de trafic) mais ne sont pas recopiées au
+  journal ; l'addon les signale par le bit de poids fort du numéro de fenêtre.
 
 ## Correctif 0.14.4 (11/11/2026)
 
@@ -278,13 +291,13 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.4.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.5.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.14.4)
+## Vérifié avant livraison (0.14.5)
 
 - 117 tests Rust sous Linux (116 sous Windows) : dont, en 0.14.4, les lignes du jeu plus hautes
   (icône) qui gardent les messages des joueurs à leur place ; en 0.14.3, la règle de la première
@@ -301,7 +314,8 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   par `ct-outils` ; valeurs secrètes, verrouillage du chat et relais après le combat ; bandeau
   immobile au repos ; valeurs secrètes jamais testées avant contrôle (relecture des sources, et
   absence et instance secrètes en champ de bataille) ; ligne plus haute chez WoW signalée à
-  l'application ; réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
+  l'application ; toutes les lignes lisibles cachées et envoyées, celles du jeu sans être
+  recopiées au journal (0.14.5) ; réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
   `/chevaliers tele off` puis `auto` ; retour à l'écran de PC (texte caché).
@@ -310,14 +324,14 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
 
-## Test de la 0.14.4 (PowerShell)
+## Test de la 0.14.5 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
 | Lancement | aucune console ; médaillon près de l'horloge et sur l'exécutable ; infobulle « En attente de World of Warcraft » |
-| Installation | journal : addon 0.14.4 posé dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Installation | journal : addon 0.14.5 posé dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
 | Téléchargements | infobulle de l'icône : pourcentage ; WoW ouvert : « débit bridé » ; à la fin : bulle « Modèles de traduction prêts » |
 | Télévision | WoW sur la télé : « Écran de télévision » à la connexion ; chat traduit sur plaque sombre ; `/chevaliers tele off` le cache comme sur un écran de PC |
 | Combat | rien de dessiné pendant le combat ; à la fin, chat traduit et bilan |

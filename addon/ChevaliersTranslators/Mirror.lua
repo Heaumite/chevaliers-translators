@@ -126,10 +126,12 @@ local function LineId(info)
   return id
 end
 
--- Lignes des joueurs (dire, chuchotements, groupe, raid, guilde, canaux...) : redessinées par
--- l'application, qui les traduit. Les autres (butin, artisanat, monnaies, système, erreurs,
--- combat, JcJ, créatures et boss, marques de cible, messages des addons) restent dessinées par
--- WoW, ligne par ligne, et ne passent plus par le bandeau (0.12.3).
+-- Lignes des joueurs (dire, chuchotements, groupe, raid, guilde, canaux...) : traduites par
+-- l'application. Depuis la 0.14.5, les autres lignes lisibles (butin, artisanat, monnaies,
+-- système, créatures, messages des addons...) sont aussi redessinées, sans traduction : une
+-- traduction plus longue que l'original prend alors les lignes qu'il lui faut et les plus
+-- anciennes remontent, comme dans WoW (avant : coupée par « … » entre deux lignes du jeu). Seules
+-- les lignes secrètes (instances, combat) restent dessinées par WoW.
 local PLAYER_TYPES = {
   SAY = true, YELL = true, EMOTE = true, WHISPER = true, WHISPER_INFORM = true,
   BN_WHISPER = true, BN_WHISPER_INFORM = true, PARTY = true, PARTY_LEADER = true,
@@ -198,7 +200,8 @@ local function ApplyLinesNow(cf)
   local now = GetTime()
   for _, fs in ipairs(cf.visibleLines) do
     local info = fs.messageInfo
-    if info and not IsSecret(info.message) and Ours(info, now) and fs:GetAlpha() ~= 0 then fs:SetAlpha(0) end
+    -- Toute ligne lisible : redessinée par l'application (0.14.5).
+    if info and not IsSecret(info.message) and fs:GetAlpha() ~= 0 then fs:SetAlpha(0) end
   end
 end
 
@@ -352,8 +355,10 @@ local function Describe(i, cf, now)
         n = n + 1
         local e = lines[n] or {}
         lines[n] = e
-        -- Ligne qui n'est pas d'un joueur : laissée à WoW, seule sa place est décrite.
-        e.gap = hidden or (perLine and not Ours(info, now))
+        -- Ligne secrète : laissée à WoW, seule sa place est décrite. Les autres sont redessinées,
+        -- celles des joueurs traduites (0.14.5).
+        e.gap = hidden
+        e.ours = not hidden and Ours(info, now)
         local ts = info.timestamp
         if IsSecret(ts) then ts = nil end
         e.info, e.base, e.rows = info, max(tonumber(ts) or 0, override), Rows(fs)
@@ -641,7 +646,8 @@ local function SendView(i, cf, now, flags, n, view)
         local sent = fresh and Cite(text, now) or text
         if sent ~= text then M.stats.cited = (M.stats.cited or 0) + 1 end
         AnnounceIcons(text, now)
-        CT.ChatFragments(e.id, i, ColorHex(e.info, cf), sent, maxp,
+        -- Ligne du jeu (pas d'un joueur) : bit de poids fort du numéro de fenêtre (0.14.5).
+        CT.ChatFragments(e.id, i + (e.ours and 0 or 128), ColorHex(e.info, cf), sent, maxp,
           function(p, len) CT.Enqueue(CT.FRAME_MLINE, p, len) end)
         M.stats.lines = M.stats.lines + 1
       end

@@ -89,6 +89,10 @@ modèle choisi avec WoW compté 7 Go à la première installation, puis d'après
 portent une icône (plus hautes) : hauteur réelle de chaque ligne envoyée par l'addon. Première
 publication sur GitHub (`Heaumite/chevaliers-translators`, version v0.14.3 publiée par GitHub
 Actions le 11/11).
+**0.14.5 (12/11)** : traduction plus longue que l'original coupée par « … » entre deux lignes du
+jeu : choix « tout redessiner » ; les lignes du jeu lisibles sont redessinées aussi (sans
+traduction), la traduction prend sa place et les anciennes remontent ; seules les lignes secrètes
+restent à WoW.
 **0.15** : mises à jour des modèles suivies sur Hugging Face, vérifiées WoW fermé puis essayées
 pendant une absence (AFK) avant d'être proposées.
 
