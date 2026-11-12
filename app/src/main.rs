@@ -366,15 +366,35 @@ mod app {
             }
             if let Err(e) = install::install(root, None, None) {
                 ct::say!("  installation : {e}");
+                tray.notify("Addon non mis à jour", &format!("{} : {e}", root.display()), true);
                 continue;
             }
-            // Jeu déjà ouvert : dire au joueur comment charger l'addon.
+            // Vérification : chaque version du jeu doit désormais porter la nouvelle version de
+            // l'addon, pour qu'une ancienne ne se charge pas à sa place.
+            for (f, v) in install::status(root) {
+                let was = before.iter().find(|(x, _)| *x == f).and_then(|(_, v)| v.clone());
+                if v.as_deref() == Some(VERSION) {
+                    if was.as_deref() != Some(VERSION) {
+                        ct::say!("  {f} : {} -> {VERSION}", was.as_deref().unwrap_or("absent"));
+                    }
+                } else {
+                    ct::say!("  {f} : ATTENTION, encore {} après la mise à jour", v.as_deref().unwrap_or("absent"));
+                    tray.notify(
+                        "Addon à vérifier",
+                        &format!("WoW {} : l'addon est resté en {}. Ferme le jeu, puis relance l'application.", flavor_label(&f), v.as_deref().unwrap_or("absent")),
+                        true,
+                    );
+                }
+            }
+            // Jeu déjà ouvert : sa version du jeu vient-elle d'être mise à jour (ou installée) ?
+            // Un seul message, une fois la mise à jour faite : tant que le joueur ne recharge pas,
+            // c'est l'ancien addon qui tourne.
             if let Some((r, f)) = &open {
                 if same_path(r, root) {
-                    if let Some((_, v)) = before.iter().find(|(x, _)| x == f) {
-                        if v.as_deref() != Some(VERSION) {
-                            announce(tray, f, v.is_some());
-                        }
+                    let was = before.iter().find(|(x, _)| x == f).and_then(|(_, v)| v.clone());
+                    let now_ok = install::addon_version(root, f).as_deref() == Some(VERSION);
+                    if was.as_deref() != Some(VERSION) && now_ok {
+                        announce(tray, f, was.is_some());
                     }
                 }
             }
@@ -390,7 +410,18 @@ mod app {
             return;
         }
         match install::install(root, Some(flavor), None) {
-            Ok(()) => announce(tray, flavor, before.is_some()),
+            Ok(()) => {
+                // Vérification : la nouvelle version doit bien être en place avant d'inviter au /reload.
+                if install::addon_version(root, flavor).as_deref() == Some(VERSION) {
+                    announce(tray, flavor, before.is_some());
+                } else {
+                    tray.notify(
+                        "Addon à vérifier",
+                        &format!("WoW {} : l'addon n'a pas pu être mis à jour. Ferme le jeu, puis relance l'application.", flavor_label(flavor)),
+                        true,
+                    );
+                }
+            }
             Err(e) => tray.notify(
                 "Addon non installé",
                 &format!("WoW {} : {e}", flavor_label(flavor)),
@@ -403,8 +434,8 @@ mod app {
         let label = flavor_label(flavor);
         if update {
             // Fichiers Lua relus à chaque connexion : /reload seulement si un personnage est
-            // déjà connecté.
-            tray.notify("Addon mis à jour", &format!("WoW {label} : si tu es déjà connecté à un personnage, tape /reload ; sinon rien à faire."), false);
+            // déjà connecté. Sans /reload, l'ancienne version de l'addon reste chargée.
+            tray.notify("Addon mis à jour", &format!("WoW {label} : addon en version {VERSION}. Si tu es déjà en jeu, tape /reload pour charger la nouvelle version ; sinon rien à faire."), false);
         } else {
             tray.notify("Addon installé", &format!("WoW {label} : redémarre le jeu pour charger l'addon Chevaliers Translators."), false);
         }

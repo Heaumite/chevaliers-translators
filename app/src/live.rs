@@ -127,16 +127,18 @@ pub struct Tr {
 }
 
 impl Tr {
-    /// Une traduction demandée maintenant serait-elle prête avant `HOLD_MAX` ? Sinon la ligne
-    /// s'affiche tout de suite telle quelle et la traduction la remplace à son arrivée (0.12.4 :
-    /// sous un chat très actif, plus d'attente de 4 s pour rien).
-    fn can_wait(&self) -> bool {
-        let waiting = self.pending.values().filter(|p| matches!(p, Pending::Received { .. })).count();
+    /// Budget d'attente de l'affichage pour une traduction demandée maintenant : le temps de
+    /// traduction réellement observé (médiane récente, allongée si la file est chargée). La ligne
+    /// patiente ce temps-là dans le miroir, puis s'affiche telle quelle si la traduction tarde.
+    /// Ainsi l'attente d'affichage suit la vitesse du modèle (équilibre traduction/affichage,
+    /// 0.14.8) : modèle rapide, chat vif ; modèle plus lourd, court délai, toujours sans trou.
+    fn budget(&self) -> Duration {
         let mut l: Vec<f64> = self.lat.iter().copied().collect();
         l.sort_by(|a, b| a.total_cmp(b));
-        let med = l.get(l.len() / 2).copied().unwrap_or(1.5);
+        let med = l.get(l.len() / 2).copied().unwrap_or(1.0);
+        let waiting = self.pending.values().filter(|p| matches!(p, Pending::Received { .. })).count();
         let eta = ((waiting / crate::engine::PARALLEL) as f64 + 1.0) * med;
-        eta <= mirror::HOLD_MAX.as_secs_f64() * 0.9
+        Duration::from_secs_f64(eta.clamp(0.4, mirror::HOLD_MAX.as_secs_f64()))
     }
 }
 
@@ -1095,13 +1097,12 @@ impl Live {
         // La ligne attend sa traduction dans le miroir (elle s'affichera d'un coup, traduite) si
         // elle peut être prête à temps ; sinon elle s'affiche tout de suite et la traduction la
         // remplace à son arrivée.
+        let until = now + tr.budget();
         match (foreign, self.mirror.as_mut()) {
             (Some(l), Some(m)) if !late => {
-                if tr.can_wait() {
-                    m.hold(msg, sender, now);
-                } else {
-                    m.settle(msg, now);
-                }
+                // La ligne patiente le temps d'une traduction, puis s'affiche telle quelle : jamais
+                // de trou, et la traduction la remplace à son arrivée (0.14.8).
+                m.hold(msg, sender, until);
                 let job = tr.engine.submit(Ask { text: msg.to_string(), src: l, tgt: client, priority: Priority::Received, group: None });
                 tr.pending.insert(job, Pending::Received { body: msg.to_string(), sender: sender.to_string(), src: l, late });
             }

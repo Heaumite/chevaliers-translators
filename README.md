@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.14.7)
+# Chevaliers Translators (v0.14.8)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -94,6 +94,25 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.14.8 (12/11/2026)
+
+- **Affichage continu, sans trou ni clignotement** : les lignes s'affichent dans l'ordre d'arrivée,
+  chacune quand elle est prête (traduite, ou rien à traduire : butin, artisanat, même langue). Une
+  ligne dont la traduction est en route retient un court instant les lignes plus récentes, puis tout
+  se révèle dans l'ordre — le chat paraît couler en continu, sans case vide (avant : trou pendant
+  l'attente) et sans voir le texte passer de l'original au traduit.
+- **Attente ajustée à la vitesse du modèle** : ce petit délai d'affichage suit le temps de
+  traduction réellement mesuré (médiane récente, allongée si la file est chargée) : modèle rapide,
+  chat vif ; modèle plus lourd, délai un peu plus long, toujours sans trou. Si la traduction dépasse
+  le budget, la ligne s'affiche telle quelle et la traduction la remplace à son arrivée — le flux ne
+  cale jamais. L'équilibre traduction/affichage est ainsi automatique.
+- **Mises à jour vérifiées dans chaque version du jeu** : à son lancement, l'application remplace
+  l'addon dans toutes les versions de WoW et **vérifie** que chacune porte bien la nouvelle version,
+  pour qu'une ancienne ne se charge pas à la place. Si la version ouverte vient d'être mise à jour,
+  une bulle prévient : « addon en version X, tape /reload pour charger la nouvelle version ». Si une
+  version n'a pas pu être mise à jour, l'application le signale (fermer le jeu, relancer
+  l'application).
 
 ## 0.14.7 (12/11/2026)
 
@@ -315,13 +334,13 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.7.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.8.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.14.7)
+## Vérifié avant livraison (0.14.8)
 
 - 117 tests Rust sous Linux (116 sous Windows) : dont, en 0.14.4, les lignes du jeu plus hautes
   (icône) qui gardent les messages des joueurs à leur place ; en 0.14.3, la règle de la première
@@ -340,7 +359,8 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   absence et instance secrètes en champ de bataille) ; ligne plus haute chez WoW signalée à
   l'application ; toutes les lignes lisibles cachées et envoyées, celles du jeu sans être
   recopiées au journal (0.14.5) ; menu de langues réordonné et aide citant le guide (0.14.6) ;
-  Maj+clic sur Trad qui traduit et envoie, et ligne affichée sans attendre sa traduction (0.14.7) ;
+  Maj+clic sur Trad qui traduit et envoie (0.14.7) ; affichage continu dans l'ordre d'arrivée avec
+  attente ajustée au temps de traduction, et mise à jour vérifiée dans chaque version (0.14.8) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
@@ -350,14 +370,14 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
 
-## Test de la 0.14.7 (PowerShell)
+## Test de la 0.14.8 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
 | Lancement | aucune console ; médaillon près de l'horloge et sur l'exécutable ; infobulle « En attente de World of Warcraft » |
-| Installation | journal : addon 0.14.7 posé dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Installation | journal : addon 0.14.8 posé et vérifié dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
 | Téléchargements | infobulle de l'icône : pourcentage ; WoW ouvert : « débit bridé » ; à la fin : bulle « Modèles de traduction prêts » |
 | Télévision | WoW sur la télé : « Écran de télévision » à la connexion ; chat traduit sur plaque sombre ; `/chevaliers tele off` le cache comme sur un écran de PC |
 | Combat | rien de dessiné pendant le combat ; à la fin, chat traduit et bilan |

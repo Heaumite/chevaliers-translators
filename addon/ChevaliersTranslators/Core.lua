@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.14.7"
+CT.VERSION = "0.14.8"
 
 local floor = math.floor
 local format = string.format

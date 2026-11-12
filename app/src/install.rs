@@ -644,6 +644,30 @@ mod tests {
     }
 
     #[test]
+    fn update_replaces_the_addon_in_every_game_version() {
+        let base = std::env::temp_dir().join(format!("ct-maj-{}", std::process::id()));
+        let wow = base.join("World of Warcraft");
+        for f in ["_retail_", "_classic_era_", "_forever_"] {
+            fs::create_dir_all(wow.join(f).join("Interface").join("AddOns")).unwrap();
+        }
+        fs::write(wow.join(".build.info"), "").unwrap();
+        // Vieille version de l'addon déjà posée dans une des versions du jeu.
+        let old = addons_dir(&wow, "_retail_").join(ADDON);
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join(format!("{ADDON}.toc")), "## Version: 0.0.1\n").unwrap();
+        fs::write(old.join("Core.lua"), "-- vieux\n").unwrap();
+        assert_eq!(addon_version(&wow, "_retail_").as_deref(), Some("0.0.1"));
+        // Mise à jour : la nouvelle version remplace l'ancienne dans toutes les versions du jeu.
+        install(&wow, None, Some(120105)).unwrap();
+        for (f, v) in status(&wow) {
+            assert_eq!(v.as_deref(), Some(env!("CARGO_PKG_VERSION")), "{f} pas à jour");
+        }
+        // Les fichiers de l'ancienne version sont bien les nouveaux.
+        assert!(fs::read_to_string(old.join("Core.lua")).unwrap().contains("CT.VERSION"));
+        fs::remove_dir_all(base).ok();
+    }
+
+    #[test]
     fn uninstall_removes_the_addon_and_on_request_the_data() {
         let base = std::env::temp_dir().join(format!("ct-desinstall-{}", std::process::id()));
         let wow = base.join("World of Warcraft");

@@ -1148,7 +1148,8 @@ struct Held {
 /// connue dès que le message relayé arrive, en général en moins de 0,2 s).
 pub const GRACE: Duration = Duration::from_millis(350);
 /// Une ligne à traduire attend sa traduction ce temps-là au plus ; ensuite elle s'affiche telle
-/// quelle, et la traduction la remplace à son arrivée (0.12.4).
+/// quelle, et la traduction la remplace à son arrivée (0.12.4). Plafond du budget d'attente, qui
+/// est par ailleurs ajusté au temps de traduction réel (équilibre traduction/affichage, 0.14.8).
 pub const HOLD_MAX: Duration = Duration::from_secs(4);
 
 /// Le texte d'une ligne cite-t-il ce message de cet expéditeur ? (Les lignes de l'addon qui
@@ -1406,20 +1407,17 @@ impl Mirror {
         self.dirty_all();
     }
 
-    /// Le message `body` de `sender` part à la traduction : ses lignes attendent (au plus
-    /// `HOLD_MAX`). Faux si une de ses lignes est déjà affichée : elle n'attend pas, la traduction
-    /// la remplacera à son arrivée (0.12.4 : tout message étranger est traduit).
-    pub fn hold(&mut self, body: &str, sender: &str, now: Instant) -> bool {
+    /// Le message `body` de `sender` part à la traduction : ses lignes patientent jusqu'à `until`
+    /// (budget ajusté au temps de traduction réel), puis s'affichent telles quelles si la
+    /// traduction n'est pas encore là (0.14.8). Toujours enregistré, même si une ligne est déjà
+    /// affichée : la traduction la remplacera à son arrivée.
+    pub fn hold(&mut self, body: &str, sender: &str, until: Instant) -> bool {
         if body.trim().is_empty() {
             return false;
         }
-        let shown = self.lines.iter().any(|(id, lt)| {
-            line_has(&lt.text, body, sender) && self.line_first.get(id).is_some_and(|t| now.saturating_duration_since(*t) >= GRACE)
-        });
-        if shown {
-            return false;
-        }
-        self.held.push(Held { body: body.to_string(), until: now + HOLD_MAX });
+        let _ = sender;
+        self.held.retain(|h| h.body != body);
+        self.held.push(Held { body: body.to_string(), until });
         self.dirty_all();
         true
     }
@@ -1458,33 +1456,49 @@ impl Mirror {
         true
     }
 
-    /// Une ligne attend-elle encore avant d'être dessinée ? On n'attend qu'un court instant
-    /// (`GRACE`) après l'arrivée de la ligne, le temps de laisser une traduction très rapide
-    /// s'afficher directement. Passé ce délai, la ligne s'affiche telle quelle — même si sa
-    /// traduction est encore en route — pour ne jamais laisser d'emplacement vide (illusion du
-    /// temps réel, 0.14.7) ; la traduction la remplace à son arrivée.
-    fn waiting(&self, id: u16, now: Instant) -> bool {
-        let Some(lt) = self.lines.get(&id) else { return false };
-        if self.translations.iter().any(|t| line_has(&lt.text, &t.body, &t.sender)) {
-            return false;
+    /// Moment où une ligne est prête à être dessinée : traduite (quand la traduction est arrivée),
+    /// ou rien à traduire (butin, artisanat, même langue : dès son arrivée), ou — si la traduction
+    /// tarde au-delà du budget — à la fin du budget (elle s'affiche alors telle quelle, la
+    /// traduction la remplacera). `None` tant qu'une traduction est attendue dans le budget : la
+    /// ligne, et toutes les plus récentes, patientent (ordre d'arrivée gardé).
+    fn ready_at(&self, id: u16, now: Instant) -> Option<Instant> {
+        let lt = self.lines.get(&id)?;
+        let arrival = self.line_first.get(&id).copied().unwrap_or(now);
+        if let Some(t) = self.translations.iter().find(|t| line_has(&lt.text, &t.body, &t.sender)) {
+            return Some(arrival.max(t.at));
         }
-        if self.settled.iter().any(|(b, _)| lt.text.contains(b.as_str())) {
-            return false;
+        if self.demo || self.settled.iter().any(|(b, _)| lt.text.contains(b.as_str())) {
+            return Some(arrival);
         }
-        !self.demo && self.line_first.get(&id).is_some_and(|t| now.saturating_duration_since(*t) < GRACE)
+        if let Some(h) = self.held.iter().find(|h| lt.text.contains(h.body.as_str())) {
+            return (now >= h.until).then_some(h.until);
+        }
+        // Ligne neuve dont on ne sait pas encore si elle est à traduire : court instant d'attente.
+        (now.saturating_duration_since(arrival) >= GRACE).then_some(arrival)
     }
 
-    /// Lignes à ne pas dessiner encore : une ligne qui attend, et toutes les plus récentes
-    /// (le chat garde son ordre, comme s'il arrivait un peu plus tard).
+    /// Lignes à ne pas dessiner encore. L'affichage est temporisé dans l'ordre d'arrivée : une
+    /// ligne pas encore prête (traduction attendue dans le budget) retient toutes les plus
+    /// récentes, pour que le chat reste dans l'ordre et sans trou (la ligne apparaît un peu plus
+    /// tard, déjà traduite). Dès que le budget est écoulé, elle s'affiche telle quelle (0.14.8).
     fn hidden(&self, v: &View, now: Instant) -> Vec<u16> {
         if v.flags & FLAG_CALAGE != 0 {
             return Vec::new();
         }
-        // Les lignes vont de la plus récente (en bas) à la plus ancienne.
-        match v.lines.iter().rposition(|(id, _)| self.waiting(*id, now)) {
-            Some(k) => v.lines[..=k].iter().map(|(id, _)| *id).collect(),
-            None => Vec::new(),
+        let mut withheld = Vec::new();
+        let mut blocked = false;
+        // `v.lines` va de la plus récente à la plus ancienne : on parcourt de la plus ancienne.
+        for (id, _) in v.lines.iter().rev() {
+            // Ligne de WoW (ancre, id 0) : dessinée par le jeu, jamais en attente.
+            if *id == 0 {
+                continue;
+            }
+            if blocked || self.ready_at(*id, now).is_none() {
+                withheld.push(*id);
+                blocked = true;
+            }
         }
+        withheld
     }
 
     pub fn fonts_needed(&self) -> Vec<String> {
@@ -2016,35 +2030,37 @@ pub mod tests {
         m.on_line(2, "FFFFFF\u{1F}[Hans] : Guten Abend zusammen");
         m.on_line(3, "FFFFFF\u{1F}[Paul] : ça va ?");
         m.settle("ça va ?", t0);
+        let ms = |n| t0 + Duration::from_millis(n);
+        let sorted = |mut v: Vec<u16>| {
+            v.sort_unstable();
+            v
+        };
         // Les lignes vont de la plus récente à la plus ancienne : 3, 2, 1.
         let v = view(&[(3, 0), (2, 0), (1, 0)]);
-        assert!(m.hold("Guten Abend zusammen", "Hans", t0));
-        // La ligne de Hans attend, et celle de Paul, plus récente, aussi : l'ordre est gardé.
-        assert_eq!(m.hidden(&v, t0), vec![3, 2]);
-        assert!(m.set_translation("Guten Abend zusammen", "Hans", "[DE] Bonsoir à tous", t0));
-        assert!(m.hidden(&v, t0).is_empty());
+        // Hans attend sa traduction (budget 1 s) ; Paul, plus récent, attend derrière lui : ordre gardé.
+        assert!(m.hold("Guten Abend zusammen", "Hans", ms(1000)));
+        assert_eq!(sorted(m.hidden(&v, ms(500))), vec![2, 3]);
+        // Traduction arrivée avant la fin du budget : Hans et Paul s'affichent, dans l'ordre.
+        assert!(m.set_translation("Guten Abend zusammen", "Hans", "[DE] Bonsoir à tous", ms(500)));
+        assert!(m.hidden(&v, ms(500)).is_empty());
         assert_eq!(m.text_for(2).unwrap().text, "[Hans] : [DE] Bonsoir à tous");
-        // Traduction qui tarde (0.14.7) : passé le court délai, la ligne s'affiche telle quelle
-        // (plus d'emplacement vide), et la traduction la remplace à son arrivée.
+        // Traduction qui tarde au-delà du budget : la ligne s'affiche telle quelle (plus de trou),
+        // et la traduction la remplace à son arrivée (0.14.8).
         m.on_line(4, "FFFFFF\u{1F}[Olga] : Всем привет");
-        assert!(m.hold("Всем привет", "Olga", t0));
+        assert!(m.hold("Всем привет", "Olga", ms(1000)));
         let v = view(&[(4, 0), (3, 0), (2, 0), (1, 0)]);
-        // Tout de suite : la ligne neuve attend le court délai.
-        assert_eq!(m.hidden(&v, t0), vec![4]);
-        // Passé GRACE, mais bien avant toute traduction : la ligne s'affiche telle quelle.
-        let mid = t0 + GRACE + Duration::from_millis(50);
-        assert!(m.hidden(&v, mid).is_empty(), "emplacement laissé vide pendant la traduction");
+        // Pendant le budget : en attente.
+        assert_eq!(m.hidden(&v, ms(500)), vec![4]);
+        // Budget écoulé : affichée telle quelle.
+        assert!(m.hidden(&v, ms(1010)).is_empty(), "emplacement laissé vide pendant la traduction");
         assert_eq!(m.text_for(4).unwrap().text, "[Olga] : Всем привет");
-        assert!(m.set_translation("Всем привет", "Olga", "[RU] Salut à tous", mid));
+        assert!(m.set_translation("Всем привет", "Olga", "[RU] Salut à tous", ms(1010)));
         assert_eq!(m.text_for(4).unwrap().text, "[Olga] : [RU] Salut à tous");
-        // Ligne neuve dont la langue n'est pas encore connue : elle attend un instant au plus.
+        // Ligne neuve dont la langue n'est pas encore connue : court instant d'attente (GRACE).
         m.on_line(5, "FFFFFF\u{1F}Le Commerce est fermé");
-        let v = view(&[(5, 0), (4, 0)]);
-        let now = Instant::now();
-        assert_eq!(m.hidden(&v, now), vec![5]);
-        assert!(m.hidden(&v, now + GRACE).is_empty());
-        // Ligne déjà affichée : elle n'attend plus (sa traduction la remplacera).
-        assert!(!m.hold("Le Commerce est fermé", "", now + GRACE));
-        assert!(m.hidden(&v, now + GRACE).is_empty());
+        let v = view(&[(5, 0)]);
+        let rn = Instant::now();
+        assert_eq!(m.hidden(&v, rn), vec![5]);
+        assert!(m.hidden(&v, rn + GRACE + Duration::from_millis(20)).is_empty());
     }
 }

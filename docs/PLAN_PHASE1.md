@@ -99,6 +99,10 @@ guide`) renvoyant au dépôt et signalant l'application non encore signée.
 **0.14.7 (12/11)** : Maj+clic sur le bouton Trad = Maj+Entrée (traduire et envoyer), infobulle mise
 à jour ; plus d'emplacement vide pendant la traduction (la ligne s'affiche tout de suite telle
 quelle, la traduction la remplace à son arrivée).
+**0.14.8 (12/11)** : affichage du chat temporisé dans l'ordre d'arrivée (traductions et textes non
+traduits), attente ajustée au temps de traduction réel (équilibre traduction/affichage), plus de
+case vide ni de passage visible original->traduit ; mises à jour qui remplacent et **vérifient**
+l'addon dans chaque version du jeu, avec bulle « /reload » quand la version ouverte a changé.
 **À faire (demandé le 12/11)** : (a) capturer plusieurs instances de WoW à la fois et traduire chacune
 (file de traduction partagée) - gros changement de la capture, du miroir et des fenêtres superposées,
 à faire comme jalon à part, testé en jeu, sans risquer le fonctionnement mono-instance actuel. (b) Traduire les bulles de discussion au-dessus des personnages (avec
