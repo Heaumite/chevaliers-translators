@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.14.5"
+CT.VERSION = "0.14.7"
 
 local floor = math.floor
 local format = string.format
@@ -730,6 +730,34 @@ local function SendDraft(editBox)
   SendRequest(NextReq(), "b", type(langId) == "number" and langId or nil, chatType, target, text)
 end
 
+-- Démarre un envoi traduit pour le texte courant de la boîte : la boîte est vidée (le jeu
+-- n'envoie rien tant que la traduction n'est pas prête), puis rouverte vide ; l'application y
+-- colle la traduction et l'envoie. Partagé par Maj+Entrée et Maj+clic sur le bouton Trad (0.14.7).
+-- Faux si rien à envoyer (boîte vide, commande « / », texte secret) : le jeu suit son cours.
+local function StartSend(editBox)
+  if not editBox or not editBox.GetText then return false end
+  local text = editBox:GetText()
+  if issecretvalue and issecretvalue(text) then return false end
+  if type(text) ~= "string" or not text:find("%S") or text:sub(1, 1) == "/" then return false end
+  local chatType = BoxChatType(editBox)
+  -- Texte vidé d'abord : une erreur plus bas ne laisse jamais partir le texte non traduit.
+  editBox:SetText("")
+  draftDue = nil
+  if awaiting then Cancel() end
+  local langId = editBox.languageID
+  local s = { id = NextReq(), text = text, box = editBox, chatType = chatType, target = Target(editBox, chatType),
+    lang = type(langId) == "number" and langId or nil, at = GetTime(), reopenAt = GetTime() }
+  awaiting = s
+  if not chatOn then
+    s.restore = true
+    return true
+  end
+  s3Stats.requests = s3Stats.requests + 1
+  SendRequest(s.id, "s", s.lang, chatType, s.target, text)
+  return true
+end
+CT.StartSend = StartSend
+
 -- Appelé par le jeu juste avant qu'il lise le texte à envoyer.
 local function OnPreSend(editBox)
   local text = editBox:GetText()
@@ -754,23 +782,7 @@ local function OnPreSend(editBox)
     return
   end
   if not IsShiftKeyDown() then return end
-  if not text:find("%S") or text:sub(1, 1) == "/" then return end
-  local chatType = BoxChatType(editBox)
-  -- Texte vidé : le jeu ne l'envoie pas. Fait en premier pour qu'une erreur plus bas
-  -- ne laisse jamais partir le texte non traduit.
-  editBox:SetText("")
-  draftDue = nil
-  if s then Cancel() end
-  local langId = editBox.languageID
-  s = { id = NextReq(), text = text, box = editBox, chatType = chatType, target = Target(editBox, chatType),
-    lang = type(langId) == "number" and langId or nil, at = GetTime(), reopenAt = GetTime() }
-  awaiting = s
-  if not chatOn then
-    s.restore = true
-    return
-  end
-  s3Stats.requests = s3Stats.requests + 1
-  SendRequest(s.id, "s", s.lang, chatType, s.target, text)
+  StartSend(editBox)
 end
 
 local function ULen(text)
@@ -892,27 +904,31 @@ local LANG_NAMES = {
   HU = "Hongrois", RO = "Roumain", BG = "Bulgare", EL = "Grec", HR = "Croate", SR = "Serbe", SL = "Slovène",
   UK = "Ukrainien", SV = "Suédois", NO = "Norvégien", FI = "Finnois", DA = "Danois",
 }
+-- Langues courantes et mode automatique : en bas du menu (0.14.6). En haut, les régions, l'Europe
+-- du Nord en premier.
 local MAIN_LANGS = { "AUTO", "FR", "EN", "DE", "ES", "IT", "RU" }
 local REGIONS = {
+  { "Europe du Nord", { "SV", "NO", "DA", "FI" } },
   { "Europe de l'Est et du Sud-Est", { "PL", "CS", "SK", "HU", "RO", "BG", "EL", "HR", "SR", "SL", "UK" } },
   { "Europe de l'Ouest et du Sud", { "PT", "NL" } },
-  { "Europe du Nord", { "SV", "NO", "DA", "FI" } },
 }
--- Ordre du clic sans menu (anciens clients).
-local TRAD_LANGS = { "AUTO", "FR", "EN", "DE", "ES", "IT", "RU", "PT", "NL", "PL", "CS", "SK", "HU", "RO",
-  "BG", "EL", "HR", "SR", "SL", "UK", "SV", "NO", "DA", "FI" }
+-- Ordre du clic sans menu (anciens clients) : même ordre que le menu (haut en bas).
+local TRAD_LANGS = { "SV", "NO", "DA", "FI", "PL", "CS", "SK", "HU", "RO", "BG", "EL", "HR", "SR", "SL",
+  "UK", "PT", "NL", "AUTO", "FR", "EN", "DE", "ES", "IT", "RU" }
 
 -- Contenu du menu, décrit une fois pour les deux systèmes de menus du jeu. Un seul niveau : un
--- clic sur le bouton, un clic sur la langue (0.11).
+-- clic sur le bouton, un clic sur la langue (0.11). Régions en haut (Europe du Nord d'abord),
+-- langues courantes et mode automatique en bas (0.14.6).
 CT.TradMenu = function(add)
   add("title", "Langue du message envoyé")
-  add("title", "Saisie : langue détectée automatiquement")
-  for _, c in ipairs(MAIN_LANGS) do add("radio", LANG_NAMES[c], c) end
-  for _, r in ipairs(REGIONS) do
-    add("divider")
+  for i, r in ipairs(REGIONS) do
+    if i > 1 then add("divider") end
     add("title", r[1])
     for _, c in ipairs(r[2]) do add("radio", LANG_NAMES[c], c) end
   end
+  add("divider")
+  add("title", "Saisie : langue détectée automatiquement")
+  for _, c in ipairs(MAIN_LANGS) do add("radio", LANG_NAMES[c], c) end
 end
 
 local function OpenTradMenu(owner)
@@ -950,6 +966,14 @@ local function OpenTradMenu(owner)
 end
 
 local function TradClick(self, button)
+  -- Maj+clic gauche : traduire et envoyer tout de suite, comme Maj+Entrée (0.14.7).
+  if button == "LeftButton" and IsShiftKeyDown() then
+    local eb = self.ctEditBox or (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+    if not StartSend(eb) then
+      Print("Maj+clic sur Trad : écris d'abord un message dans la boîte de saisie.")
+    end
+    return
+  end
   if button == "RightButton" then
     SetDest("AUTO")
   elseif not OpenTradMenu(self) then
@@ -957,8 +981,7 @@ local function TradClick(self, button)
     for k, v in ipairs(TRAD_LANGS) do
       if v == dest then i = k end
     end
-    local step = IsShiftKeyDown() and -1 or 1
-    SetDest(TRAD_LANGS[((i - 1 + step) % #TRAD_LANGS) + 1])
+    SetDest(TRAD_LANGS[(i % #TRAD_LANGS) + 1])
   end
 end
 
@@ -976,15 +999,16 @@ local function AddTradButton(eb, cf)
   local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   fs:SetPoint("CENTER")
   b:SetFontString(fs)
+  b.ctEditBox = eb
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   b:SetScript("OnClick", TradClick)
   b:SetScript("OnEnter", function(self)
     if not GameTooltip then return end
+    local vers = dest == "AUTO" and "dans la langue de ton interlocuteur" or ("en " .. (LANG_NAMES[dest] or dest))
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:AddLine("Chevaliers Translators")
-    GameTooltip:AddLine(dest == "AUTO" and "Maj+Entrée : traduit dans la langue de ton interlocuteur"
-      or ("Maj+Entrée : traduit en " .. (LANG_NAMES[dest] or dest)), 1, 1, 1)
-    GameTooltip:AddLine("Clic : choisir la langue, clic droit : automatique", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Traduire et envoyer " .. vers .. " : Maj+Entrée ou Maj+clic ici.", 1, 1, 1, true)
+    GameTooltip:AddLine("Clic : choisir la langue. Clic droit : automatique.", 0.8, 0.8, 0.8)
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -1187,11 +1211,96 @@ end
 
 -- Commandes du joueur, et outils de développement (tests de la phase 0) acceptés tels quels mais
 -- absents de l'aide, listés par « /chevaliers dev ».
+-- Guide d'installation (0.14.6) : petit panneau affiché une fois, à la première utilisation de
+-- l'addon (et par /chevaliers guide), avec la bannière et le logo. Il dit où se trouve
+-- l'application compagnon et comment la lancer. Fermeture par la croix ou au bout de 60 s.
+local MEDIA = "Interface\\AddOns\\ChevaliersTranslators\\Media\\"
+local GUIDE_TEXT =
+  "Bienvenue dans Chevaliers Translators !\n\n" ..
+  "L'addon affiche le bandeau en bas de l'écran ; c'est l'application compagnon qui traduit le " ..
+  "chat, sur ton PC (aucun serveur en ligne).\n\n" ..
+  "|cffe6c77e1.|r L'application se trouve dans le dossier de l'addon : " ..
+  "|cffffffffChevaliersTranslators.exe|r. Double-clique dessus pour la lancer.\n" ..
+  "|cffe6c77e2.|r Lance ensuite World of Warcraft : la traduction démarre à la connexion du " ..
+  "personnage (si l'application a été lancée après, fais /reload).\n\n" ..
+  "L'application n'est pas encore signée numériquement (une demande est en cours auprès de la " ..
+  "SignPath Foundation) : Windows peut la présenter comme venant d'un éditeur inconnu. Le code " ..
+  "est ouvert et vérifiable :\n|cff79b8ffgithub.com/Heaumite/chevaliers-translators|r\n\n" ..
+  "Tu peux revoir ce guide avec |cffe6c77e/chevaliers guide|r."
+
+local guideFrame
+local function BuildGuide()
+  if guideFrame then return guideFrame end
+  local f = CreateFrame("Frame", "ChevaliersTranslatorsGuide", UIParent)
+  f:SetFrameStrata("DIALOG")
+  f:SetSize(500, 420)
+  f:SetPoint("CENTER")
+  f:EnableMouse(true)
+  pcall(f.SetClampedToScreen, f, true)
+  if f.SetMovable then
+    f:SetMovable(true)
+    pcall(f.RegisterForDrag, f, "LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+  end
+  -- Fond sombre et cadre or (couleurs unies : pas de dépendance aux modèles de cadre du jeu).
+  local bg = f:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints(f)
+  bg:SetColorTexture(0.055, 0.051, 0.039, 0.97)
+  for _, s in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+    local e = f:CreateTexture(nil, "BORDER")
+    e:SetColorTexture(0.788, 0.647, 0.353, 1)
+    if s == "TOP" then e:SetPoint("TOPLEFT"); e:SetPoint("TOPRIGHT"); e:SetHeight(2)
+    elseif s == "BOTTOM" then e:SetPoint("BOTTOMLEFT"); e:SetPoint("BOTTOMRIGHT"); e:SetHeight(2)
+    elseif s == "LEFT" then e:SetPoint("TOPLEFT"); e:SetPoint("BOTTOMLEFT"); e:SetWidth(2)
+    else e:SetPoint("TOPRIGHT"); e:SetPoint("BOTTOMRIGHT"); e:SetWidth(2) end
+  end
+  -- Bannière de l'addon en haut.
+  local ban = f:CreateTexture(nil, "ARTWORK")
+  ban:SetPoint("TOP", f, "TOP", 0, -8)
+  ban:SetSize(468, 117)
+  ban:SetTexture(MEDIA .. "Banniere")
+  -- Logo et titre.
+  local logo = f:CreateTexture(nil, "ARTWORK")
+  logo:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -134)
+  logo:SetSize(40, 40)
+  logo:SetTexture(MEDIA .. "Logo")
+  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
+  title:SetText("Guide d'installation")
+  -- Croix de fermeture.
+  local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+  -- Texte du guide.
+  local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  body:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -186)
+  body:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
+  body:SetJustifyH("LEFT")
+  body:SetJustifyV("TOP")
+  pcall(body.SetSpacing, body, 3)
+  body:SetText(GUIDE_TEXT)
+  -- Fermeture automatique au bout de 60 s après l'affichage.
+  f:SetScript("OnShow", function(self) self.hideAt = GetTime() + 60 end)
+  f:SetScript("OnUpdate", function(self)
+    if self.hideAt and GetTime() >= self.hideAt then self.hideAt = nil self:Hide() end
+  end)
+  guideFrame = f
+  return f
+end
+
+local function ShowGuide()
+  if ChevaliersTranslatorsDB then ChevaliersTranslatorsDB.guideSeen = true end
+  local ok, f = pcall(BuildGuide)
+  if ok and f then f:Show() end
+end
+CT.ShowGuide = ShowGuide
+
 local function Help()
   Print("Commandes : /chevaliers on | off (traduction du chat), langue auto | xx (langue de l'envoi " ..
     "traduit, aussi le bouton Trad), info (état), diag (rapport recopié dans le journal de l'application).")
   Print("Envoi traduit : Maj+Entrée dans la boîte de saisie. Entrée seule envoie ton texte tel quel.")
   Print("Proposition d'un modèle supérieur (panneau sur l'écran) : /chevaliers monter pour l'essayer, /chevaliers non pour ne plus le proposer.")
+  Print("Guide d'installation de l'application : /chevaliers guide.")
 end
 
 local function DevHelp()
@@ -1228,6 +1337,8 @@ SlashCmdList.CHEVALIERS = function(msg)
     end
   elseif cmd == "info" then
     CmdInfo()
+  elseif cmd == "guide" then
+    ShowGuide()
   elseif cmd == "tele" or cmd == "télé" then
     a = (a or ""):lower()
     if a == "auto" or a == "on" or a == "off" then
@@ -1351,6 +1462,11 @@ boot:SetScript("OnEvent", function(self, event)
     CT.screenTV = fresh and live.e == 1 or false
     if CT.liveSeen and CT.VERSION and live.v ~= CT.VERSION then
       Print("|cffff8000Application " .. tostring(live.v) .. " et addon " .. tostring(CT.VERSION) .. " : relance l'application (elle met l'addon à jour), puis /reload.|r")
+    end
+    -- Première utilisation : guide d'installation affiché une fois, peu après la connexion (pas
+    -- pendant l'écran de chargement). C_Timer absent (hors jeu) : pas de guide.
+    if not ChevaliersTranslatorsDB.guideSeen and C_Timer and C_Timer.After then
+      C_Timer.After(3, function() pcall(ShowGuide) end)
     end
     if ChevaliersTranslatorsDB.tradOff then
       Print("Prêt - traduction du chat coupée (/chevaliers on pour la remettre).")

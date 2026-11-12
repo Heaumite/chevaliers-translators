@@ -1141,7 +1141,6 @@ struct Translated {
 #[derive(Clone, Debug)]
 struct Held {
     body: String,
-    sender: String,
     until: Instant,
 }
 
@@ -1379,15 +1378,19 @@ impl Mirror {
         self.chats.iter().find(|c| line_has(&lt.text, &c.body, &c.sender))
     }
 
-    /// Texte copié pour une ligne : le message tel qu'il s'affiche (traduit le cas échéant), sans
-    /// l'heure, le canal, le nom ni l'acronyme de langue.
+    /// Texte copié pour une ligne : le nom du joueur qui a écrit le message puis le message tel
+    /// qu'il s'affiche (traduit le cas échéant), sans l'heure, le canal ni l'acronyme de langue
+    /// (0.14.6 : le nom de l'expéditeur est copié avec le message).
     pub fn copy_text(&self, id: u16) -> Option<String> {
         let lt = self.lines.get(&id)?;
         let c = self.chat_of(lt)?;
-        match self.translations.iter().find(|t| line_has(&lt.text, &t.body, &t.sender)) {
-            Some(t) => Some(plain(strip_tag(&t.shown))),
-            None => Some(plain(&c.body)),
-        }
+        let msg = match self.translations.iter().find(|t| line_has(&lt.text, &t.body, &t.sender)) {
+            Some(t) => plain(strip_tag(&t.shown)),
+            None => plain(&c.body),
+        };
+        // Nom sans le royaume (« Hazè-Hyjal » -> « Hazè »), comme dans le chat.
+        let who = c.sender.split('-').next().unwrap_or(&c.sender).trim();
+        Some(if who.is_empty() { msg } else { format!("{who} : {msg}") })
     }
 
     /// Clic dans la fenêtre des icônes de `frame` (pixels de l'image) : ligne et texte à copier.
@@ -1416,7 +1419,7 @@ impl Mirror {
         if shown {
             return false;
         }
-        self.held.push(Held { body: body.to_string(), sender: sender.to_string(), until: now + HOLD_MAX });
+        self.held.push(Held { body: body.to_string(), until: now + HOLD_MAX });
         self.dirty_all();
         true
     }
@@ -1455,19 +1458,19 @@ impl Mirror {
         true
     }
 
-    /// Une ligne attend-elle encore (traduction en cours, ou langue pas encore connue) ?
+    /// Une ligne attend-elle encore avant d'être dessinée ? On n'attend qu'un court instant
+    /// (`GRACE`) après l'arrivée de la ligne, le temps de laisser une traduction très rapide
+    /// s'afficher directement. Passé ce délai, la ligne s'affiche telle quelle — même si sa
+    /// traduction est encore en route — pour ne jamais laisser d'emplacement vide (illusion du
+    /// temps réel, 0.14.7) ; la traduction la remplace à son arrivée.
     fn waiting(&self, id: u16, now: Instant) -> bool {
         let Some(lt) = self.lines.get(&id) else { return false };
         if self.translations.iter().any(|t| line_has(&lt.text, &t.body, &t.sender)) {
             return false;
         }
-        if self.held.iter().any(|h| now < h.until && line_has(&lt.text, &h.body, &h.sender)) {
-            return true;
-        }
         if self.settled.iter().any(|(b, _)| lt.text.contains(b.as_str())) {
             return false;
         }
-        // Ligne neuve : on attend de savoir (sauf en mode démonstration ou calage).
         !self.demo && self.line_first.get(&id).is_some_and(|t| now.saturating_duration_since(*t) < GRACE)
     }
 
@@ -1911,12 +1914,12 @@ pub mod tests {
         let h = ups[0].hits[0];
         assert_eq!(h.line, 1);
         assert!(h.x > 60 && h.x < 200, "{h:?}");
-        // Clic sur l'icône : le message, sans l'heure ni le nom.
-        assert_eq!(m.hit(1, h.x + h.w / 2, h.y + h.h / 2), Some((1, "Guten Abend".to_string())));
+        // Clic sur l'icône : le nom de l'expéditeur (sans royaume) et le message, sans l'heure.
+        assert_eq!(m.hit(1, h.x + h.w / 2, h.y + h.h / 2), Some((1, "Hans : Guten Abend".to_string())));
         assert_eq!(m.hit(1, 0, 0), None);
-        // Traduit : c'est la traduction qui est copiée, sans l'acronyme.
+        // Traduit : c'est la traduction qui est copiée, sans l'acronyme, précédée du nom.
         m.set_translation("Guten Abend", "Hans-Ysondre", "[DE] Bonsoir", now);
-        assert_eq!(m.copy_text(1).as_deref(), Some("Bonsoir"));
+        assert_eq!(m.copy_text(1).as_deref(), Some("Hans : Bonsoir"));
         // Menu ouvert sur le chat : rien n'est dessiné dessous, l'icône n'est plus cliquable.
         let mut occ = vec![1u8];
         for v in [10u16, 20, 300, 80] {
@@ -2021,17 +2024,18 @@ pub mod tests {
         assert!(m.set_translation("Guten Abend zusammen", "Hans", "[DE] Bonsoir à tous", t0));
         assert!(m.hidden(&v, t0).is_empty());
         assert_eq!(m.text_for(2).unwrap().text, "[Hans] : [DE] Bonsoir à tous");
-        // Traduction lente : la ligne s'affiche telle quelle après 4 s, puis la traduction la
-        // remplace à son arrivée (0.12.4).
+        // Traduction qui tarde (0.14.7) : passé le court délai, la ligne s'affiche telle quelle
+        // (plus d'emplacement vide), et la traduction la remplace à son arrivée.
         m.on_line(4, "FFFFFF\u{1F}[Olga] : Всем привет");
         assert!(m.hold("Всем привет", "Olga", t0));
         let v = view(&[(4, 0), (3, 0), (2, 0), (1, 0)]);
+        // Tout de suite : la ligne neuve attend le court délai.
         assert_eq!(m.hidden(&v, t0), vec![4]);
-        let later = t0 + HOLD_MAX + Duration::from_millis(10);
-        m.tick(later);
-        assert!(m.hidden(&v, later).is_empty());
+        // Passé GRACE, mais bien avant toute traduction : la ligne s'affiche telle quelle.
+        let mid = t0 + GRACE + Duration::from_millis(50);
+        assert!(m.hidden(&v, mid).is_empty(), "emplacement laissé vide pendant la traduction");
         assert_eq!(m.text_for(4).unwrap().text, "[Olga] : Всем привет");
-        assert!(m.set_translation("Всем привет", "Olga", "[RU] Salut à tous", later));
+        assert!(m.set_translation("Всем привет", "Olga", "[RU] Salut à tous", mid));
         assert_eq!(m.text_for(4).unwrap().text, "[Olga] : [RU] Salut à tous");
         // Ligne neuve dont la langue n'est pas encore connue : elle attend un instant au plus.
         m.on_line(5, "FFFFFF\u{1F}Le Commerce est fermé");

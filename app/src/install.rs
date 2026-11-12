@@ -11,6 +11,8 @@ const CORE: &str = include_str!("../../addon/ChevaliersTranslators/Core.lua");
 const MIRROR: &str = include_str!("../../addon/ChevaliersTranslators/Mirror.lua");
 /// Logo de la liste des addons (TGA 64x64, ligne `## IconTexture` du .toc).
 const LOGO: &[u8] = include_bytes!("../../addon/ChevaliersTranslators/Media/Logo.tga");
+/// Bannière du guide d'installation (TGA 512x128).
+const BANNIERE: &[u8] = include_bytes!("../../addon/ChevaliersTranslators/Media/Banniere.tga");
 const ICON_TEXTURE: &str = "## IconTexture: Interface\\AddOns\\ChevaliersTranslators\\Media\\Logo\n";
 /// Licence et dépôt du code source (0.14.3, GPL-3.0), lignes du .toc.
 const TOC_SOURCE: &str = "## X-License: GPL-3.0-or-later\n## X-Website: https://github.com/Heaumite/chevaliers-translators\n";
@@ -503,6 +505,7 @@ pub fn install(root: &Path, only: Option<&str>, iface_override: Option<u32>) -> 
         let media = main.join("Media");
         fs::create_dir_all(&media).map_err(|e| format!("{} : {e}", media.display()))?;
         fs::write(media.join("Logo.tga"), LOGO).map_err(|e| format!("Logo.tga : {e}"))?;
+        fs::write(media.join("Banniere.tga"), BANNIERE).map_err(|e| format!("Banniere.tga : {e}"))?;
         // Raccourci de la phase 0, chargé d'office par le jeu s'il reste là : plus utilisé.
         let _ = fs::remove_file(main.join("Bindings.xml"));
         let main_toc = toc(

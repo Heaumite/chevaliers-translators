@@ -536,9 +536,11 @@ def mock(root, binary):
     subs = [e.button for e in menu.values() if e.button]
     print("Menu Trad :", titles, len(radios), "langues")
     assert titles[0] == "Langue du message envoyé", titles
-    assert radios[:7] == ["Automatique", "Français", "Anglais", "Allemand", "Espagnol", "Italien", "Russe"], radios
-    assert len(radios) == 24 and "Suédois" in radios and "Grec" in radios, radios
-    assert "Europe du Nord" in titles and not subs, "sous-menus : un clic de trop"
+    # 0.14.6 : régions en haut (Europe du Nord d'abord), langues courantes et mode automatique en bas.
+    assert radios[:4] == ["Suédois", "Norvégien", "Danois", "Finnois"], radios
+    assert radios[-7:] == ["Automatique", "Français", "Anglais", "Allemand", "Espagnol", "Italien", "Russe"], radios
+    assert len(radios) == 24 and "Grec" in radios, radios
+    assert titles[1] == "Europe du Nord" and titles[-1] == "Saisie : langue détectée automatiquement" and not subs, "sous-menus : un clic de trop"
     auto = [e for e in menu.values() if e.radio == "Automatique"][0]
     assert auto.sel() is True, "Automatique sélectionné par défaut"
     [e for e in menu.values() if e.radio == "Allemand"][0].set()
@@ -662,6 +664,25 @@ def mock(root, binary):
     assert g.ChatFrame1EditBox.ctTrad.text == "Trad:DE", "retour en automatique trop tôt"
     g.TICK(31)
     assert g.ChatFrame1EditBox.ctTrad.text == "Trad:AUTO", "pas de retour en automatique après 60 s"
+    # Maj+clic sur le bouton Trad : même effet que Maj+Entrée - traduit et envoie (0.14.7).
+    tbox = g.EDITBOX("salut tout le monde", "SAY", None)
+    tb.ctEditBox = tbox
+    g.SHIFT = True
+    tb.scripts["OnClick"](tb, "LeftButton")
+    assert tbox.text == "", "Maj+clic sur Trad : boîte non vidée"
+    out = app(frames_until_idle("majclic"))
+    assert "(SAY) : salut tout le monde" in out and "collage prêt" in out, out
+    tbox.text = "[→XX] salut tout le monde"
+    g.ChatFrame1EditBox.hooks["OnTextChanged"](tbox, True)
+    g.SIMULATE_SEND(tbox)
+    g.SHIFT = False
+    assert list(g.BLIZZ_SENT.values())[-1] == "SAY:nil:[→XX] salut tout le monde", list(g.BLIZZ_SENT.values())[-1]
+    s3_frames.extend(frames_until_idle("majclicsent"))
+    # Clic gauche simple (sans Maj) : rien n'est envoyé, c'est le choix de langue.
+    tb.ctEditBox = g.EDITBOX("ne pas envoyer", "SAY", None)
+    tb.scripts["OnClick"](tb, "LeftButton")
+    assert tb.ctEditBox.text == "ne pas envoyer", "clic simple a vidé la boîte"
+    tb.ctEditBox = g.ChatFrame1EditBox
     g.SLASH("lang de")
 
     # ---- S5 : chat miroir -------------------------------------------------------
@@ -946,8 +967,9 @@ def mock(root, binary):
     assert g.OFFICIAL_ALPHA() == 0, "écran de PC : texte du jeu non caché"
     # ---- Commandes du joueur (J1) : aide, on/off, langue ; outils de développement à part ------
     g.SLASH("")
-    helpmsg = list(g.LOG.values())[-3:]
+    helpmsg = list(g.LOG.values())[-4:]
     assert any("/chevaliers on | off" in m for m in helpmsg), helpmsg
+    assert any("/chevaliers guide" in m for m in helpmsg), "guide absent de l'aide"
     assert not any("essai" in m or "miroir" in m for m in helpmsg), "outils de développement dans l'aide"
     g.SLASH("dev")
     assert "miroir on|calage|off" in list(g.LOG.values())[-1], "/chevaliers dev"
@@ -960,7 +982,7 @@ def mock(root, binary):
     g.SLASH("langue it")
     assert g.ChevaliersTranslatorsDB.dest == "IT", f"/chevaliers langue it : {g.ChevaliersTranslatorsDB.dest}"
     g.SLASH("n'importe quoi")
-    assert any("/chevaliers on | off" in m for m in list(g.LOG.values())[-3:]), "commande inconnue : aide"
+    assert any("/chevaliers on | off" in m for m in list(g.LOG.values())[-4:]), "commande inconnue : aide"
     # Réponses à une proposition de modèle (0.14) : transmises à l'application.
     g.SLASH("monter")
     assert "proposé sera essayé hors combat" in list(g.LOG.values())[-1]

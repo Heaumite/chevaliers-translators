@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.14.5)
+# Chevaliers Translators (v0.14.7)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -75,7 +75,7 @@ proprement : `/chevaliers off`.
 | `/chevaliers tele auto` / `on` / `off` | dispositif télévision : selon l'écran vu par l'application (par défaut), forcé, coupé (0.14) |
 | `/chevaliers dev` | liste des outils de développement (test, ping, miroir, perf, essai...) |
 
-Maj+Entrée dans la boîte de saisie : la traduction est collée puis envoyée (Ctrl+V et Entrée
+Maj+Entrée dans la boîte de saisie — ou **Maj+clic sur le bouton Trad** (0.14.7) : la traduction est collée puis envoyée (Ctrl+V et Entrée
 simulés seulement dans ce cas). Entrée seule envoie ton texte tel quel.
 
 ### Présence de l'application (0.13.1)
@@ -94,6 +94,30 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.14.7 (12/11/2026)
+
+- **Traduire et envoyer en un clic** : Maj+clic sur le bouton Trad fait la même chose que
+  Maj+Entrée dans la boîte de saisie (le texte part à la traduction, l'application le colle traduit
+  et l'envoie). L'infobulle du bouton le rappelle : « Traduire et envoyer… : Maj+Entrée ou Maj+clic
+  ici. »
+- **Plus d'emplacement vide pendant la traduction** : quand une traduction met un peu de temps, la
+  ligne s'affiche aussitôt telle quelle (texte d'origine) au lieu de laisser un trou qui faisait
+  penser à un bug ; la traduction la remplace à son arrivée. L'attente avant d'afficher est ramenée
+  à un court instant (le temps de laisser une traduction très rapide s'afficher directement).
+
+## 0.14.6 (12/11/2026)
+
+- **Menu de langues (bouton Trad) réordonné** : les régions sont en haut (Europe du Nord d'abord),
+  les langues courantes et le mode automatique (Automatique, Français, Anglais, Allemand, Espagnol,
+  Italien, Russe) en bas.
+- **Copie du chat avec le nom** : l'icône de copie au bout d'un message copie désormais le nom du
+  joueur puis le message (« Hazè : bonjour »), sans l'heure, le canal ni l'acronyme de langue.
+- **Guide d'installation en jeu** : à la première utilisation de l'addon (et par `/chevaliers
+  guide`), un petit panneau avec la bannière et le logo rappelle où se trouve l'application
+  compagnon (`ChevaliersTranslators.exe`, dans le dossier de l'addon), comment la lancer, et qu'elle
+  n'est pas encore signée (demande en cours auprès de la SignPath Foundation), avec le lien du
+  dépôt. Il se ferme par la croix ou au bout de 60 s. Bannière ajoutée à `Media/Banniere.tga`.
 
 ## 0.14.5 (12/11/2026) : phrases entières
 
@@ -291,13 +315,13 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.5.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.7.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.14.5)
+## Vérifié avant livraison (0.14.7)
 
 - 117 tests Rust sous Linux (116 sous Windows) : dont, en 0.14.4, les lignes du jeu plus hautes
   (icône) qui gardent les messages des joueurs à leur place ; en 0.14.3, la règle de la première
@@ -315,7 +339,9 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   immobile au repos ; valeurs secrètes jamais testées avant contrôle (relecture des sources, et
   absence et instance secrètes en champ de bataille) ; ligne plus haute chez WoW signalée à
   l'application ; toutes les lignes lisibles cachées et envoyées, celles du jeu sans être
-  recopiées au journal (0.14.5) ; réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
+  recopiées au journal (0.14.5) ; menu de langues réordonné et aide citant le guide (0.14.6) ;
+  Maj+clic sur Trad qui traduit et envoie, et ligne affichée sans attendre sa traduction (0.14.7) ;
+  réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
   `/chevaliers tele off` puis `auto` ; retour à l'écran de PC (texte caché).
@@ -324,14 +350,14 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
 
-## Test de la 0.14.5 (PowerShell)
+## Test de la 0.14.7 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
 | Lancement | aucune console ; médaillon près de l'horloge et sur l'exécutable ; infobulle « En attente de World of Warcraft » |
-| Installation | journal : addon 0.14.5 posé dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Installation | journal : addon 0.14.7 posé dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
 | Téléchargements | infobulle de l'icône : pourcentage ; WoW ouvert : « débit bridé » ; à la fin : bulle « Modèles de traduction prêts » |
 | Télévision | WoW sur la télé : « Écran de télévision » à la connexion ; chat traduit sur plaque sombre ; `/chevaliers tele off` le cache comme sur un écran de PC |
 | Combat | rien de dessiné pendant le combat ; à la fin, chat traduit et bilan |

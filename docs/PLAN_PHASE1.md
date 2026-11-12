@@ -93,6 +93,18 @@ Actions le 11/11).
 jeu : choix « tout redessiner » ; les lignes du jeu lisibles sont redessinées aussi (sans
 traduction), la traduction prend sa place et les anciennes remontent ; seules les lignes secrètes
 restent à WoW.
+**0.14.6 (12/11)** : menu de langues réordonné (régions en haut, courantes en bas) ; copie du chat
+avec le nom du joueur ; guide d'installation en jeu (panneau bannière + logo, 60 s, `/chevaliers
+guide`) renvoyant au dépôt et signalant l'application non encore signée.
+**0.14.7 (12/11)** : Maj+clic sur le bouton Trad = Maj+Entrée (traduire et envoyer), infobulle mise
+à jour ; plus d'emplacement vide pendant la traduction (la ligne s'affiche tout de suite telle
+quelle, la traduction la remplace à son arrivée).
+**À faire (demandé le 12/11)** : (a) capturer plusieurs instances de WoW à la fois et traduire chacune
+(file de traduction partagée) - gros changement de la capture, du miroir et des fenêtres superposées,
+à faire comme jalon à part, testé en jeu, sans risquer le fonctionnement mono-instance actuel. (b) Traduire les bulles de discussion au-dessus des personnages (avec
+l'acronyme) : texte en jeu, mobile ; l'application devrait le dessiner par-dessus le jeu à partir
+de rectangles signalés par l'addon - autre travail de fenêtre superposée, à faire comme jalon à
+part, testé en jeu. (a) et (b) touchent le même cœur capture/superposition.
 **0.15** : mises à jour des modèles suivies sur Hugging Face, vérifiées WoW fermé puis essayées
 pendant une absence (AFK) avant d'être proposées.
 
