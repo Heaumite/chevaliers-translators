@@ -33,6 +33,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 pub const TITLE: &str = "Chevaliers Translators";
 
 const WM_TRAY: u32 = WM_APP + 1;
+/// Envoyé par un second lancement de l'application (raccourci du bureau, double-clic) : la
+/// fenêtre des modèles s'ouvre (0.15).
+const WM_OPEN_MODELS: u32 = WM_APP + 2;
+/// Classe de la fenêtre cachée de l'icône (retrouvée par un second lancement).
+const CLASS: &str = "ChevaliersTranslatorsIcone";
 /// Numéro du groupe d'icônes de l'exécutable (build.rs).
 const ICON_ID: usize = 1;
 const CMD_INTERFACE: usize = 1;
@@ -83,7 +88,7 @@ pub struct Tray {
 
 impl Tray {
     pub fn new(status: &str) -> Result<Tray, String> {
-        let class = wide("ChevaliersTranslatorsIcone");
+        let class = wide(CLASS);
         unsafe {
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
@@ -190,6 +195,11 @@ impl Tray {
         }
     }
 
+    /// Fenêtre des modèles : ouverte, ou ramenée devant si elle l'est déjà.
+    pub fn open_models() {
+        open_interface();
+    }
+
     pub fn set_journal(path: PathBuf) {
         *JOURNAL.lock().unwrap() = Some(path);
     }
@@ -278,9 +288,62 @@ fn make_icon() -> HICON {
     }
 }
 
+/// Application déjà lancée (second lancement) : sa fenêtre des modèles s'ouvre. Faux si
+/// l'application lancée n'a pas été trouvée.
+pub fn ask_running_to_open_models() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, FindWindowW, ASFW_ANY};
+    let class = wide(CLASS);
+    unsafe {
+        let h = FindWindowW(class.as_ptr(), null());
+        if h.is_null() {
+            return false;
+        }
+        // Lancée par le joueur, cette instance a le droit de passer une fenêtre devant : elle le
+        // cède à l'application déjà lancée (puis à sa fenêtre des modèles).
+        AllowSetForegroundWindow(ASFW_ANY);
+        PostMessageW(h, WM_OPEN_MODELS, 0, 0) != 0
+    }
+}
+
+/// Fenêtre visible d'un processus, mise au premier plan (restaurée si réduite).
+fn bring_process_to_front(pid: u32) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, ShowWindow, SW_RESTORE,
+    };
+    struct Find {
+        pid: u32,
+        found: HWND,
+    }
+    unsafe extern "system" fn cb(h: HWND, lp: LPARAM) -> windows_sys::core::BOOL {
+        let f = &mut *(lp as *mut Find);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, &mut pid);
+        if pid == f.pid && IsWindowVisible(h) != 0 {
+            f.found = h;
+            return 0;
+        }
+        1
+    }
+    let mut f = Find { pid, found: null_mut() };
+    unsafe {
+        EnumWindows(Some(cb), &mut f as *mut Find as LPARAM);
+        if f.found.is_null() {
+            return false;
+        }
+        if IsIconic(f.found) != 0 {
+            ShowWindow(f.found, SW_RESTORE);
+        }
+        SetForegroundWindow(f.found) != 0
+    }
+}
+
 fn open_interface() {
-    let busy = UI.with(|u| u.borrow_mut().as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None))));
-    if busy {
+    let running = UI.with(|u| {
+        u.borrow_mut().as_mut().and_then(|c| matches!(c.try_wait(), Ok(None)).then(|| c.id()))
+    });
+    if let Some(pid) = running {
+        // Déjà ouverte : ramenée devant au lieu d'une seconde fenêtre.
+        bring_process_to_front(pid);
         return;
     }
     match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).arg("interface").spawn()) {
@@ -384,6 +447,10 @@ fn show_menu(hwnd: HWND) {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if msg == WM_OPEN_MODELS {
+        open_interface();
+        return 0;
+    }
     if msg == WM_TRAY {
         let event = (lp & 0xffff) as u32;
         if event == WM_RBUTTONUP || event == WM_LBUTTONUP {

@@ -116,7 +116,8 @@ impl Translator for Engine {
 
 // --- Contexte du joueur (addon 0.13.3) ---------------------------------------------------------
 
-static CONTEXT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// Contexte de chaque jeu ouvert (0.15 : plusieurs à la fois), par numéro de jeu.
+static CONTEXTS: std::sync::Mutex<Vec<(usize, u8, u8)>> = std::sync::Mutex::new(Vec::new());
 pub const CTX_COMBAT: u8 = 1;
 pub const CTX_INSTANCE: u8 = 2;
 pub const CTX_RAID: u8 = 4;
@@ -126,26 +127,53 @@ pub const CTX_LOCKED: u8 = 16;
 /// Contexte reçu de l'addon : combat, instance, raid, absence, chat verrouillé. Reçu une fois :
 /// le joueur est en jeu (le premier modèle est choisi d'après la mémoire vidéo d'alors).
 pub fn set_context(c: u8) {
-    CONTEXT.store(c, std::sync::atomic::Ordering::Relaxed);
+    set_context_of(0, c);
+}
+
+/// Contexte d'un des jeux ouverts (0.15) : le moteur voit l'union de tous (un jeu en combat
+/// suffit à retenir les bascules de modèle).
+pub fn set_context_of(game: usize, c: u8) {
+    if let Ok(mut v) = CONTEXTS.lock() {
+        match v.iter_mut().find(|e| e.0 == game) {
+            Some(e) => e.1 = c,
+            None => v.push((game, c, 0)),
+        }
+    }
     IN_WORLD.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Jeu fermé : son contexte ne compte plus.
+pub fn forget_game(game: usize) {
+    if let Ok(mut v) = CONTEXTS.lock() {
+        v.retain(|e| e.0 != game);
+    }
 }
 
 static IN_WORLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Réglages graphiques de WoW (addon 0.14.2) : numéro changé par l'addon à chaque réglage
 /// graphique modifié dans le jeu (0 : connexion ou /reload).
-static GFX: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
 pub fn set_gfx(g: u8) {
-    GFX.store(g, std::sync::atomic::Ordering::Relaxed);
+    set_gfx_of(0, g);
+}
+
+/// Réglages graphiques d'un des jeux ouverts : le numéro vu par le moteur change dès que l'un
+/// d'eux change.
+pub fn set_gfx_of(game: usize, g: u8) {
+    if let Ok(mut v) = CONTEXTS.lock() {
+        match v.iter_mut().find(|e| e.0 == game) {
+            Some(e) => e.2 = g,
+            None => v.push((game, 0, g)),
+        }
+    }
 }
 
 fn gfx() -> u8 {
-    GFX.load(std::sync::atomic::Ordering::Relaxed)
+    CONTEXTS.lock().map(|v| v.iter().fold(0u8, |a, e| a.wrapping_add(e.2))).unwrap_or(0)
 }
 
 pub fn context() -> u8 {
-    CONTEXT.load(std::sync::atomic::Ordering::Relaxed)
+    CONTEXTS.lock().map(|v| v.iter().fold(0u8, |a, e| a | e.1)).unwrap_or(0)
 }
 
 // --- Commandes (0.14) : téléchargements finis, propositions acceptées ou écartées --------------
@@ -479,13 +507,44 @@ fn launch(cfg: &Config, plan: &Plan, pos: usize) -> Result<Running, (Failure, St
     let c = plan.step(pos).ok_or((Failure::Crash, "étape inconnue".to_string()))?;
     let model = cfg.models.join(c.model.file);
     let exe = server_exe(c.place).ok_or((Failure::Crash, "moteur llama.cpp absent (installation --telecharger)".to_string()))?;
+    let mut tuning = crate::llama::Tuning::gentle();
+    // Cache 8 bits déjà refusé par ce moteur (0.15) : plus essayé.
+    let refused = catalog::runtime_dir().join("cache-8bits-refuse.txt");
+    let exe_key = exe.to_string_lossy().to_lowercase();
+    if std::fs::read_to_string(&refused).is_ok_and(|t| t.lines().any(|l| l.trim() == exe_key)) {
+        tuning.kv_cache_8bit = false;
+    }
+    match start_server(cfg, &exe, &model, c, plan, &tuning, pos) {
+        // Moteur qui refuse le cache 8 bits (attention « flash » indisponible) : relancé sans, et
+        // retenu pour les prochaines fois. Ce n'est pas un échec du modèle.
+        Err((Failure::Memory, why)) if tuning.kv_cache_8bit && crate::llama::kv_refused(&std::fs::read_to_string(&cfg.log).unwrap_or_default()) => {
+            crate::say!("[traduction] cache 8 bits refusé par ce moteur ({why}) : relance avec le cache ordinaire");
+            let mut list = std::fs::read_to_string(&refused).unwrap_or_default();
+            list.push_str(&exe_key);
+            list.push('\n');
+            let _ = std::fs::write(&refused, list);
+            tuning.kv_cache_8bit = false;
+            start_server(cfg, &exe, &model, c, plan, &tuning, pos)
+        }
+        r => r,
+    }
+}
+
+fn start_server(
+    cfg: &Config,
+    exe: &Path,
+    model: &Path,
+    c: &Candidate,
+    plan: &Plan,
+    tuning: &crate::llama::Tuning,
+    pos: usize,
+) -> Result<Running, (Failure, String)> {
     let log = std::fs::File::create(&cfg.log).map_err(|e| (Failure::Crash, format!("{} : {e}", cfg.log.display())))?;
-    let tuning = crate::llama::Tuning::gentle();
-    let l = crate::llama::Launch { exe: &exe, model: &model, port: cfg.port, place: c.place, threads: plan.threads, tuning: &tuning };
+    let l = crate::llama::Launch { exe, model, port: cfg.port, place: c.place, threads: plan.threads, tuning };
     let child = crate::llama::spawn(&l, log).map_err(|e| (Failure::Crash, e))?;
     let mut r = Running {
         child,
-        srv: Server { port: cfg.port, format: Format::guess(&model), bursts: (c.place == Place::Gpu).then(Bursts::gentle) },
+        srv: Server { port: cfg.port, format: Format::guess(model), bursts: (c.place == Place::Gpu).then(Bursts::gentle) },
         pos,
         gap: c.min_gap(),
         quality: c.model.quality,
@@ -506,7 +565,7 @@ fn launch(cfg: &Config, plan: &Plan, pos: usize) -> Result<Running, (Failure, St
         std::thread::sleep(Duration::from_millis(300));
     }
     if c.place == Place::Gpu {
-        let _ = crate::llama::apply_priority(r.child.id(), c.place, &tuning);
+        let _ = crate::llama::apply_priority(r.child.id(), c.place, tuning);
         // Carte saturée une fois le modèle chargé (0.14.2 : seuil de saturation, plus de réserve).
         if let Some((_, free)) = bench::vram_now() {
             if free < bench::saturation_now() {

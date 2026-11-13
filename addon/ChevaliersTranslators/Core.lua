@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.14.8"
+CT.VERSION = "0.15.0"
 
 local floor = math.floor
 local format = string.format
@@ -217,7 +217,16 @@ local function EnqueueLow(ftype, payload, len, tag)
   low[ltail] = { t = ftype, p = payload, n = len, tag = tag, at = GetTime() }
 end
 
--- Partagés avec Mirror.lua.
+-- Trames « dernier état » (0.15, bulles de dialogue) : une seule en attente par type, la plus
+-- récente remplaçant l'ancienne ; elles passent après la file prioritaire, au plus une toutes les
+-- LATEST_GAP secondes (le reste du temps, le chat continue de passer).
+local LATEST_GAP = 0.1
+local latest, latestAt = {}, -10
+function CT.SetLatest(ftype, payload, len)
+  latest[ftype] = { t = ftype, p = payload, n = len }
+end
+
+-- Partagés avec Mirror.lua et Bubbles.lua.
 CT.Print, CT.InLockdown, CT.MaxPayload, CT.Enqueue = Print, InLockdown, MaxPayload, Enqueue
 
 local aliveBuf, waitBuf = { 1, 0, 0 }, { 0 }
@@ -243,6 +252,12 @@ local function NextItem()
     local item = prio[phead]
     prio[phead] = nil
     phead = phead + 1
+    return Stamp(item)
+  end
+  if next(latest) and GetTime() - latestAt >= LATEST_GAP then
+    local t, item = next(latest)
+    latest[t] = nil
+    latestAt = GetTime()
     return Stamp(item)
   end
   if qhead <= qtail then
@@ -558,6 +573,8 @@ Relay = function(event, late, text, sender, ...)
     if CT.Mirror and CT.Mirror.NoteChat then CT.Mirror:NoteChat(msgId, text) end
     return true
   end
+  -- Bulle de dialogue qui affichera ce message : retrouvée par son texte (0.15).
+  if CT.Bubbles then CT.Bubbles:Note(msgId, event, text, own or INFORM[event]) end
   if shown then
     CT.ChatFragments(msgId, code, sender, text, MaxPayload(),
       function(p, len) Enqueue(CT.FRAME_CHAT, p, len) end)
@@ -1210,97 +1227,14 @@ local function CmdTest(a, b)
 end
 
 -- Commandes du joueur, et outils de développement (tests de la phase 0) acceptés tels quels mais
--- absents de l'aide, listés par « /chevaliers dev ».
--- Guide d'installation (0.14.6) : petit panneau affiché une fois, à la première utilisation de
--- l'addon (et par /chevaliers guide), avec la bannière et le logo. Il dit où se trouve
--- l'application compagnon et comment la lancer. Fermeture par la croix ou au bout de 60 s.
-local MEDIA = "Interface\\AddOns\\ChevaliersTranslators\\Media\\"
-local GUIDE_TEXT =
-  "Bienvenue dans Chevaliers Translators !\n\n" ..
-  "L'addon affiche le bandeau en bas de l'écran ; c'est l'application compagnon qui traduit le " ..
-  "chat, sur ton PC (aucun serveur en ligne).\n\n" ..
-  "|cffe6c77e1.|r L'application se trouve dans le dossier de l'addon : " ..
-  "|cffffffffChevaliersTranslators.exe|r. Double-clique dessus pour la lancer.\n" ..
-  "|cffe6c77e2.|r Lance ensuite World of Warcraft : la traduction démarre à la connexion du " ..
-  "personnage (si l'application a été lancée après, fais /reload).\n\n" ..
-  "L'application n'est pas encore signée numériquement (une demande est en cours auprès de la " ..
-  "SignPath Foundation) : Windows peut la présenter comme venant d'un éditeur inconnu. Le code " ..
-  "est ouvert et vérifiable :\n|cff79b8ffgithub.com/Heaumite/chevaliers-translators|r\n\n" ..
-  "Tu peux revoir ce guide avec |cffe6c77e/chevaliers guide|r."
-
-local guideFrame
-local function BuildGuide()
-  if guideFrame then return guideFrame end
-  local f = CreateFrame("Frame", "ChevaliersTranslatorsGuide", UIParent)
-  f:SetFrameStrata("DIALOG")
-  f:SetSize(500, 420)
-  f:SetPoint("CENTER")
-  f:EnableMouse(true)
-  pcall(f.SetClampedToScreen, f, true)
-  if f.SetMovable then
-    f:SetMovable(true)
-    pcall(f.RegisterForDrag, f, "LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-  end
-  -- Fond sombre et cadre or (couleurs unies : pas de dépendance aux modèles de cadre du jeu).
-  local bg = f:CreateTexture(nil, "BACKGROUND")
-  bg:SetAllPoints(f)
-  bg:SetColorTexture(0.055, 0.051, 0.039, 0.97)
-  for _, s in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-    local e = f:CreateTexture(nil, "BORDER")
-    e:SetColorTexture(0.788, 0.647, 0.353, 1)
-    if s == "TOP" then e:SetPoint("TOPLEFT"); e:SetPoint("TOPRIGHT"); e:SetHeight(2)
-    elseif s == "BOTTOM" then e:SetPoint("BOTTOMLEFT"); e:SetPoint("BOTTOMRIGHT"); e:SetHeight(2)
-    elseif s == "LEFT" then e:SetPoint("TOPLEFT"); e:SetPoint("BOTTOMLEFT"); e:SetWidth(2)
-    else e:SetPoint("TOPRIGHT"); e:SetPoint("BOTTOMRIGHT"); e:SetWidth(2) end
-  end
-  -- Bannière de l'addon en haut.
-  local ban = f:CreateTexture(nil, "ARTWORK")
-  ban:SetPoint("TOP", f, "TOP", 0, -8)
-  ban:SetSize(468, 117)
-  ban:SetTexture(MEDIA .. "Banniere")
-  -- Logo et titre.
-  local logo = f:CreateTexture(nil, "ARTWORK")
-  logo:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -134)
-  logo:SetSize(40, 40)
-  logo:SetTexture(MEDIA .. "Logo")
-  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
-  title:SetText("Guide d'installation")
-  -- Croix de fermeture.
-  local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
-  -- Texte du guide.
-  local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  body:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -186)
-  body:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
-  body:SetJustifyH("LEFT")
-  body:SetJustifyV("TOP")
-  pcall(body.SetSpacing, body, 3)
-  body:SetText(GUIDE_TEXT)
-  -- Fermeture automatique au bout de 60 s après l'affichage.
-  f:SetScript("OnShow", function(self) self.hideAt = GetTime() + 60 end)
-  f:SetScript("OnUpdate", function(self)
-    if self.hideAt and GetTime() >= self.hideAt then self.hideAt = nil self:Hide() end
-  end)
-  guideFrame = f
-  return f
-end
-
-local function ShowGuide()
-  if ChevaliersTranslatorsDB then ChevaliersTranslatorsDB.guideSeen = true end
-  local ok, f = pcall(BuildGuide)
-  if ok and f then f:Show() end
-end
-CT.ShowGuide = ShowGuide
-
+-- absents de l'aide, listés par « /chevaliers dev ». Le guide d'installation est dans Guide.lua
+-- (CT.ShowGuide).
 local function Help()
   Print("Commandes : /chevaliers on | off (traduction du chat), langue auto | xx (langue de l'envoi " ..
     "traduit, aussi le bouton Trad), info (état), diag (rapport recopié dans le journal de l'application).")
   Print("Envoi traduit : Maj+Entrée dans la boîte de saisie. Entrée seule envoie ton texte tel quel.")
   Print("Proposition d'un modèle supérieur (panneau sur l'écran) : /chevaliers monter pour l'essayer, /chevaliers non pour ne plus le proposer.")
-  Print("Guide d'installation de l'application : /chevaliers guide.")
+  Print("Guide d'installation de l'application : /chevaliers guide. Bulles de dialogue traduites : /chevaliers bulles on | off.")
 end
 
 local function DevHelp()
@@ -1338,7 +1272,9 @@ SlashCmdList.CHEVALIERS = function(msg)
   elseif cmd == "info" then
     CmdInfo()
   elseif cmd == "guide" then
-    ShowGuide()
+    CT.ShowGuide()
+  elseif cmd == "bulles" or cmd == "bulle" then
+    if CT.Bubbles then CT.Bubbles:Command(a) end
   elseif cmd == "tele" or cmd == "télé" then
     a = (a or ""):lower()
     if a == "auto" or a == "on" or a == "off" then
@@ -1466,7 +1402,7 @@ boot:SetScript("OnEvent", function(self, event)
     -- Première utilisation : guide d'installation affiché une fois, peu après la connexion (pas
     -- pendant l'écran de chargement). C_Timer absent (hors jeu) : pas de guide.
     if not ChevaliersTranslatorsDB.guideSeen and C_Timer and C_Timer.After then
-      C_Timer.After(3, function() pcall(ShowGuide) end)
+      C_Timer.After(3, function() pcall(CT.ShowGuide) end)
     end
     if ChevaliersTranslatorsDB.tradOff then
       Print("Prêt - traduction du chat coupée (/chevaliers on pour la remettre).")

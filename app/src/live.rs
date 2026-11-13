@@ -26,6 +26,7 @@ use crate::proto::{
 };
 
 /// D'où viennent les polices du chat miroir.
+#[derive(Clone, Debug)]
 pub enum FontSource {
     /// Archives du jeu (avec cache local) : `--wow` et `--flavor`.
     Game { wow: PathBuf, flavor: String },
@@ -168,7 +169,7 @@ fn channel_codes(chat_type: &str, target: &str) -> Vec<u8> {
 /// Panneau du bilan d'un combat : traductions des messages reçus pendant le verrouillage du chat
 /// (les 12 derniers).
 #[cfg_attr(not(windows), allow(dead_code))]
-fn digest_rows(items: &[(String, String)]) -> Vec<crate::panel::Row> {
+pub(crate) fn digest_rows(items: &[(String, String)]) -> Vec<crate::panel::Row> {
     let mut rows = vec![crate::panel::Row {
         text: format!("Pendant le combat : {} message(s) traduit(s)", items.len()),
         color: crate::panel::TITLE,
@@ -310,6 +311,8 @@ fn resolve_cites(text: &str, bodies: &HashMap<u16, (String, Instant)>) -> Option
 }
 
 pub struct Live {
+    /// Numéro du jeu traduit (0.15 : plusieurs fenêtres de WoW à la fois ; 0 pour un seul).
+    pub game: usize,
     /// Contexte du joueur (addon 0.13.3) : 1 combat, 2 instance, 4 raid, 8 absent, 16 chat
     /// verrouillé.
     pub ctx: u8,
@@ -355,6 +358,8 @@ pub struct Live {
     /// Lignes qui citaient un message jamais arrivé (attendent leur renvoi complet).
     cites_lost: usize,
     icons_seen: usize,
+    /// Premières bulles de dialogue reçues (dit une fois au journal).
+    bubbles_said: Option<Instant>,
 }
 
 impl Default for Live {
@@ -368,6 +373,7 @@ impl Live {
     pub fn new(addons: Option<PathBuf>) -> Self {
         let now = Instant::now();
         Live {
+            game: 0,
             test: TestStats {
                 seen: vec![false; 65536],
                 ..Default::default()
@@ -405,6 +411,7 @@ impl Live {
             bodies: HashMap::new(),
             cites_lost: 0,
             icons_seen: 0,
+            bubbles_said: None,
         }
     }
 
@@ -624,6 +631,26 @@ impl Live {
                     self.occluded = n > 0;
                 }
             }
+            crate::proto::FRAME_BUBBLE => match mirror::bulles::parse(&f.payload) {
+                Ok((list, font)) => {
+                    if let Some(m) = self.mirror.as_mut() {
+                        let n = list.len();
+                        let list: Vec<_> = list
+                            .into_iter()
+                            .map(|s| {
+                                let body = self.bodies.get(&s.id).map(|(b, _)| b.clone());
+                                (s, body)
+                            })
+                            .collect();
+                        if n > 0 && self.bubbles_said.is_none() {
+                            self.bubbles_said = Some(now);
+                            crate::say!("[bulles] {n} bulle(s) de dialogue au-dessus des joueurs : traduction posée dessus");
+                        }
+                        m.on_bubbles(list, font, now);
+                    }
+                }
+                Err(e) => crate::say!("[bulles] trame illisible : {e}"),
+            },
             FRAME_NOTE => crate::say!("[addon] {}", String::from_utf8_lossy(&f.payload)),
             crate::proto::FRAME_ICON => match crate::icons::on_frame(&f.payload) {
                 Ok(s) => {
@@ -661,7 +688,7 @@ impl Live {
                             );
                         }
                         self.ctx = c;
-                        crate::engine::set_context(c);
+                        crate::engine::set_context_of(self.game, c);
                     }
                     // Réglages graphiques de WoW (addon 0.14.2) : numéro changé à chaque réglage
                     // modifié ; le moteur réévalue la place du modèle dans la mémoire vidéo.
@@ -670,7 +697,7 @@ impl Live {
                             crate::say!("[contexte] réglages graphiques de WoW modifiés");
                         }
                         self.gfx = g;
-                        crate::engine::set_gfx(g);
+                        crate::engine::set_gfx_of(self.game, g);
                     }
                 }
             },
@@ -1325,6 +1352,8 @@ impl Live {
 #[cfg_attr(not(windows), allow(dead_code))]
 pub const ALIVE_TIMEOUT: Duration = Duration::from_millis(1200);
 
+/// Traduction d'un seul jeu, la fenêtre de WoW trouvée (outils de développement) ; l'application
+/// traduit toutes les fenêtres de WoW ouvertes (`jeux_win::run_games`, 0.15).
 #[cfg(windows)]
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -1338,395 +1367,10 @@ pub fn run(
     tr: Option<(crate::engine::Config, &'static str, bool)>,
     keep: &mut dyn FnMut() -> bool,
 ) -> Result<(), String> {
-    use crate::overlay_win::Overlay;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    // Fin de la boucle (`keep` renvoie faux : Quitter, WoW fermé ou lancé dans une autre version,
-    // ou erreur) : le fil de capture s'arrête aussi.
-    struct Stop(Arc<AtomicBool>);
-    impl Drop for Stop {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::Relaxed);
-        }
-    }
-    let stop = Stop(Arc::new(AtomicBool::new(false)));
-    let stopped = stop.0.clone();
-    // Capture et décodage du bandeau dans leur propre fil (0.12.3) : le dessin du miroir, long sous
-    // un chat très actif, ne fait plus manquer de trames (chacune ne reste que 50 ms à l'écran).
-    let (cap_tx, cap_rx) = std::sync::mpsc::channel::<Result<Result<Decoded, DecodeError>, String>>();
-    let (dims_tx, dims_rx) = std::sync::mpsc::sync_channel::<Result<(i32, i32, usize, usize), String>>(1);
-    std::thread::spawn(move || {
-        let mut cap = match crate::capture_win::Capturer::new(width, height) {
-            Ok(c) => {
-                let _ = dims_tx.send(Ok((c.screen_w, c.screen_h, c.w, c.h)));
-                c
-            }
-            Err(e) => {
-                let _ = dims_tx.send(Err(e));
-                return;
-            }
-        };
-        // Seuls les changements partent : une même trame reste plusieurs captures à l'écran.
-        let mut last: Option<Result<(u8, u16, usize), DecodeError>> = None;
-        let mut resent = Instant::now();
-        while !stopped.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(poll_ms));
-            let (w, h) = (cap.w, cap.h);
-            let r = match cap.grab() {
-                Ok(buf) => crate::decode::decode(&Image { w, h, stride: w * 4, bgra: buf }),
-                Err(e) => {
-                    let _ = cap_tx.send(Err(e));
-                    return;
-                }
-            };
-            let sig = r.as_ref().map(|d| (d.frame.ftype, d.frame.seq, d.frame.payload.len())).map_err(|e| *e);
-            // Bandeau immobile (addon 0.13.3) : la même trame lisible est renvoyée toutes les
-            // 300 ms, signe que le jeu est toujours là.
-            let still = sig.is_ok() && last.as_ref() == Some(&sig) && resent.elapsed() >= Duration::from_millis(300);
-            if last.as_ref() != Some(&sig) || still {
-                last = Some(sig);
-                resent = Instant::now();
-                if cap_tx.send(Ok(r)).is_err() {
-                    return;
-                }
-            }
-        }
-    });
-    // Jamais d'attente sans fin : une capture qui ne démarre pas devient une erreur (nouvel essai
-    // dans 5 s, bulle), au lieu d'une application figée sans présence ni chat traduit.
-    let (screen_w, screen_h, cap_w, cap_h) = match dims_rx.recv_timeout(Duration::from_secs(10)) {
-        Ok(r) => r?,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return Err("capture du bandeau bloquée au démarrage".into()),
-        Err(_) => return Err("fil de capture arrêté".into()),
-    };
-    crate::say!(
-        "Décodeur en écoute : écran {}x{}, zone {}x{} px en bas à droite, capture toutes les {} ms.",
-        screen_w, screen_h, cap_w, cap_h, poll_ms
-    );
-    match &addons {
-        Some(d) => crate::say!("Présence de l'application écrite dans {} (ChevaliersTranslators_Live) : la traduction démarre seule à la connexion.", d.display()),
-        None => crate::say!("Sans --wow et --flavor : la traduction ne démarre pas seule (en jeu : /chevaliers on)."),
-    }
-    let mut live = Live::new(addons);
-    live.enable_mirror(fonts, demo, opts);
-    match tr {
-        Some((cfg, client, own_too)) => {
-            crate::say!(
-                "Traduction : vers {} (langue du client) ; modèle choisi par l'estimation, chargement en cours. Journal du serveur : {}",
-                client.to_uppercase(),
-                cfg.log.display()
-            );
-            if !own_too {
-                crate::say!("Tes propres messages ne sont pas traduits (--sans-mes-messages).");
-            }
-            live.enable_translation(Box::new(crate::engine::Engine::start(cfg)), client, own_too);
-        }
-        None => crate::say!("Traduction : simulée ([→XX] devant le texte, --sans-traduction ou --demo-trad)"),
-    }
-    let mut overlay = Overlay::new()?;
-    if let (Some(open), Some(dir)) = (crate::capture_win::wow_flavor(), live.addons_dir()) {
-        let asked = dir.parent().and_then(|p| p.parent()).and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
-        if asked.as_deref().is_some_and(|a| a != open) {
-            crate::say!(
-                "ATTENTION : WoW ouvert en {open}, application lancée pour {} : polices et choix du modèle de {} (relancer avec --flavor {open}).",
-                asked.as_deref().unwrap_or("?"),
-                asked.as_deref().unwrap_or("?")
-            );
-        }
-    }
-    crate::say!("En jeu : la traduction démarre seule à la connexion (WoW déjà ouvert : /reload). Maj+Entrée : envoi traduit.");
-    // Panneau « /reload » posé sur le jeu quand l'addon attend l'application.
-    const HINT: u8 = 251;
-    const DIGEST: u8 = 250;
-    const PROPOSAL: u8 = 249;
-    const DOWNLOADS: u8 = 248;
-    let mut proposal_until: Option<Instant> = None;
-    let mut downloads_until: Option<Instant> = None;
-    let mut downloads_said = false;
-    let mut game_since: Option<Instant> = None;
-    let mut screen_info: Option<String> = None;
-    let mut screen_checked = Instant::now() - Duration::from_secs(10);
-    let mut digest_until: Option<Instant> = None;
-    let mut hint_fonts: Option<crate::panel::Fonts> = None;
-    let mut hint_until: Option<Instant> = None;
-    let mut hint_last: Option<Instant> = None;
-    let mut last_raise = Instant::now();
-    let mut last_tick = Instant::now();
-    let mut last_presence: Option<Instant> = None;
-    let mut overlay_error = false;
-    // Presse-papiers du joueur remis après un collage : (moment, contenu d'avant, texte collé).
-    let mut restore: Option<(Instant, Option<String>, String)> = None;
-    // Le miroir ne s'affiche que par-dessus WoW : caché dès qu'une autre fenêtre est active.
-    let mut wow_front = true;
-    let mut combat_seen = false;
-    loop {
-        // Trames décodées par le fil de capture (attente courte : fenêtres et collages restent vifs).
-        let mut got: Vec<Result<Decoded, DecodeError>> = Vec::new();
-        match cap_rx.recv_timeout(Duration::from_millis(poll_ms.max(4))) {
-            Ok(r) => got.push(r?),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Err("fil de capture arrêté".into()),
-        }
-        for r in cap_rx.try_iter() {
-            got.push(r?);
-        }
-        let now = Instant::now();
-        if got.is_empty() {
-            live.idle(now);
-        }
-        for r in got {
-            live.feed_result(r, now);
-        }
-        overlay.pump();
-        if !keep() {
-            drop(stop);
-            return Ok(());
-        }
-        // Présence de l'application, relue par l'addon à chaque connexion et /reload.
-        if last_presence.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(2)) {
-            last_presence = Some(now);
-            if let Some(dir) = live.addons_dir() {
-                // Dans toutes les versions du jeu installées : celle qu'on lance n'importe pas.
-                if let Err(e) = crate::install::write_live_everywhere(dir) {
-                    if !overlay_error {
-                        crate::say!("[présence] {e}");
-                        overlay_error = true;
-                    }
-                }
-            }
-        }
-        // Envoi traduit : collage puis Entrée, seulement si WoW est devant (boîte de saisie prête).
-        for (id, text) in live.sends_due(now, crate::keys_win::shift_held()) {
-            if !Overlay::wow_in_front() {
-                crate::say!("[S3] envoi {id} : WoW n'est plus au premier plan, rien n'est collé");
-                continue;
-            }
-            let saved = crate::clipboard::get();
-            match crate::clipboard::set(&text).and_then(|_| crate::keys_win::paste_and_enter()) {
-                Ok(()) => {
-                    crate::say!("[S3] envoi {id} : collé et envoyé : {text}");
-                    restore = Some((Instant::now() + Duration::from_millis(700), saved, text));
-                }
-                Err(e) => crate::say!("[S3] envoi {id} : collage impossible ({e}) ; la traduction est dans le presse-papiers (Ctrl+V)"),
-            }
-        }
-        if let Some((at, saved, pasted)) = &restore {
-            if now >= *at {
-                // Remis seulement si le presse-papiers contient encore notre texte.
-                if crate::clipboard::get().as_deref() == Some(pasted.as_str()) {
-                    if let Some(s) = saved {
-                        let _ = crate::clipboard::set(s);
-                    }
-                }
-                restore = None;
-            }
-        }
-        // Clic sur une icône de copie.
-        for (frame, x, y) in overlay.take_clicks() {
-            if let Some(text) = live.copy_at(frame, x, y, now) {
-                match crate::clipboard::set(&text) {
-                    Ok(()) => crate::say!("[copie] {text}"),
-                    Err(e) => crate::say!("[copie] impossible : {e}"),
-                }
-            }
-        }
-        if now.duration_since(last_tick) >= Duration::from_millis(33) {
-            last_tick = now;
-            // Caché dès que l'addon ne donne plus signe de vie (déconnexion, écran de chargement,
-            // choix du personnage) ou que WoW est fermé ou réduit ; revient avec lui. Une autre
-            // application active ne le cache plus (0.12) : le chat reste sur WoW, sauf sous sa
-            // fenêtre. WoW derrière elle : le bandeau peut être masqué, l'état d'avant est gardé.
-            let in_front = Overlay::wow_in_front();
-            let alive = live.last_alive.is_none_or(|t| now.saturating_duration_since(t) < ALIVE_TIMEOUT);
-            let front = if in_front {
-                alive
-            } else if crate::capture_win::wow_client_rect().is_none() {
-                false
-            } else {
-                wow_front
-            };
-            // Combat (0.14) : rien n'est dessiné sur le jeu (chat du jeu, panneaux cachés) ; la
-            // traduction continue, et hors combat le chat traduit revient avec ce qui a été traduit.
-            let combat = crate::engine::in_combat();
-            if front != wow_front {
-                wow_front = front;
-                if front && !combat {
-                    live.mirror_redraw();
-                } else if !front {
-                    overlay.hide_all();
-                }
-            }
-            if combat != combat_seen {
-                combat_seen = combat;
-                if combat {
-                    overlay.hide_all();
-                    hint_until = None;
-                    downloads_until = None;
-                } else if wow_front {
-                    live.mirror_redraw();
-                }
-            }
-            // Un clic dans WoW peut le passer devant le miroir : on remet le miroir devant. Une autre
-            // application devant WoW : rien n'est dessiné sous sa fenêtre.
-            if now.saturating_duration_since(last_raise) >= Duration::from_millis(100) {
-                last_raise = now;
-                overlay.set_wow_rect(crate::capture_win::wow_client_rect());
-                // Écran de WoW (et ses changements) au journal : télévision, autre écran, échelle.
-                if now.saturating_duration_since(screen_checked) >= Duration::from_secs(5) {
-                    screen_checked = now;
-                    if let Some((info, tv)) = crate::capture_win::wow_screen_info() {
-                        if screen_info.as_deref() != Some(info.as_str()) {
-                            crate::say!("[écran] {info}");
-                            screen_info = Some(info);
-                        }
-                        // Télévision : dispositif télévision à la prochaine connexion ou /reload
-                        // (l'addon lit la présence à ce moment-là).
-                        if tv != crate::install::screen_tv() {
-                            crate::install::set_screen_tv(tv);
-                            crate::say!(
-                                "[écran] {} : dispositif télévision {} à la prochaine connexion ou /reload",
-                                if tv { "WoW passé sur une télévision" } else { "WoW passé sur un écran de PC" },
-                                if tv { "actif" } else { "inactif" }
-                            );
-                        }
-                    }
-                }
-                if in_front {
-                    overlay.raise_all();
-                    live.window_over(None, overlay.origin());
-                } else {
-                    live.window_over(Overlay::window_over_wow(), overlay.origin());
-                }
-            }
-            // L'addon attend l'application (lancée après la connexion) : « /reload » sur le jeu,
-            // 20 s, au plus toutes les 3 min.
-            let waiting = live.waiting_at.is_some_and(|t| now.saturating_duration_since(t) < Duration::from_secs(25))
-                && live.last_alive.is_none_or(|t| live.waiting_at.is_some_and(|w| w > t));
-            if waiting && in_front && !combat && hint_until.is_none() && hint_last.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(180)) {
-                if let Some((l, top, r, _)) = crate::capture_win::wow_client_rect() {
-                    let fonts = hint_fonts.get_or_insert_with(crate::panel::Fonts::load);
-                    let px = ((r - l) as f32 / 120.0).clamp(14.0, 32.0);
-                    let rows = vec![
-                        crate::panel::Row { text: "Chevaliers Translators".into(), color: crate::panel::TITLE, title: true },
-                        crate::panel::Row { text: "L'application est lancée : tape /reload pour traduire le chat.".into(), color: crate::panel::TEXT, title: false },
-                        crate::panel::Row { text: "La prochaine fois, lance Chevaliers Translators avant WoW.".into(), color: crate::panel::DIM, title: false },
-                    ];
-                    let cv = crate::panel::render(fonts, &rows, ((r - l) as f32 * 0.32) as usize, px);
-                    let left = l + ((r - l) - cv.w as i32) / 2;
-                    if overlay.show_screen(HINT, left, top + (px * 4.0) as i32, &cv).is_ok() {
-                        crate::say!("[présence] l'addon attend l'application : « /reload » affiché sur le jeu");
-                        hint_until = Some(now + Duration::from_secs(20));
-                        hint_last = Some(now);
-                    }
-                }
-            }
-            if hint_until.is_some_and(|t| now >= t || !waiting) {
-                overlay.hide(HINT);
-                hint_until = None;
-            }
-            // Bilan du combat (0.13.3) : les messages reçus pendant le verrouillage du chat,
-            // traduits après, d'un bloc, une fois le combat fini (2 s sans nouvel ajout).
-            let calm = !crate::engine::in_combat();
-            if digest_until.is_none()
-                && in_front
-                && calm
-                && !live.digest.is_empty()
-                && live.digest_at.is_some_and(|t| now.saturating_duration_since(t) >= Duration::from_secs(2))
-            {
-                if let Some((l, top, r, b)) = crate::capture_win::wow_client_rect() {
-                    let fonts = hint_fonts.get_or_insert_with(crate::panel::Fonts::load);
-                    let px = ((r - l) as f32 / 140.0).clamp(13.0, 28.0);
-                    let items: Vec<(String, String)> = live.digest.drain(..).collect();
-                    let cv = crate::panel::render(fonts, &digest_rows(&items), ((r - l) as f32 * 0.34) as usize, px);
-                    // En haut à gauche de l'écran du jeu, sous le cadre du personnage.
-                    let left = l + (px * 2.0) as i32;
-                    let y = (top + (b - top) / 5).min(b - cv.h as i32);
-                    if overlay.show_screen(DIGEST, left, y, &cv).is_ok() {
-                        crate::say!("[combat] bilan affiché : {} message(s) traduit(s) après le combat", items.len());
-                        digest_until = Some(now + Duration::from_secs((12 + 3 * items.len() as u64).min(40)));
-                    }
-                }
-            }
-            if digest_until.is_some_and(|t| now >= t || !calm) {
-                overlay.hide(DIGEST);
-                digest_until = None;
-            }
-            // Proposition d'un modèle supérieur (0.14) : hors combat, une minute après l'arrivée
-            // en jeu, 40 s, une fois par session ; cachée dès la réponse du joueur.
-            let settled = alive && live.last_alive.is_some() && game_since.is_some_and(|t| now.saturating_duration_since(t) >= Duration::from_secs(60));
-            if alive && live.last_alive.is_some() {
-                game_since.get_or_insert(now);
-            } else {
-                game_since = None;
-            }
-            if proposal_until.is_none() && in_front && calm && settled && !live.proposal_shown && !live.proposal_answered {
-                if let (Some(p), Some((l, top, r, _))) = (live.proposal.clone(), crate::capture_win::wow_client_rect()) {
-                    let fonts = hint_fonts.get_or_insert_with(crate::panel::Fonts::load);
-                    let px = ((r - l) as f32 / 130.0).clamp(13.0, 28.0);
-                    let cv = crate::panel::render(fonts, &crate::conseil::panel_rows(&p), ((r - l) as f32 * 0.36) as usize, px);
-                    let left = l + ((r - l) - cv.w as i32) / 2;
-                    if overlay.show_screen(PROPOSAL, left, top + (px * 4.0) as i32, &cv).is_ok() {
-                        crate::say!("[proposition] panneau affiché : {} {}", p.model.name, p.place.label());
-                        live.proposal_shown = true;
-                        proposal_until = Some(now + Duration::from_secs(40));
-                    }
-                }
-            }
-            if proposal_until.is_some_and(|t| now >= t || !calm || live.proposal_answered) {
-                overlay.hide(PROPOSAL);
-                proposal_until = None;
-            }
-            // Téléchargement des modèles en cours (0.14) : dit une fois par session, en arrivant en
-            // jeu, 15 s.
-            if downloads_until.is_none() && !downloads_said && in_front && calm && settled {
-                let st = crate::telechargements::status();
-                downloads_said = true;
-                if st.active {
-                    if let Some((l, top, r, _)) = crate::capture_win::wow_client_rect() {
-                        let fonts = hint_fonts.get_or_insert_with(crate::panel::Fonts::load);
-                        let px = ((r - l) as f32 / 130.0).clamp(13.0, 28.0);
-                        let rows = vec![
-                            crate::panel::Row { text: "Chevaliers Translators".into(), color: crate::panel::TITLE, title: true },
-                            crate::panel::Row { text: format!("Modèles de traduction en cours de téléchargement : {}.", st.line()), color: crate::panel::TEXT, title: false },
-                            crate::panel::Row {
-                                text: "La traduction utilise le modèle déjà là ; le meilleur pour ton PC sera activé à la fin, hors combat.".into(),
-                                color: crate::panel::DIM,
-                                title: false,
-                            },
-                        ];
-                        let cv = crate::panel::render(fonts, &rows, ((r - l) as f32 * 0.34) as usize, px);
-                        let left = l + ((r - l) - cv.w as i32) / 2;
-                        if overlay.show_screen(DOWNLOADS, left, top + (px * 4.0) as i32, &cv).is_ok() {
-                            downloads_until = Some(now + Duration::from_secs(15));
-                        }
-                    }
-                }
-            }
-            if downloads_until.is_some_and(|t| now >= t || combat) {
-                overlay.hide(DOWNLOADS);
-                downloads_until = None;
-            }
-            let updates = live.mirror_tick(now);
-            if !wow_front || combat {
-                continue;
-            }
-            for u in updates {
-                let r = match &u.canvas {
-                    Some(cv) => overlay.show(u.frame, u.left, u.bottom, cv, &u.hits),
-                    None => {
-                        overlay.hide(u.frame);
-                        Ok(())
-                    }
-                };
-                if let Err(e) = r {
-                    if !overlay_error {
-                        crate::say!("[miroir] affichage impossible : {e}");
-                        overlay_error = true;
-                    }
-                }
-            }
-        }
-    }
+    let client = tr.as_ref().map_or("fr", |t| t.1);
+    let spec = crate::jeux_win::GameSpec { hwnd: 0, addons, fonts, client, label: String::new() };
+    let engine = tr.map(|(cfg, _, own_too)| (cfg, own_too));
+    crate::jeux_win::run_games(width, height, poll_ms, demo, opts, engine, &mut || vec![spec.clone()], keep, true)
 }
 
 #[cfg(not(windows))]

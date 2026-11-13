@@ -188,6 +188,26 @@ pub struct Overlay {
     /// positions du miroir. WoW sur un autre écran que le principal (télévision 4K, 0.13.3) ou en
     /// fenêtre : le miroir le suit au lieu de se dessiner sur l'écran principal.
     origin: (i32, i32),
+    /// Fenêtres exclues des captures d'écran (cache du bandeau).
+    covers: Vec<u8>,
+}
+
+/// Windows 10 version 2004 (build 19041) ou suivant : WDA_EXCLUDEFROMCAPTURE existe (avant, la
+/// fenêtre apparaîtrait noire dans la capture, et le bandeau serait illisible).
+pub fn capture_exclusion_supported() -> bool {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+    let key: Vec<u16> = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion".encode_utf16().chain(Some(0)).collect();
+    let name: Vec<u16> = "CurrentBuildNumber".encode_utf16().chain(Some(0)).collect();
+    let mut buf = [0u16; 32];
+    let mut len = (buf.len() * 2) as u32;
+    let ok = unsafe {
+        RegGetValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, null_mut(), buf.as_mut_ptr() as *mut c_void, &mut len)
+    } == 0;
+    if !ok {
+        return false;
+    }
+    let n = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..n]).trim().parse::<u32>().is_ok_and(|b| b >= 19041)
 }
 
 impl Overlay {
@@ -223,6 +243,7 @@ impl Overlay {
                 click_class,
                 screen_h: GetSystemMetrics(SM_CYSCREEN),
                 origin: (0, GetSystemMetrics(SM_CYSCREEN)),
+                covers: Vec::new(),
             })
         }
     }
@@ -329,6 +350,25 @@ impl Overlay {
         Ok(())
     }
 
+    /// Cache du bandeau (0.15) : image posée sur le bandeau, vue par le joueur mais absente des
+    /// captures d'écran (WDA_EXCLUDEFROMCAPTURE, Windows 10 2004 et suivants) : la capture lit
+    /// toujours le bandeau dessous. Erreur si Windows ne l'accepte pas (rien n'est alors affiché :
+    /// le cache rendrait le bandeau illisible).
+    pub fn show_cover(&mut self, frame: u8, left: i32, top: i32, cv: &Canvas) -> Result<(), String> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+        if !self.covers.contains(&frame) {
+            if !capture_exclusion_supported() {
+                return Err("Windows trop ancien pour cacher le bandeau (10 version 2004 au moins)".into());
+            }
+            let w = self.window(frame)?;
+            if unsafe { SetWindowDisplayAffinity(w.hwnd, WDA_EXCLUDEFROMCAPTURE) } == 0 {
+                return Err(format!("SetWindowDisplayAffinity refusé ({})", unsafe { windows_sys::Win32::Foundation::GetLastError() }));
+            }
+            self.covers.push(frame);
+        }
+        self.window(frame)?.present(left, top, cv.w, cv.h, &cv.px)
+    }
+
     pub fn hide(&mut self, frame: u8) {
         if let Some(w) = self.wins.get_mut(&frame) {
             w.hide();
@@ -342,9 +382,16 @@ impl Overlay {
     /// haut, droite, bas), pixels de l'écran. Rien si WoW est actif, ou si la fenêtre active est
     /// derrière WoW (WoW « toujours au premier plan »), réduite ou masquée.
     pub fn window_over_wow() -> Option<(i32, i32, i32, i32)> {
+        Self::window_over(crate::capture_win::wow_window())
+    }
+
+    /// Comme `window_over_wow`, pour une fenêtre de WoW donnée (0.15) : un autre WoW passé devant
+    /// compte comme une autre application.
+    // Poignée de fenêtre transmise à Windows, jamais lue par le programme.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn window_over(wow: HWND) -> Option<(i32, i32, i32, i32)> {
         use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
-        let wow = crate::capture_win::wow_window();
         unsafe {
             let fg = GetForegroundWindow();
             if wow.is_null() || fg.is_null() || fg == wow || IsIconic(fg) != 0 || IsWindowVisible(fg) == 0 {
@@ -408,8 +455,14 @@ impl Overlay {
     /// Clics sur les icônes de copie depuis le dernier appel : (fenêtre de chat, x, y dans son
     /// image).
     pub fn take_clicks(&mut self) -> Vec<(u8, i32, i32)> {
+        // Seulement les clics de ses propres fenêtres : ceux d'un autre jeu (0.15) restent pour lui.
+        let mine: Vec<isize> = self.clicks.values().map(|w| w.hwnd as isize).collect();
         let raw: Vec<(isize, i32, i32)> = match CLICKS.lock() {
-            Ok(mut c) => c.drain(..).collect(),
+            Ok(mut c) => {
+                let (take, keep): (Vec<_>, Vec<_>) = c.drain(..).partition(|(h, _, _)| mine.contains(h));
+                *c = keep;
+                take
+            }
             Err(_) => Vec::new(),
         };
         raw.into_iter()
@@ -420,6 +473,11 @@ impl Overlay {
                     .map(|(f, w)| (*f, x + w.off.0, y + w.off.1))
             })
             .collect()
+    }
+
+    /// Vrai si la fenêtre active est cette fenêtre de WoW (0.15, plusieurs jeux).
+    pub fn in_front_of(h: HWND) -> bool {
+        unsafe { !h.is_null() && GetForegroundWindow() == h }
     }
 
     /// Vrai si la fenêtre active est celle de WoW (titre « World of Warcraft »).
@@ -475,6 +533,11 @@ impl Overlay {
 
     /// Traite les messages Windows des fenêtres du miroir (à appeler régulièrement).
     pub fn pump(&self) {
+        Self::pump_thread();
+    }
+
+    /// Messages de toutes les fenêtres du fil (miroirs de tous les jeux, icône de l'application).
+    pub fn pump_thread() {
         unsafe {
             let mut msg: MSG = std::mem::zeroed();
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {

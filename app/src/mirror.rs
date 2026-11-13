@@ -31,6 +31,10 @@ pub const PLATE_ALPHA: f32 = 0.94;
 
 pub type Rgb = [u8; 3];
 
+/// Bulles de dialogue traduites (0.15).
+#[path = "bulles.rs"]
+pub mod bulles;
+
 // --- Description d'une fenêtre ---------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -488,6 +492,7 @@ pub fn parse_measures(p: &[u8]) -> Result<(u8, u16, Measures), String> {
 // --- Image -----------------------------------------------------------------------
 
 /// Image en BGRA prémultiplié, une valeur 0xAARRGGBB par pixel, lignes de haut en bas.
+#[derive(Clone)]
 pub struct Canvas {
     pub w: usize,
     pub h: usize,
@@ -1118,7 +1123,13 @@ struct FrameState {
     alpha_sig: Vec<u8>,
     shown: bool,
     hits: Vec<Hit>,
+    /// Dernier dessin (0.15 : l'effacement progressif des lignes est redessiné 15 fois par
+    /// seconde au plus, au lieu de 30 : moitié moins d'images envoyées à Windows).
+    drawn_at: Option<Instant>,
 }
+
+/// Pas de l'effacement progressif des lignes.
+const FADE_STEP: Duration = Duration::from_millis(66);
 
 /// Message de joueur relayé par l'addon : ses lignes portent l'icône de copie.
 #[derive(Clone, Debug)]
@@ -1192,6 +1203,8 @@ pub struct Mirror {
     pub opts: RenderOpts,
     pub views_seen: usize,
     pub lines_seen: usize,
+    /// Bulles de dialogue au-dessus des joueurs (0.15).
+    pub bubbles: bulles::Bubbles,
 }
 
 impl Default for Mirror {
@@ -1220,6 +1233,7 @@ impl Mirror {
             opts: RenderOpts::default(),
             views_seen: 0,
             lines_seen: 0,
+            bubbles: bulles::Bubbles::default(),
         }
     }
 
@@ -1241,6 +1255,7 @@ impl Mirror {
             alpha_sig: Vec::new(),
             shown: self.frames.get(&frame).is_some_and(|f| f.shown),
             hits: self.frames.get(&frame).map(|f| f.hits.clone()).unwrap_or_default(),
+            drawn_at: None,
         };
         self.frames.insert(frame, st);
         report.then_some(v)
@@ -1328,6 +1343,12 @@ impl Mirror {
             f.dirty = true;
             f.shown = false;
         }
+        self.bubbles.redraw_all();
+    }
+
+    /// Relevé des bulles de dialogue (0.15) : chacune avec le texte d'origine de son message.
+    pub fn on_bubbles(&mut self, list: Vec<(bulles::Seen, Option<String>)>, font: String, now: Instant) {
+        self.bubbles.update(list, font, now);
     }
 
     pub fn note_chat(&mut self, body: &str, sender: &str, now: Instant) {
@@ -1508,6 +1529,9 @@ impl Mirror {
             .filter(|f| f.view.drawn() && !self.book.knows(&f.view.font_path))
             .map(|f| f.view.font_path.clone())
             .collect();
+        if self.bubbles.active() && !self.bubbles.font.is_empty() && !self.book.knows(&self.bubbles.font) {
+            v.push(self.bubbles.font.clone());
+        }
         v.sort();
         v.dedup();
         v
@@ -1594,6 +1618,11 @@ impl Mirror {
             if !f.dirty && f.alpha_sig == sig {
                 continue;
             }
+            // Seule l'opacité des lignes change (effacement) : au plus un dessin par pas.
+            let fade_only = !f.dirty && f.alpha_sig.len() == sig.len() && f.alpha_sig.last() == sig.last();
+            if fade_only && f.drawn_at.is_some_and(|t| now.saturating_duration_since(t) < FADE_STEP) {
+                continue;
+            }
             let view = f.view.clone();
             let (mut canvas, mut hits) = {
                 let me = &*self;
@@ -1637,6 +1666,7 @@ impl Mirror {
             f.dirty = false;
             f.alpha_sig = sig;
             f.shown = true;
+            f.drawn_at = Some(now);
             f.hits = hits.clone();
             ups.push(Update {
                 frame: fid,
@@ -1646,6 +1676,12 @@ impl Mirror {
                 hits,
             });
         }
+        // Bulles de dialogue traduites : posées sur les bulles, suivant leur déplacement.
+        let mut occ = self.occluders.clone();
+        occ.extend(self.window_occ);
+        let translations = &self.translations;
+        let tr = |body: &str| translations.iter().find(|t| t.body == body).map(|t| t.shown.clone());
+        ups.extend(self.bubbles.tick(&mut self.book, &tr, &occ, now));
         ups
     }
 }

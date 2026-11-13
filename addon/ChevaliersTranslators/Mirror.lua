@@ -795,6 +795,23 @@ local function Overlaps(r)
   return false
 end
 
+-- Rectangles des fenêtres du jeu affichées (carte, sacs, menus...), où qu'elles soient : les bulles
+-- de dialogue qu'elles recouvrent ne sont pas traduites (0.15). Relus au plus 4 fois par seconde.
+local uiAt, uiRects = -10, {}
+function M:UiRects(k0)
+  local now = GetTime()
+  if now - uiAt < 0.25 then return uiRects end
+  uiAt, uiRects = now, {}
+  for _, n in ipairs(OccNames()) do
+    local f = _G[n]
+    if type(f) == "table" then
+      local ok, r = pcall(Rect, f, k0)
+      if ok and r then uiRects[#uiRects + 1] = r end
+    end
+  end
+  return uiRects
+end
+
 function M:Occluders(now)
   if now - occAt < OCC_POLL then return end
   occAt = now

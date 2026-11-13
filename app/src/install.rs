@@ -7,8 +7,10 @@ use std::path::{Path, PathBuf};
 
 const ENCODER: &str = include_str!("../../addon/ChevaliersTranslators/Encoder.lua");
 const BANNER: &str = include_str!("../../addon/ChevaliersTranslators/Banner.lua");
+const GUIDE: &str = include_str!("../../addon/ChevaliersTranslators/Guide.lua");
 const CORE: &str = include_str!("../../addon/ChevaliersTranslators/Core.lua");
 const MIRROR: &str = include_str!("../../addon/ChevaliersTranslators/Mirror.lua");
+const BUBBLES: &str = include_str!("../../addon/ChevaliersTranslators/Bubbles.lua");
 /// Logo de la liste des addons (TGA 64x64, ligne `## IconTexture` du .toc).
 const LOGO: &[u8] = include_bytes!("../../addon/ChevaliersTranslators/Media/Logo.tga");
 /// Bannière du guide d'installation (TGA 512x128).
@@ -18,7 +20,7 @@ const ICON_TEXTURE: &str = "## IconTexture: Interface\\AddOns\\ChevaliersTransla
 const TOC_SOURCE: &str = "## X-License: GPL-3.0-or-later\n## X-Website: https://github.com/Heaumite/chevaliers-translators\n";
 
 /// Fichiers de l'addon, dans l'ordre de chargement du .toc.
-const FILES: [&str; 4] = ["Encoder.lua", "Banner.lua", "Core.lua", "Mirror.lua"];
+const FILES: [&str; 6] = ["Encoder.lua", "Banner.lua", "Guide.lua", "Core.lua", "Mirror.lua", "Bubbles.lua"];
 
 /// Dossier de l'addon dans `Interface\AddOns`.
 pub const ADDON: &str = "ChevaliersTranslators";
@@ -496,8 +498,10 @@ pub fn install(root: &Path, only: Option<&str>, iface_override: Option<u32>) -> 
         let files = [
             ("Encoder.lua", ENCODER),
             ("Banner.lua", BANNER),
+            ("Guide.lua", GUIDE),
             ("Core.lua", CORE),
             ("Mirror.lua", MIRROR),
+            ("Bubbles.lua", BUBBLES),
         ];
         for (name, body) in files {
             fs::write(main.join(name), body).map_err(|e| format!("{name} : {e}"))?;

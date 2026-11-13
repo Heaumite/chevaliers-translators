@@ -65,6 +65,11 @@ pub struct Tuning {
     pub graphics_queue: bool,
     /// Couches du modèle sur la carte (None : toutes).
     pub gpu_layers: Option<u32>,
+    /// Cache des conversations en 8 bits (clés et valeurs) avec l'attention « flash » (0.15) :
+    /// moitié moins de mémoire pour le cache (130 à 170 Mo de mémoire vidéo rendus au jeu pour un
+    /// modèle de 4 à 9 milliards de paramètres), sans perte visible sur des messages de chat. Un
+    /// moteur qui ne le permet pas refuse de démarrer : le moteur relance sans (`engine.rs`).
+    pub kv_cache_8bit: bool,
 }
 
 impl Tuning {
@@ -76,6 +81,7 @@ impl Tuning {
             ubatch: Some(64),
             graphics_queue: false,
             gpu_layers: None,
+            kv_cache_8bit: true,
         }
     }
 
@@ -87,6 +93,7 @@ impl Tuning {
             ubatch: None,
             graphics_queue: false,
             gpu_layers: None,
+            kv_cache_8bit: false,
         }
     }
 
@@ -157,6 +164,11 @@ pub fn args(l: &Launch) -> Vec<String> {
     if sliding_window(l.model) {
         a.push("--swa-full".into());
     }
+    // Cache en 8 bits : l'attention « flash » est laissée au choix du moteur (auto) ; sans elle,
+    // il refuse le cache 8 bits des valeurs et ne démarre pas (relance sans, voir engine.rs).
+    if l.tuning.kv_cache_8bit {
+        a.extend(["-fa", "auto", "-ctk", "q8_0", "-ctv", "q8_0"].map(String::from));
+    }
     match l.place {
         Place::Cpu => {
             // Aucun calcul sur la carte, pas même les gros lots que llama.cpp y envoie sinon.
@@ -171,6 +183,15 @@ pub fn args(l: &Launch) -> Vec<String> {
         }
     }
     a
+}
+
+/// Journal du serveur arrêté au chargement : refus du cache 8 bits (attention « flash »
+/// indisponible pour ce modèle ou cette carte), pas un manque de mémoire.
+pub fn kv_refused(log: &str) -> bool {
+    let l = log.to_lowercase();
+    (l.contains("flash_attn") || l.contains("flash attention")) && (l.contains("quantiz") || l.contains("requires") || l.contains("not supported"))
+        || l.contains("unsupported cache type")
+        || l.contains("invalid cache type")
 }
 
 /// Variables d'environnement du serveur (moteur Vulkan).
@@ -313,7 +334,7 @@ mod tests {
         let (exe, model) = (Path::new("llama-server"), Path::new("m.gguf"));
         let l = Launch { exe, model, port: 8089, place: Place::Gpu, threads: 8, tuning: &t };
         let a = args(&l).join(" ");
-        assert_eq!(a, "-m m.gguf --host 127.0.0.1 --port 8089 -c 2048 -np 4 -t 8 -ngl 999 -ub 64 -b 256");
+        assert_eq!(a, "-m m.gguf --host 127.0.0.1 --port 8089 -c 2048 -np 4 -t 8 -fa auto -ctk q8_0 -ctv q8_0 -ngl 999 -ub 64 -b 256");
         assert_eq!(envs(&l), vec![("GGML_VK_MAX_NODES_PER_SUBMIT", "10".to_string())]);
         assert_eq!(t.code(), "prio=basse;paquets=10;lots=64;file=calcul;couches=toutes");
         // Réglages d'origine : rien d'ajouté.
@@ -327,12 +348,18 @@ mod tests {
         assert!(envs(&l).contains(&("GGML_VK_ALLOW_GRAPHICS_QUEUE", "1".to_string())));
         // Processeur : aucun réglage de carte, aucun calcul envoyé à la carte.
         let l = Launch { place: Place::Cpu, threads: 4, ..l };
-        assert!(args(&l).join(" ").ends_with("-t 4 -ngl 0 --device none"));
+        assert!(args(&l).join(" ").ends_with("-t 4 -fa auto -ctk q8_0 -ctv q8_0 -ngl 0 --device none"));
         assert!(envs(&l).is_empty());
         assert_eq!(GpuPriority::parse("minimale").unwrap().class(), 0);
         // TranslateGemma : cache complet de la fenêtre glissante.
         let gemma = Path::new("C:\\m\\translategemma-4b-it.Q4_K_M.gguf");
         let l = Launch { model: gemma, place: Place::Gpu, ..l };
-        assert!(args(&l).join(" ").contains("-t 4 --swa-full -ngl "));
+        assert!(args(&l).join(" ").contains("-t 4 --swa-full -fa auto -ctk q8_0 -ctv q8_0 -ngl "), "{}", args(&l).join(" "));
+        // Cache 8 bits refusé par le moteur : relancé sans.
+        let plain = Tuning { kv_cache_8bit: false, ..Tuning::gentle() };
+        let l = Launch { tuning: &plain, ..l };
+        assert!(!args(&l).join(" ").contains("q8_0"));
+        assert!(kv_refused("llama_init_from_model: V cache quantization requires flash_attn\n"));
+        assert!(!kv_refused("ggml_vulkan: out of device memory"));
     }
 }

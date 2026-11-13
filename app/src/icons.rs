@@ -548,6 +548,10 @@ fn archive_path(p: &str) -> String {
 
 /// Lance le chargement des images en tâche de fond (archives de `wow`, version `flavor`).
 pub fn start(wow: PathBuf, flavor: String) {
+    // Déjà lancé (plusieurs jeux ouverts, 0.15) : les icônes du premier servent à tous.
+    if lock().tx.is_some() {
+        return;
+    }
     let (tx, rx) = mpsc::channel::<Load>();
     lock().tx = Some(tx);
     std::thread::spawn(move || loader(wow, flavor, rx));

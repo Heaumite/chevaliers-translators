@@ -2,7 +2,7 @@
 ## Title: Chevaliers Translators
 ## Notes: Traduction du chat entre les langues européennes, sur ton PC. /chevaliers
 ## Author: Chevaliers Translators
-## Version: 0.14.8
+## Version: 0.15.0
 ## SavedVariables: ChevaliersTranslatorsDB
 ## IconTexture: Interface\AddOns\ChevaliersTranslators\Media\Logo
 ## X-License: GPL-3.0-or-later
@@ -10,5 +10,7 @@
 
 Encoder.lua
 Banner.lua
+Guide.lua
 Core.lua
 Mirror.lua
+Bubbles.lua

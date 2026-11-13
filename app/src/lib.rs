@@ -4,6 +4,7 @@
 //! développement (`ct-outils.exe`) : bandeau de pixels de l'addon, chat miroir, détection des
 //! langues, traduction locale (llama.cpp) et choix des modèles.
 
+pub mod bandeau;
 pub mod bench;
 pub mod brand;
 pub mod res_icone;
@@ -20,6 +21,7 @@ pub mod fonts;
 pub mod fps;
 pub mod glossary;
 pub mod gouverneur;
+pub mod hub;
 pub mod hw;
 pub mod icons;
 pub mod ingame;
@@ -35,6 +37,7 @@ pub mod mesures;
 pub mod conseil;
 pub mod telechargements;
 pub mod proto;
+pub mod raccourci;
 pub mod regul;
 pub mod render;
 pub mod selftest;
@@ -42,6 +45,8 @@ pub mod ttf;
 pub mod ui;
 #[cfg(windows)]
 pub mod capture_win;
+#[cfg(windows)]
+pub mod jeux_win;
 #[cfg(windows)]
 pub mod keys_win;
 #[cfg(windows)]
@@ -67,9 +72,31 @@ pub fn set_journal(f: std::fs::File) {
     }
 }
 
+thread_local! {
+    /// Préfixe des lignes écrites par ce fil (« [WoW 2 Retail] » quand plusieurs jeux sont
+    /// traduits, 0.15).
+    static PREFIX: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Préfixe des lignes du journal écrites par ce fil (vide : aucun).
+pub fn set_journal_prefix(p: &str) {
+    PREFIX.with(|x| {
+        let mut x = x.borrow_mut();
+        if x.as_str() != p {
+            x.clear();
+            x.push_str(p);
+        }
+    });
+}
+
 /// Une ligne du journal (macro `say!`).
 pub fn journal_line(s: &str) {
     use std::io::Write;
+    let line = PREFIX.with(|p| {
+        let p = p.borrow();
+        if p.is_empty() { None } else { Some(format!("{p}{s}")) }
+    });
+    let s = line.as_deref().unwrap_or(s);
     if let Ok(mut j) = JOURNAL.lock() {
         if let Some(f) = j.as_mut() {
             let _ = writeln!(f, "{s}");

@@ -97,7 +97,7 @@ def lint_secret_order(root):
         re.compile(r"\b(\w+(?:\.\w+)?)\s*==\s*[^=\n]+?\s+and\s+not\s+(?:Secret|IsSecret)\(\1\)"),
         re.compile(r"not\s+\(([\w ]+?(?:\band\b[\w ]+)+)\)\s+or\s+(?:Secret|IsSecret)\("),
     ]
-    for name in ("Core.lua", "Mirror.lua", "Banner.lua", "Encoder.lua"):
+    for name in ("Core.lua", "Mirror.lua", "Banner.lua", "Encoder.lua", "Guide.lua", "Bubbles.lua"):
         path = os.path.join(root, "addon", "ChevaliersTranslators", name)
         with open(path, encoding="utf-8") as f:
             for n, line in enumerate(f, 1):
@@ -394,7 +394,7 @@ C_ChatInfo = {
 
 local CT = {}
 CT_TABLE = CT
-for _, file in ipairs({ "Encoder.lua", "Banner.lua", "Core.lua", "Mirror.lua" }) do
+for _, file in ipairs({ "Encoder.lua", "Banner.lua", "Guide.lua", "Core.lua", "Mirror.lua", "Bubbles.lua" }) do
   local f = assert(loadfile(ROOT .. "/addon/ChevaliersTranslators/" .. file))
   f("ChevaliersTranslators", CT)
 end
@@ -456,7 +456,7 @@ def mock(root, binary):
     os.makedirs(os.path.join(wow, "_forever_"))
     subprocess.run([binary, "install", "--wow", wow, "--flavor", "_forever_", "--interface", "16001"], check=True)
     addons = os.path.join(wow, "_forever_", "Interface", "AddOns")
-    for name in ("Encoder.lua", "Banner.lua", "Core.lua", "Mirror.lua"):
+    for name in ("Encoder.lua", "Banner.lua", "Guide.lua", "Core.lua", "Mirror.lua", "Bubbles.lua"):
         installed = open(os.path.join(addons, "ChevaliersTranslators", name), encoding="utf-8").read()
         source = open(os.path.join(root, "addon/ChevaliersTranslators", name), encoding="utf-8").read()
         assert installed == source, f"{name} installé différent de la source"
@@ -739,6 +739,45 @@ def mock(root, binary):
     assert "1 menu(s), bulle(s) ou fenêtre(s) du jeu sur le chat" in out, "bulle d'aide non signalée"
     g.GameTooltip.visible = False
     collect("bulle-fin")
+    # ---- 0.15 : bulles de dialogue au-dessus des joueurs ----------------------------------
+    # Une bulle visible affiche un message relayé : sa place part à l'application (trame 18), qui
+    # retrouve le message par son numéro.
+    lua.execute('''
+      local fs = { GetText = function() return "|cffffffffGuten Abend, wer kommt mit nach Schwarzfels? {rt1}|r" end,
+        GetLeft = function() return 500 end, GetBottom = function() return 400 end,
+        GetWidth = function() return 180 end, GetHeight = function() return 28 end,
+        GetEffectiveScale = function() return 0.64 end,
+        GetFont = function() return "Fonts\\FRIZQT__.TTF", 13, "" end,
+        GetTextColor = function() return 1, 1, 1 end }
+      BUBBLE = { IsForbidden = function() return false end, IsVisible = function() return true end,
+        GetChildren = function() return { String = fs } end }
+      PROTECTED = { IsForbidden = function() return true end }
+      C_ChatBubbles = { GetAllChatBubbles = function(forbidden) return { PROTECTED, BUBBLE } end }
+    ''')
+    g.FIRE("CHAT_MSG_SAY", "Guten Abend, wer kommt mit nach Schwarzfels? {rt1}", "Hans-Ysondre", "Commun", "", "", "", 0, 0, "", 0, 50, "Player-9")
+    out = feed(collect("bulles"), os.path.join(work, "bulles"))
+    assert "[bulles] 1 bulle(s) de dialogue au-dessus des joueurs" in out, out
+    assert ct.Bubbles.stats.matched >= 1 and ct.Bubbles.stats.errors == 0, ct.Bubbles.lastError
+    # Bulle cachée sous une fenêtre du jeu : pas traduite.
+    hidden0 = ct.Bubbles.stats.hidden
+    lua.execute("GameTooltip.GetLeft = function() return 480 end; GameTooltip.GetBottom = function() return 380 end")
+    g.GameTooltip.visible = True
+    for _ in range(40):
+        g.TICK(1 / 60)
+    assert ct.Bubbles.stats.hidden > hidden0, "bulle sous une fenêtre du jeu"
+    g.GameTooltip.visible = False
+    # Désactivées par le joueur : une trame vide (l'application retire ses traductions).
+    g.SLASH("bulles off")
+    assert "désactivé" in list(g.LOG.values())[-1]
+    collect("bulles-off")
+    assert ct.Bubbles.sentSig == "", "trame vide non envoyée"
+    g.SLASH("bulles on")
+    lua.execute("C_ChatBubbles = nil")
+    collect("bulles-fin")
+    # La règle « message affiché par une fenêtre visible » est relue toutes les 5 s : le /dire
+    # ci-dessus l'a lue sans IsEventRegistered (imitation du jeu), on la laisse se relire.
+    g.TICK(6)
+    collect("bulles-fin2")
     # ---- 0.12.3 : chat très actif, onglets, icônes ----------------------------------------
     # La fenêtre visible affiche /dire et les canaux Général et Commerce, pas Services.
     lua.execute("""

@@ -15,6 +15,10 @@ CT.Banner = Banner
 local LEVEL = { [0] = 0, 0.15, 0.30, 0.45 }
 local frame
 local textures = {}
+-- Symbole affiché par chaque bloc (0.15) : seuls les blocs qui changent sont repeints. Une trame
+-- courte (signe de vie, bulles) laisse la plupart des blocs à zéro : environ 10 fois moins de
+-- textures modifiées par trame.
+local painted = {}
 
 local function PhysicalSize()
   if GetPhysicalScreenSize then
@@ -76,6 +80,7 @@ function Banner:Layout()
     t:SetSize(B, B)
     t:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -k * B, row * B)
     t:SetColorTexture(0, 0, 0, 1)
+    painted[i] = 0
     t:Show()
   end
   for i = 2 * cols + 1, #textures do textures[i]:Hide() end
@@ -86,7 +91,10 @@ end
 function Banner:Paint(syms)
   for i = 1, 2 * self.cols do
     local s = syms[i]
-    textures[i]:SetColorTexture(LEVEL[floor(s / 16)], LEVEL[floor(s / 4) % 4], LEVEL[s % 4], 1)
+    if painted[i] ~= s then
+      painted[i] = s
+      textures[i]:SetColorTexture(LEVEL[floor(s / 16)], LEVEL[floor(s / 4) % 4], LEVEL[s % 4], 1)
+    end
   end
   if not frame:IsShown() then frame:Show() end
 end

@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.14.8)
+# Chevaliers Translators (v0.15.0)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -25,9 +25,12 @@ Phase 1, jalon J1 (fondation) : `docs/PLAN_PHASE1.md`. Phase 0 (kit de test, ré
 
 ## Pour le joueur
 
-1. Lancer `ChevaliersTranslators.exe`. Aucune fenêtre : le **médaillon aux deux lions** apparaît
-   près de l'horloge (flèche ^ si Windows l'a rangée). L'addon est posé ou mis à jour dans toutes
-   les versions de WoW trouvées ; l'ancien addon de test `CT_Spike` est retiré, ses réglages repris.
+1. Lancer `ChevaliersTranslators.exe` : la **fenêtre des modèles** s'ouvre, et le **médaillon aux
+   deux lions** apparaît près de l'horloge (flèche ^ si Windows l'a rangée). Au premier lancement,
+   un raccourci **Chevaliers Translators** est posé sur le bureau. L'addon est posé ou mis à jour
+   dans toutes les versions de WoW trouvées ; l'ancien addon de test `CT_Spike` est retiré, ses
+   réglages repris. Relancer l'application (raccourci) quand elle tourne déjà rouvre simplement la
+   fenêtre des modèles.
 2. Lancer WoW : la traduction démarre seule à la connexion du personnage, sans `/reload`.
    `/reload` n'est demandé que si l'application a été lancée **après** la connexion (l'addon ne
    relit la présence de l'application qu'à la connexion et au `/reload`). Première installation
@@ -35,6 +38,10 @@ Phase 1, jalon J1 (fondation) : `docs/PLAN_PHASE1.md`. Phase 0 (kit de test, ré
    une bulle le rappelle.
 3. WoW fermé : la traduction s'arrête 20 s après et rend la mémoire vidéo ; elle reprend à
    l'ouverture suivante, pour la version du jeu lancée.
+4. Plusieurs WoW ouverts (multi-comptes, Retail et Classic côte à côte) : chacun est traduit, dans
+   la langue de son client, avec un seul modèle de traduction pour tous (0.15). Chaque fenêtre doit
+   être visible à l'écran (côte à côte, ou sur deux écrans) : un WoW entièrement caché derrière un
+   autre attend d'être de nouveau visible.
 
 Menu de l'icône (clic gauche ou droit) : état (version du jeu, langue de traduction), **Modèles de
 traduction...** (fenêtre des modèles : moteur, pack low, autres modèles), **Journal de
@@ -73,6 +80,8 @@ proprement : `/chevaliers off`.
 | `/chevaliers diag` | rapport (fenêtres de chat, messages reçus), recopié dans le journal de l'application |
 | `/chevaliers monter` / `non` | accepter / écarter le modèle supérieur proposé sur l'écran (0.14) |
 | `/chevaliers tele auto` / `on` / `off` | dispositif télévision : selon l'écran vu par l'application (par défaut), forcé, coupé (0.14) |
+| `/chevaliers bulles on` / `off` | bulles de dialogue au-dessus des joueurs traduites, avec l'acronyme de la langue (0.15, actif par défaut) |
+| `/chevaliers guide` | guide d'installation de l'application |
 | `/chevaliers dev` | liste des outils de développement (test, ping, miroir, perf, essai...) |
 
 Maj+Entrée dans la boîte de saisie — ou **Maj+clic sur le bouton Trad** (0.14.7) : la traduction est collée puis envoyée (Ctrl+V et Entrée
@@ -94,6 +103,40 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.15.0 (13/11/2026)
+
+- **Bulles de dialogue traduites** : la bulle au-dessus d'un joueur qui parle (Dire, Crier,
+  Groupe, Raid, Instance) reçoit sa traduction, posée dessus, précédée de l'acronyme de la langue
+  d'origine (« [DE] Bonsoir à tous ! »), texte centré comme dans le jeu. Elle suit la bulle quand
+  le personnage ou la caméra bouge (place prolongée selon la vitesse mesurée). Une bulle dans la
+  langue du client reste telle quelle ; une bulle sous une fenêtre du jeu (carte, sacs, bulle
+  d'aide) n'est pas recouverte. En donjon, raid, champ de bataille et arène, le jeu protège les
+  bulles (illisibles pour un addon) : elles y restent telles quelles. `/chevaliers bulles off` pour
+  les laisser intactes.
+- **Plusieurs jeux à la fois** : toutes les fenêtres de WoW ouvertes sont traduites en même temps,
+  chacune avec son chat miroir, ses bulles, ses envois traduits et la langue de son client ; leurs
+  demandes passent dans une seule file du même moteur (un seul modèle en mémoire vidéo), chaque
+  traduction revenant au jeu qui l'a demandée. Le journal préfixe les lignes `[WoW 2 Retail]`.
+- **Bandeau caché** : l'application pose sur le bandeau une image faite des pixels juste au-dessus
+  de lui ; le joueur ne voit plus les blocs colorés, mais cette image est exclue des captures
+  d'écran (Windows 10 version 2004 et suivants) : l'application lit toujours le bandeau dessous.
+  Si la capture ne le lit plus avec ce cache (Windows plus ancien), il est retiré pour la session et
+  le journal le dit.
+- **Raccourci sur le bureau et fenêtre des modèles à l'ouverture** : voir « Pour le joueur ».
+- **Moins de ressources** :
+  - capture du bandeau toutes les 8 ms seulement quand il change, toutes les 40 ms au repos (avant :
+    toutes les 4 ms, sans arrêt), sur une zone resserrée au bandeau dès qu'il est trouvé (environ 4
+    fois moins de pixels lus) : de 8 à 40 fois moins de lectures d'écran ;
+  - addon : seuls les blocs du bandeau qui changent sont repeints (une trame courte en change
+    environ un sur dix) ;
+  - cache des conversations du modèle en 8 bits avec l'attention « flash » : 130 à 170 Mo de
+    mémoire vidéo rendus au jeu pour un modèle de 4 à 9 milliards de paramètres. Un moteur qui ne
+    le permet pas est relancé avec le cache ordinaire, et c'est retenu (ce n'est pas compté comme
+    un échec du modèle) ;
+  - effacement progressif des lignes du chat redessiné 15 fois par seconde au plus (au lieu de 30) ;
+  - un seul modèle pour tous les jeux ouverts.
+- **Guide d'installation dans son propre fichier** (`Guide.lua`) ; il cite le raccourci du bureau.
 
 ## 0.14.8 (12/11/2026)
 
@@ -334,15 +377,22 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.14.8.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.15.0.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.14.8)
+## Vérifié avant livraison (0.15.0)
 
-- 117 tests Rust sous Linux (116 sous Windows) : dont, en 0.14.4, les lignes du jeu plus hautes
+- 123 tests Rust sous Linux : dont, en 0.15, la trame des bulles (aller-retour), la bulle traduite
+  qui recouvre le texte d'origine, suit son déplacement, s'efface sous une autre fenêtre et
+  disparaît sans nouvelles de l'addon ; le moteur partagé entre deux jeux (chacun reçoit ses
+  traductions, un jeu fermé n'en reçoit plus) ; la zone de capture resserrée qui lit le même
+  bandeau (4 fois moins de pixels) et le cache du bandeau pris dans la rangée au-dessus de lui ;
+  le raccourci du bureau (posé une fois, pas reposé s'il a été retiré, suit un exécutable déplacé,
+  jamais depuis un dossier temporaire) ; les arguments du cache 8 bits et la reconnaissance de son
+  refus. Et toujours : en 0.14.4, les lignes du jeu plus hautes en 0.14.4, les lignes du jeu plus hautes
   (icône) qui gardent les messages des joueurs à leur place ; en 0.14.3, la règle de la première
   installation (WoW compté 7 Go), la désinstallation (addon et
   présence retirés de chaque version, autres addons gardés ; réglages et données sur demande) ; en 0.14.2, le gouverneur de la mémoire
@@ -361,6 +411,9 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   recopiées au journal (0.14.5) ; menu de langues réordonné et aide citant le guide (0.14.6) ;
   Maj+clic sur Trad qui traduit et envoie (0.14.7) ; affichage continu dans l'ordre d'arrivée avec
   attente ajustée au temps de traduction, et mise à jour vérifiée dans chaque version (0.14.8) ;
+  bulle de dialogue retrouvée par son message (couleurs, repères de raid ignorés), trame des
+  bulles décodée par l'application, bulle protégée ignorée, bulle sous une fenêtre du jeu non
+  traduite, `/chevaliers bulles off` qui envoie une liste vide (0.15) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
@@ -370,14 +423,19 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
 
-## Test de la 0.14.8 (PowerShell)
+## Test de la 0.15.0 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
-| Lancement | aucune console ; médaillon près de l'horloge et sur l'exécutable ; infobulle « En attente de World of Warcraft » |
-| Installation | journal : addon 0.14.8 posé et vérifié dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Lancement | fenêtre des modèles ouverte ; médaillon près de l'horloge ; raccourci « Chevaliers Translators » sur le bureau (premier lancement) |
+| Second lancement | double-clic sur le raccourci : la fenêtre des modèles revient devant, pas de second médaillon |
+| Bandeau caché | en jeu, plus de blocs colorés en bas à droite ; journal : `[bandeau] caché aux yeux du joueur` ; la traduction continue |
+| Bulles | en ville, un joueur qui `/dit` dans une autre langue : la bulle porte `[XX] traduction` et la suit ; `/chevaliers bulles off` : bulles d'origine |
+| Deux WoW | deux fenêtres visibles côte à côte : journal `[WoW 1 …]` et `[WoW 2 …]`, chat traduit dans chacune, un seul `llama-server` |
+| Cache 8 bits | `traduction-serveur.log` : `-ctk q8_0` accepté ; sinon, journal « cache 8 bits refusé … relance » et traduction normale |
+| Installation | journal : addon 0.15.0 posé et vérifié dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
 | Téléchargements | infobulle de l'icône : pourcentage ; WoW ouvert : « débit bridé » ; à la fin : bulle « Modèles de traduction prêts » |
 | Télévision | WoW sur la télé : « Écran de télévision » à la connexion ; chat traduit sur plaque sombre ; `/chevaliers tele off` le cache comme sur un écran de PC |
 | Combat | rien de dessiné pendant le combat ; à la fin, chat traduit et bilan |
@@ -388,5 +446,4 @@ Voir la réponse de livraison pour les commandes à copier-coller. Points à vé
 | Traduction | application lancée avant la connexion : « Traduction du chat active » à l'arrivée en jeu, **aucun /reload** ; `/dire hello` affiché `[EN] bonjour` |
 | Application après la connexion | `/reload` demandé (seul cas) ; après `/reload`, traduction active |
 | Fermeture de WoW | 20 s après : « traduction arrêtée : WoW fermé » au journal, plus de `llama-server` |
-| Deuxième lancement | message « déjà lancé » |
 | Quitter | confirmation ; icône et `llama-server` disparus |

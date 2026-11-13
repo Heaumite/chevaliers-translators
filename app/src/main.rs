@@ -6,7 +6,9 @@
 //! s'arrête quand il est fermé (mémoire vidéo rendue). Ce qu'affichait la console de la phase 0
 //! va dans le journal (`%LOCALAPPDATA%\ChevaliersTranslators\journal`).
 //!
-//! `ChevaliersTranslators.exe interface` : fenêtre des modèles (ouverte depuis le menu de l'icône).
+//! `ChevaliersTranslators.exe interface` : fenêtre des modèles (ouverte depuis le menu de l'icône,
+//! et à chaque lancement par le joueur ; `--discret` : sans elle). Premier lancement : raccourci
+//! sur le bureau.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -101,6 +103,7 @@ mod app {
 
     use ct::tray_win::{self, Tray, TITLE};
     use ct::{capture_win, catalog, engine, fonts, install, lang, live, mirror, ui};
+    use ct::jeux_win as live_games;
 
     use crate::journal;
 
@@ -131,6 +134,12 @@ mod app {
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
         let Some(_instance) = single_instance() else {
+            // Second lancement (raccourci du bureau, double-clic) : l'application déjà lancée
+            // ouvre sa fenêtre des modèles (0.15).
+            if tray_win::ask_running_to_open_models() {
+                ct::say!("déjà lancée : fenêtre des modèles demandée à l'application lancée");
+                return ExitCode::SUCCESS;
+            }
             ct::say!("déjà lancée : arrêt");
             tray_win::message(
                 "Chevaliers Translators est déjà lancé : son icône est près de l'horloge \
@@ -150,9 +159,25 @@ mod app {
                 return ExitCode::FAILURE;
             }
         };
+        desktop_shortcut();
+        // Ouverture par le joueur (0.15) : la fenêtre des modèles s'affiche ; « --discret » pour
+        // un lancement sans fenêtre.
+        if !std::env::args().any(|a| a == "--discret") {
+            Tray::open_models();
+        }
         run(&tray);
         ct::say!("{} fin", journal::clock());
         ExitCode::SUCCESS
+    }
+
+    /// Raccourci « Chevaliers Translators » sur le bureau (0.15) : posé au premier lancement.
+    fn desktop_shortcut() {
+        let Ok(exe) = std::env::current_exe() else { return };
+        match ct::raccourci::ensure(&exe) {
+            Ok(Some(link)) => ct::say!("Raccourci posé sur le bureau : {}", link.display()),
+            Ok(None) => {}
+            Err(e) => ct::say!("Raccourci du bureau impossible : {e}"),
+        }
     }
 
     /// Boucle de l'application : addon posé, puis traduction tant que WoW est ouvert.
@@ -178,12 +203,8 @@ mod app {
                 }
                 said = Some(Instant::now());
             }
-            if let Some((root, flavor)) = capture_win::wow_game() {
-                if !roots.iter().any(|r| same_path(r, &root)) {
-                    roots.push(root.clone());
-                }
-                ensure_addon(tray, &root, &flavor);
-                translate(tray, &root, &flavor, &mut last_error);
+            if !capture_win::wow_windows().is_empty() {
+                translate_all(tray, &mut roots, &mut last_error);
                 if Tray::quit_asked() {
                     break;
                 }
@@ -209,6 +230,9 @@ mod app {
         ct::say!("{} désinstallation{} : {} élément(s)", journal::clock(), if data { " complète" } else { " de l'addon" }, targets.len());
         for t in &targets {
             ct::say!("  {}", t.display());
+        }
+        if let Some(link) = ct::raccourci::remove() {
+            ct::say!("  {} (raccourci du bureau)", link.display());
         }
         let later = install::remove_now(&targets);
         if !later.is_empty() {
@@ -246,23 +270,12 @@ mod app {
         }
     }
 
-    /// Traduction pour le jeu ouvert, jusqu'à Quitter, sa fermeture ou son changement de version.
-    fn translate(tray: &Tray, root: &Path, flavor: &str, last_error: &mut Option<String>) {
-        let locale = fonts::client_locale_of(root, flavor);
-        let client = lang::from_locale(&locale).unwrap_or("en");
-        let label = flavor_label(flavor);
-        ct::say!(
-            "{} WoW {label} ouvert ({}, client {locale}) : traduction vers {}",
-            journal::clock(),
-            root.display(),
-            client.to_uppercase()
-        );
-        tray.set_status(&format!("WoW {label} : traduction vers {}", client.to_uppercase()));
-        // Écran de WoW (0.14) : reconnu dès l'ouverture du jeu, avant la connexion du personnage.
-        // Sur une télévision, l'addon applique le dispositif télévision (le chat traduit recouvre
-        // celui du jeu). Plein écran ou fenêtré : rien à changer dans WoW.
-        screen_of_wow();
-        log_display_mode(root, flavor);
+    /// Traduction de toutes les fenêtres de WoW ouvertes (0.15 : plusieurs jeux à la fois, chacun
+    /// dans sa version et la langue de son client, un seul modèle pour tous), jusqu'à Quitter ou
+    /// la fermeture du dernier jeu.
+    fn translate_all(tray: &Tray, roots: &mut Vec<PathBuf>, last_error: &mut Option<String>) {
+        use std::collections::HashSet;
+        let Some(first) = capture_win::wow_windows().into_iter().find_map(capture_win::game_of) else { return };
         if let Some(missing) = missing_parts().filter(|_| !ct::telechargements::status().active) {
             tray.notify(
                 "Traduction impossible pour l'instant",
@@ -271,60 +284,109 @@ mod app {
             );
         }
         let cfg = engine::Config {
-            wow: Some(root.join(flavor)),
+            wow: Some(first.0.join(&first.1)),
             models: catalog::models_dir(),
             port: free_port(),
             log: engine::log_path(),
             phrases: Some(engine::phrases_path()),
         };
         let mut gone: Option<Instant> = None;
-        let mut checked = Instant::now();
         let mut why = "";
         let mut downloading = ct::telechargements::status().active;
         let mut shown_at = Instant::now();
-        let status = format!("WoW {label} : traduction vers {}", client.to_uppercase());
-        let r = live::run(
+        let status = std::cell::RefCell::new(String::from("En attente de World of Warcraft"));
+        let mut ensured: HashSet<(String, String)> = HashSet::new();
+        let mut seen: HashSet<isize> = HashSet::new();
+        let mut found_roots: Vec<PathBuf> = Vec::new();
+        let mut last_count = usize::MAX;
+        let mut games = || -> Vec<live_games::GameSpec> {
+            let mut out = Vec::new();
+            for h in capture_win::wow_windows() {
+                let Some((root, flavor)) = capture_win::game_of(h) else { continue };
+                let key = (root.to_string_lossy().to_lowercase(), flavor.clone());
+                if ensured.insert(key) {
+                    if !found_roots.iter().any(|r| same_path(r, &root)) {
+                        found_roots.push(root.clone());
+                    }
+                    ensure_addon(tray, &root, &flavor);
+                }
+                let locale = fonts::client_locale_of(&root, &flavor);
+                let client = lang::from_locale(&locale).unwrap_or("en");
+                let label = flavor_label(&flavor);
+                if seen.insert(h as isize) {
+                    ct::say!(
+                        "{} WoW {label} ouvert ({}, client {locale}) : traduction vers {}",
+                        journal::clock(),
+                        root.display(),
+                        client.to_uppercase()
+                    );
+                    // Écran de WoW (0.14) : reconnu dès l'ouverture du jeu ; sur une télévision,
+                    // l'addon applique le dispositif télévision.
+                    screen_of_wow(h);
+                    log_display_mode(&root, &flavor);
+                }
+                out.push(live_games::GameSpec {
+                    hwnd: h as isize,
+                    addons: Some(install::addons_dir(&root, &flavor)),
+                    fonts: live::FontSource::Game { wow: root.clone(), flavor: flavor.clone() },
+                    client,
+                    label,
+                });
+            }
+            if out.len() != last_count {
+                last_count = out.len();
+                *status.borrow_mut() = match out.as_slice() {
+                    [] => "En attente de World of Warcraft".to_string(),
+                    [g] => format!("WoW {} : traduction vers {}", g.label, g.client.to_uppercase()),
+                    many => format!("{} jeux traduits : {}", many.len(), many.iter().map(|g| g.label.as_str()).collect::<Vec<_>>().join(", ")),
+                };
+                tray.set_status(&status.borrow());
+                if out.len() > 1 {
+                    ct::say!("{} {} fenêtres de WoW traduites en même temps (un seul modèle pour toutes)", journal::clock(), out.len());
+                }
+            }
+            out
+        };
+        let mut checked = Instant::now();
+        let r = live_games::run_games(
             0,
             48,
-            4,
-            Some(install::addons_dir(root, flavor)),
-            live::FontSource::Game { wow: root.to_path_buf(), flavor: flavor.to_string() },
+            // Capture rapide toutes les 8 ms quand le bandeau change, 40 ms au repos (0.15).
+            8,
             false,
             // Calage du 08/11/2026 (Forever, Arial Narrow 16 px) : texte du miroir 1 px à gauche.
             mirror::RenderOpts { dx: 1.0, dy: 0.0, plate: None },
-            Some((cfg, client, true)),
+            Some((cfg, true)),
+            &mut games,
             &mut || {
                 if Tray::quit_asked() {
                     why = "Quitter";
                     return false;
                 }
-                downloads_tick(tray, &mut downloading, &mut shown_at, &status);
+                downloads_tick(tray, &mut downloading, &mut shown_at, &status.borrow());
                 let now = Instant::now();
                 if now.duration_since(checked) < Duration::from_secs(1) {
                     return true;
                 }
                 checked = now;
-                match capture_win::wow_game() {
-                    Some((r, f)) if same_path(&r, root) && f == flavor => {
-                        gone = None;
-                        true
+                if capture_win::wow_windows().is_empty() {
+                    let since = *gone.get_or_insert(now);
+                    if now.duration_since(since) >= GONE {
+                        why = "WoW fermé";
+                        return false;
                     }
-                    Some(_) => {
-                        why = "WoW ouvert dans une autre version";
-                        false
-                    }
-                    None => {
-                        let since = *gone.get_or_insert(now);
-                        if now.duration_since(since) >= GONE {
-                            why = "WoW fermé";
-                            false
-                        } else {
-                            true
-                        }
-                    }
+                } else {
+                    gone = None;
                 }
+                true
             },
+            false,
         );
+        for r in found_roots {
+            if !roots.iter().any(|x| same_path(x, &r)) {
+                roots.push(r);
+            }
+        }
         match r {
             Ok(()) => {
                 ct::say!("{} traduction arrêtée : {why}", journal::clock());
@@ -508,8 +570,8 @@ mod app {
     }
 
     /// Écran de WoW : dispositif télévision noté dans la présence (lue par l'addon à la connexion).
-    fn screen_of_wow() {
-        if let Some(s) = capture_win::wow_screen() {
+    fn screen_of_wow(h: windows_sys::Win32::Foundation::HWND) {
+        if let Some(s) = capture_win::screen_of(h) {
             let tv = s.is_tv();
             install::set_screen_tv(tv);
             ct::say!(

@@ -112,6 +112,13 @@ part, testé en jeu. (a) et (b) touchent le même cœur capture/superposition.
 **0.15** : mises à jour des modèles suivies sur Hugging Face, vérifiées WoW fermé puis essayées
 pendant une absence (AFK) avant d'être proposées.
 
+**0.15.0 (13/11)** : bulles de dialogue traduites (acronyme de la langue, suivent le personnage) ;
+plusieurs WoW traduits à la fois avec un seul moteur ; bandeau caché au joueur (image exclue des
+captures) ; raccourci sur le bureau et fenêtre des modèles à l'ouverture ; économies : capture
+adaptative et resserrée (8 à 40 fois moins de lectures d'écran), bandeau repeint bloc par bloc,
+cache du modèle en 8 bits (130 à 170 Mo de mémoire vidéo rendus), effacement du chat à 15 images/s ;
+`Guide.lua` séparé.
+
 **J2 - Installation et démarrage**
 - Premier lancement guidé : WoW trouvé, addon posé dans toutes les versions, moteur llama.cpp et
   pack low téléchargés, matériel détecté, modèles proposés (interface de la phase 0).

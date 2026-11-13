@@ -30,6 +30,9 @@ pub const FRAME_ICON: u8 = 15;
 pub const FRAME_ZONE: u8 = 16;
 /// Message reçu pendant le verrouillage du chat (combat en instance), relayé à sa fin (0.13.3).
 pub const FRAME_LATE: u8 = 17;
+/// Bulles de dialogue au-dessus des joueurs (0.15) : place, couleur et police de chacune, et le
+/// numéro du message relayé qu'elle affiche (`mirror::bulles::parse`).
+pub const FRAME_BUBBLE: u8 = 18;
 pub const STATE_READY: u8 = 1;
 pub const STATE_CANCEL: u8 = 2;
 pub const STATE_SENT: u8 = 3;

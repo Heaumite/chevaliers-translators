@@ -43,6 +43,24 @@ pub fn wow_window() -> HWND {
     }
 }
 
+/// Toutes les fenêtres de WoW ouvertes (0.15 : plusieurs jeux à la fois, multi-comptes ou
+/// plusieurs versions), dans l'ordre d'empilement de Windows ; seulement celles dont l'exécutable
+/// est dans un dossier de version du jeu.
+pub fn wow_windows() -> Vec<HWND> {
+    unsafe extern "system" fn cb(h: HWND, lp: LPARAM) -> windows_sys::core::BOOL {
+        if IsWindowVisible(h) != 0 && title_of(h).starts_with("World of Warcraft") {
+            (*(lp as *mut Vec<HWND>)).push(h);
+        }
+        1
+    }
+    let mut found: Vec<HWND> = Vec::new();
+    unsafe {
+        EnumWindows(Some(cb), &mut found as *mut Vec<HWND> as LPARAM);
+    }
+    found.retain(|h| game_of(*h).is_some());
+    found
+}
+
 /// Titre d'une fenêtre d'un autre programme ; vide pour les fenêtres de l'application elle-même.
 /// GetWindowTextW envoie un message (WM_GETTEXT) aux fenêtres de son propre programme et attend
 /// que leur fil le traite : appelé depuis le fil de capture pendant que le fil principal attendait
@@ -83,7 +101,9 @@ pub fn wow_game() -> Option<(std::path::PathBuf, String)> {
 
 /// (dossier World of Warcraft, version) de l'exécutable d'une fenêtre, s'il est dans un dossier de
 /// version du jeu.
-fn game_of(h: HWND) -> Option<(std::path::PathBuf, String)> {
+// Poignée de fenêtre transmise à Windows, jamais lue par le programme.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn game_of(h: HWND) -> Option<(std::path::PathBuf, String)> {
     let dir = exe_of(h)?.parent()?.to_path_buf();
     let flavor = dir.file_name()?.to_string_lossy().into_owned();
     if !(flavor.len() > 2 && flavor.starts_with('_') && flavor.ends_with('_')) {
@@ -148,13 +168,19 @@ pub fn wow_client_rect() -> Option<(i32, i32, i32, i32)> {
 /// Écran où se trouve WoW (0.13.3, télévision 4K) : nom, télévision, liaison, HDR, définition,
 /// échelle de Windows et zone de jeu, pour le journal ; vrai si c'est une télévision (0.14).
 pub fn wow_screen_info() -> Option<(String, bool)> {
+    screen_info_of(wow_window())
+}
+
+/// Comme `wow_screen_info`, pour une fenêtre de WoW donnée (0.15, plusieurs jeux).
+// Poignée de fenêtre transmise à Windows, jamais lue par le programme.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn screen_info_of(h: HWND) -> Option<(String, bool)> {
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-    let h = wow_window();
     if h.is_null() {
         return None;
     }
     let (l, t, r, b) = client_rect(h)?;
-    let s = wow_screen()?;
+    let s = screen_of(h)?;
     let dpi = unsafe { GetDpiForWindow(h) };
     Some((
         format!("WoW sur {} ; échelle {} %, zone de jeu {}x{} en ({l}, {t})", s.describe(), dpi * 100 / 96, r - l, b - t),
@@ -267,8 +293,13 @@ fn edid_of(key: &str) -> Option<Vec<u8>> {
 
 /// Écran où se trouve WoW (périphérique de Windows « \\.\DISPLAYn »).
 pub fn wow_monitor_device() -> Option<String> {
+    monitor_device_of(wow_window())
+}
+
+// Poignée de fenêtre transmise à Windows, jamais lue par le programme.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn monitor_device_of(h: HWND) -> Option<String> {
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST};
-    let h = wow_window();
     if h.is_null() {
         return None;
     }
@@ -286,7 +317,14 @@ pub fn wow_monitor_device() -> Option<String> {
 
 /// Écran de WoW, décrit (nom, télévision, HDR...), s'il est ouvert.
 pub fn wow_screen() -> Option<crate::ecran::Screen> {
-    let dev = wow_monitor_device()?;
+    screen_of(wow_window())
+}
+
+/// Écran d'une fenêtre, décrit.
+// Poignée de fenêtre transmise à Windows, jamais lue par le programme.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn screen_of(h: HWND) -> Option<crate::ecran::Screen> {
+    let dev = monitor_device_of(h)?;
     let found = screens().into_iter().find(|s| s.gdi.eq_ignore_ascii_case(&dev));
     Some(found.unwrap_or(crate::ecran::Screen { gdi: dev, ..Default::default() }))
 }
@@ -308,11 +346,26 @@ pub struct Capturer {
     looked: Option<std::time::Instant>,
     /// Largeur demandée (0 : selon la largeur de WoW).
     asked_w: usize,
+    /// Fenêtre imposée (0.15, plusieurs jeux) : jamais remplacée par une autre fenêtre de WoW.
+    fixed: bool,
+    /// Hauteur de la zone large (avant resserrement sur le bandeau).
+    full_h: usize,
+    /// Zone resserrée sur le bandeau trouvé (0.15) : (largeur, hauteur) ; `None` : zone large.
+    narrow: Option<(usize, usize)>,
 }
 
 impl Capturer {
     /// `width` à 0 : 30 % de la largeur de l'écran, de quoi contenir le bandeau (25 %).
     pub fn new(width: usize, height: usize) -> Result<Self, String> {
+        Self::new_for(width, height, null_mut())
+    }
+
+    /// Capture du bandeau d'une fenêtre de WoW donnée (nulle : la fenêtre de WoW trouvée, suivie).
+    // Poignée de fenêtre transmise à Windows, jamais lue par le programme.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn new_for(width: usize, height: usize, target: HWND) -> Result<Self, String> {
+        let fixed = !target.is_null();
+        let start = if fixed { target } else { wow_window() };
         unsafe {
             // Coordonnées en pixels physiques, quelle que soit la mise à l'échelle Windows.
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -324,7 +377,7 @@ impl Capturer {
             }
             // Largeur de WoW s'il est ouvert (télévision 4K à côté d'un écran plus petit, 0.13.3),
             // sinon celle de l'écran principal ; suivie ensuite (voir follow_wow).
-            let base = client_rect(wow_window()).map_or(sw, |(l, _, r, _)| (r - l).max(sw.min(640)));
+            let base = client_rect(start).map_or(sw, |(l, _, r, _)| (r - l).max(sw.min(640)));
             let w = if width == 0 {
                 (base as f32 * 0.30) as i32 + 8
             } else {
@@ -364,9 +417,12 @@ impl Capturer {
                 y: sh - h,
                 screen_w: sw,
                 screen_h: sh,
-                wow: null_mut(),
+                wow: if fixed { target } else { null_mut() },
                 looked: None,
                 asked_w: width,
+                fixed,
+                full_h: h as usize,
+                narrow: None,
             })
         }
     }
@@ -374,30 +430,67 @@ impl Capturer {
     /// Place la zone de capture au coin bas-droit de la zone de jeu de WoW.
     fn follow_wow(&mut self) {
         let stale = self.looked.map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(1));
-        if stale || self.wow.is_null() {
+        if !self.fixed && (stale || self.wow.is_null()) {
             self.wow = wow_window();
             self.looked = Some(std::time::Instant::now());
         }
         if let Some((l, _, r, b)) = client_rect(self.wow) {
-            // Zone de capture à la taille du bandeau de ce WoW (30 % de sa largeur).
-            if self.asked_w == 0 {
-                let want = (((r - l) as f32 * 0.30) as i32 + 8).max(64) as usize;
-                if want.abs_diff(self.w) > 16 {
-                    self.resize(want);
+            // Zone resserrée sur le bandeau (0.15) : sa taille ne suit plus celle de WoW.
+            if let Some((w, h)) = self.narrow {
+                if (w, h) != (self.w, self.h) {
+                    self.resize(w, h);
                 }
+            } else if self.asked_w == 0 {
+                // Zone de capture à la taille du bandeau de ce WoW (30 % de sa largeur).
+                let want = (((r - l) as f32 * 0.30) as i32 + 8).max(64) as usize;
+                if want.abs_diff(self.w) > 16 || self.h != self.full_h {
+                    self.resize(want, self.full_h);
+                }
+            } else if self.h != self.full_h || self.w != self.asked_w {
+                self.resize(self.asked_w, self.full_h);
             }
             self.x = r - self.w as i32;
             self.y = b - self.h as i32;
         }
     }
 
-    /// Nouvelle largeur de la zone de capture (WoW redimensionné ou sur un autre écran).
-    fn resize(&mut self, w: usize) {
+    /// La fenêtre de WoW capturée existe-t-elle encore ?
+    pub fn target_alive(&self) -> bool {
+        unsafe { !self.wow.is_null() && IsWindow(self.wow) != 0 }
+    }
+
+    /// Coin haut-gauche de la zone capturée (pixels du bureau).
+    pub fn origin(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+
+    /// Bandeau trouvé (0.15) : la zone capturée se resserre sur lui (sa largeur et deux blocs de
+    /// marge, plus quelques rangées au-dessus pour le cache du bandeau). Environ 4 fois moins de
+    /// pixels lus à chaque capture.
+    pub fn narrow_to(&mut self, g: &crate::decode::Geometry) {
+        // Bandeau collé au coin bas-droit de la zone capturée seulement (sinon, rien à resserrer).
+        if g.right + 4 < self.w || g.bottom + 4 < self.h || g.block == 0 || g.cols == 0 {
+            return;
+        }
+        self.narrow = Some(crate::bandeau::narrow_size(g));
+    }
+
+    /// Bandeau perdu : retour à la zone large.
+    pub fn widen(&mut self) {
+        self.narrow = None;
+    }
+
+    pub fn narrowed(&self) -> bool {
+        self.narrow.is_some()
+    }
+
+    /// Nouvelle taille de la zone de capture (WoW redimensionné, autre écran, zone resserrée).
+    fn resize(&mut self, w: usize, h: usize) {
         unsafe {
             let mut bmi: BITMAPINFO = std::mem::zeroed();
             bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
             bmi.bmiHeader.biWidth = w as i32;
-            bmi.bmiHeader.biHeight = -(self.h as i32);
+            bmi.bmiHeader.biHeight = -(h as i32);
             bmi.bmiHeader.biPlanes = 1;
             bmi.bmiHeader.biBitCount = 32;
             bmi.bmiHeader.biCompression = BI_RGB;
@@ -411,6 +504,7 @@ impl Capturer {
             self.bmp = bmp;
             self.bits = bits as *mut u8;
             self.w = w;
+            self.h = h;
         }
     }
 

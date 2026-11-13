@@ -150,6 +150,9 @@ CT.FRAME_ICON = 15
 CT.FRAME_ZONE = 16
 -- Message reçu pendant le verrouillage du chat (combat en instance), relayé après (0.13.3).
 CT.FRAME_LATE = 17
+-- Bulles de dialogue au-dessus des joueurs (0.15) : place, couleur et police de chacune, et le
+-- numéro du message relayé qu'elle affiche.
+CT.FRAME_BUBBLE = 18
 
 CT.CHANNEL_CODES = {
   SAY = 1, YELL = 2, WHISPER = 3, WHISPER_INFORM = 4,
