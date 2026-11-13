@@ -37,6 +37,7 @@ pub mod plan;
 pub mod mesures;
 pub mod conseil;
 pub mod telechargements;
+pub mod textes;
 pub mod proto;
 pub mod raccourci;
 pub mod regul;

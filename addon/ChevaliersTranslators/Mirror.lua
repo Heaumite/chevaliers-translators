@@ -18,7 +18,7 @@
 -- Le journal de combat n'est jamais modifié.
 
 local ADDON, CT = ...
-local floor, format, min, max = math.floor, string.format, math.min, math.max
+local floor, ceil, format, min, max = math.floor, math.ceil, string.format, math.min, math.max
 local strbyte = string.byte
 
 local FLAG_VISIBLE, FLAG_CALAGE, FLAG_OFFICIAL, FLAG_FADE, FLAG_TRUNC = 1, 2, 4, 8, 16
@@ -41,7 +41,6 @@ local TEXT_RESEND = 60
 -- (« \029XXXX\029 ») au lieu de le renvoyer (0.12.3 : moitié moins de trames par message).
 local CITE_TTL, CITE_MIN, CITE_MAX = 20, 16, 40
 local OCC_POLL = 0.1     -- rectangles posés sur le chat : relus 10 fois par seconde
-local OCC_MARGIN = 10    -- pixels ajoutés autour de chaque rectangle
 
 local M = {
   mode = "off",
@@ -758,8 +757,33 @@ for i = 1, 13 do OCC_NAMES[#OCC_NAMES + 1] = "ContainerFrame" .. i end
 
 local occNames, occAt, occSig, occSentAt = nil, -10, "", -10
 -- Menus récents vus pendant leur ouverture (le gestionnaire ne donne que le premier niveau ; les
--- sous-menus sont repérés sous la souris).
+-- sous-menus sont repérés sous la souris, et parmi les cadres de la même strate que le menu).
 local menuSeen = {}
+-- Sous-menus ouverts à côté du menu (0.16.1 : sous-menu « Taille de la police » des réglages du
+-- chat recouvert par le miroir tant que la souris restait sur le menu) : cadres visibles de la même
+-- strate que le menu, rattachés à l'interface ou à un menu ouvert. Relevés 4 fois par seconde au
+-- plus, seulement pendant qu'un menu est ouvert.
+local menuScanAt, menuExtra = -10, {}
+local MENU_SCAN = 0.25
+
+local function MenuFamily(root, now)
+  if now - menuScanAt < MENU_SCAN or not EnumerateFrames then return menuExtra end
+  menuScanAt, menuExtra = now, {}
+  local okS, strata = pcall(root.GetFrameStrata, root)
+  if not okS or type(strata) ~= "string" then return menuExtra end
+  local f, n = EnumerateFrames(), 0
+  while f and n < 30000 do
+    n = n + 1
+    if f ~= root and not (f.IsForbidden and f:IsForbidden()) then
+      local ok, vis, st, par = pcall(function() return f:IsVisible(), f:GetFrameStrata(), f:GetParent() end)
+      if ok and vis and st == strata and (par == nil or par == UIParent or par == root or menuSeen[par]) then
+        menuExtra[#menuExtra + 1] = f
+      end
+    end
+    f = EnumerateFrames(f)
+  end
+  return menuExtra
+end
 
 local function OccNames()
   if occNames then return occNames end
@@ -777,15 +801,42 @@ local function OccNames()
   return list
 end
 
+-- Ombre portée d'un menu ou d'une bulle (texture ou atlas « shadow ») : ignorée.
+local function Shadowy(r)
+  local ok, t = pcall(function()
+    return (r.GetAtlas and r:GetAtlas()) or (r.GetTexture and r:GetTexture())
+  end)
+  return ok and type(t) == "string" and t:lower():find("shadow", 1, true) ~= nil
+end
+
+-- Bord visible d'une boîte (0.16.1) : son cadre, agrandi de sa bordure quand elle dépasse (pièces
+-- du NineSlice, bordure, fond), sans son ombre. Le miroir s'efface au ras de la boîte (avant : une
+-- marge fixe de 10 à 14 pixels laissait un vide sombre autour des menus).
 local function Rect(f, k0)
   if not (f and f.IsVisible and f:IsVisible()) then return nil end
   local l, b, w, h = f:GetLeft(), f:GetBottom(), f:GetWidth(), f:GetHeight()
   if not (l and b and w and h) or w <= 0 or h <= 0 then return nil end
+  local L, B, R, T = l, b, l + w, b + h
+  local function grow(x)
+    if type(x) ~= "table" or not (x.IsVisible and x:IsVisible()) or Shadowy(x) then return end
+    local xl, xb, xw, xh = x:GetLeft(), x:GetBottom(), x:GetWidth(), x:GetHeight()
+    if not (xl and xb and xw and xh) then return end
+    -- Une bordure, pas une autre fenêtre : au plus 16 unités hors du cadre.
+    if xl < l - 16 or xb < b - 16 or xl + xw > l + w + 16 or xb + xh > b + h + 16 then return end
+    L, B, R, T = min(L, xl), min(B, xb), max(R, xl + xw), max(T, xb + xh)
+  end
+  for _, key in ipairs({ "NineSlice", "Border", "Backdrop" }) do
+    local border = f[key]
+    if type(border) == "table" then
+      grow(border)
+      if border.GetRegions then
+        for _, r in ipairs({ border:GetRegions() }) do grow(r) end
+      end
+    end
+  end
   local k = f:GetEffectiveScale() * k0
-  -- Marge : bordures et ombres des menus et bulles dépassent un peu de leur cadre (essai du
-  -- 09/11/2026 : bas du menu de l'onglet recouvert).
-  local m = OCC_MARGIN
-  return { floor(l * k) - m, floor(b * k) - m, floor(w * k + 1.5) + 2 * m, floor(h * k + 1.5) + 2 * m }
+  -- Un pixel de plus de chaque côté : le bord adouci de la bordure.
+  return { floor(L * k) - 1, floor(B * k) - 1, ceil((R - L) * k) + 2, ceil((T - B) * k) + 2 }
 end
 
 local function Overlaps(r)
@@ -798,6 +849,8 @@ end
 -- Rectangles des fenêtres du jeu affichées (carte, sacs, menus...), où qu'elles soient : les bulles
 -- de dialogue qu'elles recouvrent ne sont pas traduites (0.15). Relus au plus 4 fois par seconde.
 local uiAt, uiRects = -10, {}
+M.Rect = Rect
+
 function M:UiRects(k0)
   local now = GetTime()
   if now - uiAt < 0.25 then return uiRects end
@@ -848,8 +901,12 @@ function M:Occluders(now)
       end)
       if okF and top and top ~= UIParent and top ~= WorldFrame then menuSeen[top] = true end
       for m in pairs(menuSeen) do add(m) end
-    elseif next(menuSeen) then
-      menuSeen = {}
+      local okE, extra = pcall(MenuFamily, root, now)
+      if okE then
+        for _, m in ipairs(extra) do add(m) end
+      end
+    elseif next(menuSeen) or #menuExtra > 0 then
+      menuSeen, menuExtra, menuScanAt = {}, {}, -10
     end
   end
   local parts = {}

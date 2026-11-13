@@ -1,4 +1,4 @@
-//! Mise à jour automatique depuis GitHub (0.16).
+//! Mises à jour depuis GitHub (0.16 ; 0.16.1 : installées sur demande du joueur).
 //!
 //! L'application regarde la dernière version publiée sur GitHub (Releases du dépôt), 20 s après
 //! son lancement puis toutes les 30 minutes (ou tout de suite par le menu de l'icône). Une version
@@ -6,14 +6,18 @@
 //! exactement l'empreinte SHA-256 publiée avec lui (`.zip.sha256`), sinon il est refusé ; son
 //! exécutable en est extrait.
 //!
-//! Installation dès qu'aucun WoW n'est ouvert (jamais pendant une partie) : l'exécutable en cours
-//! est renommé (`.exe.ancien`, Windows le permet pendant qu'il tourne), le nouveau prend sa place,
-//! puis il est lancé et l'ancien s'arrête. Au démarrage, la nouvelle version pose son addon dans
-//! toutes les versions de WoW trouvées, vérifié fichier par fichier, et remplace les copies de
-//! l'exécutable rangées dans les dossiers de l'addon : toutes les installations du PC suivent.
+//! Le joueur est alors prévenu : la fenêtre de l'application montre « Mise à jour X disponible »,
+//! un bouton pour l'installer et la note de mise à jour (le texte de la version sur GitHub). WoW au
+//! premier plan : une bulle près de l'horloge, et la fenêtre s'ouvre dès que WoW n'est plus devant.
+//! Au clic, l'exécutable en cours est renommé (`.exe.ancien`, Windows le permet pendant qu'il
+//! tourne), le nouveau prend sa place, il est lancé et l'ancien s'arrête. Au démarrage, la nouvelle
+//! version pose son addon dans toutes les versions de WoW trouvées, vérifié fichier par fichier, et
+//! remplace les copies de l'exécutable rangées dans les dossiers de l'addon.
 //!
-//! Une version compilée sur place (dossier `target`, développement) ne se met jamais à jour seule.
-//! Menu de l'icône : « Rechercher une mise à jour », « Mises à jour automatiques » (coupables).
+//! Fenêtre de l'application (processus à part) et application : un petit fichier d'état
+//! (`maj/etat.json`) et un fichier de demande d'installation (`maj/installer.demande`).
+//! Menu de l'icône : « Rechercher une mise à jour », « Rechercher les mises à jour
+//! automatiquement » (coupable).
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -39,6 +43,8 @@ pub struct Release {
     pub zip_url: String,
     pub size: u64,
     pub sha_url: String,
+    /// Note de mise à jour (texte de la version sur GitHub, en Markdown).
+    pub notes: String,
 }
 
 /// « v0.15.2 », « 0.15.2 » -> (0, 15, 2).
@@ -71,6 +77,7 @@ pub fn release_from_json(v: &Value) -> Option<Release> {
         zip_url: zip["browser_download_url"].as_str()?.to_string(),
         size: zip["size"].as_u64().unwrap_or(0),
         sha_url: sha["browser_download_url"].as_str()?.to_string(),
+        notes: v["body"].as_str().unwrap_or("").replace("\r\n", "\n").trim().to_string(),
         version,
         zip_name,
     })
@@ -254,9 +261,9 @@ pub fn download(rel: &Release) -> Result<PathBuf, String> {
 pub enum Event {
     /// Recherche demandée par le joueur : déjà la dernière version.
     UpToDate(String),
-    /// Nouvelle version trouvée, téléchargement en cours.
+    /// Nouvelle version trouvée, téléchargement en cours (recherche demandée par le joueur).
     Found(String),
-    /// Nouvelle version téléchargée et vérifiée : installée dès qu'aucun WoW n'est ouvert.
+    /// Nouvelle version téléchargée et vérifiée : le joueur est prévenu (fenêtre, bouton, note).
     Ready(String),
     Problem(String),
 }
@@ -296,8 +303,82 @@ pub fn forget_ready() {
     with(|s| s.skip = s.ready.take().map(|(v, _)| v));
 }
 
-/// Lance la recherche en fond. `exe` : exécutable en cours (une version de développement ne se
-/// met pas à jour seule, mais la recherche demandée par le menu dit qu'il y a du nouveau).
+// --- État partagé avec la fenêtre de l'application ---------------------------------------------
+
+fn dir() -> PathBuf {
+    crate::fonts::cache_root().join("maj")
+}
+
+fn state_file() -> PathBuf {
+    dir().join("etat.json")
+}
+
+fn installed_file() -> PathBuf {
+    dir().join("installee.json")
+}
+
+fn request_file() -> PathBuf {
+    dir().join("installer.demande")
+}
+
+/// État de la mise à jour vu par la fenêtre : version, note, étape (« telechargement »,
+/// « prete », « installation », « erreur »), message.
+pub fn write_state(version: &str, notes: &str, step: &str, message: &str) {
+    let _ = std::fs::create_dir_all(dir());
+    let v = serde_json::json!({ "version": version, "notes": notes, "etat": step, "message": message });
+    let _ = std::fs::write(state_file(), v.to_string());
+}
+
+/// Nouvelle étape de la mise à jour, sa note gardée (montrée encore après l'installation).
+pub fn set_step(version: &str, step: &str, message: &str) {
+    let notes = std::fs::read(state_file())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .filter(|v| v["version"].as_str() == Some(version))
+        .and_then(|v| v["notes"].as_str().map(str::to_string))
+        .unwrap_or_default();
+    write_state(version, &notes, step, message);
+}
+
+/// Mise à jour à montrer dans la fenêtre : seulement une version plus récente que celle-ci.
+pub fn read_state(current: &str) -> Option<Value> {
+    let v: Value = serde_json::from_slice(&std::fs::read(state_file()).ok()?).ok()?;
+    is_newer(v["version"].as_str()?, current).then_some(v)
+}
+
+/// Nouveautés de la version qui vient d'être installée (montrées une fois dans la fenêtre).
+pub fn read_installed(current: &str) -> Option<Value> {
+    let v: Value = serde_json::from_slice(&std::fs::read(installed_file()).ok()?).ok()?;
+    (v["version"].as_str()? == current).then_some(v)
+}
+
+/// Nouveautés lues par le joueur.
+pub fn dismiss_installed() {
+    let _ = std::fs::remove_file(installed_file());
+}
+
+/// Au premier lancement de la version installée : l'état de la mise à jour devient « nouveautés ».
+pub fn mark_installed(current: &str) {
+    if let Ok(Some(v)) = std::fs::read(state_file()).map(|b| serde_json::from_slice::<Value>(&b).ok()) {
+        if v["version"].as_str() == Some(current) {
+            let _ = std::fs::write(installed_file(), v.to_string());
+        }
+    }
+    let _ = std::fs::remove_file(state_file());
+}
+
+/// Bouton « Installer la mise à jour » de la fenêtre.
+pub fn request_install() -> Result<(), String> {
+    std::fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
+    std::fs::write(request_file(), b"1").map_err(|e| e.to_string())
+}
+
+/// Installation demandée par le joueur depuis la fenêtre (lue une fois).
+pub fn take_install_request() -> bool {
+    std::fs::remove_file(request_file()).is_ok()
+}
+
+/// Lance la recherche en fond.
 pub fn start(current: &'static str, exe: PathBuf) {
     std::thread::spawn(move || {
         let dev = is_dev_build(&exe);
@@ -316,21 +397,26 @@ pub fn start(current: &'static str, exe: PathBuf) {
             last = Some(Instant::now());
             match latest() {
                 Ok(Some(rel)) if is_newer(&rel.version, current) => {
-                    if with(|s| s.ready.as_ref().is_some_and(|(v, _)| *v == rel.version) || s.skip.as_deref() == Some(rel.version.as_str())) {
-                        continue;
-                    }
-                    if dev {
-                        crate::say!("[mise à jour] version {} publiée sur GitHub ; version de développement : pas d'installation automatique", rel.version);
+                    let known = with(|s| s.ready.as_ref().is_some_and(|(v, _)| *v == rel.version) || s.skip.as_deref() == Some(rel.version.as_str()));
+                    if known {
                         if forced {
-                            with(|s| s.events.push(Event::Problem(format!("version {} publiée sur GitHub ; cette copie est une version de développement, elle ne se met pas à jour seule", rel.version))));
+                            with(|s| s.events.push(Event::Ready(rel.version.clone())));
                         }
                         continue;
                     }
-                    crate::say!("[mise à jour] version {} publiée sur GitHub : téléchargement", rel.version);
-                    with(|s| s.events.push(Event::Found(rel.version.clone())));
+                    crate::say!(
+                        "[mise à jour] version {} publiée sur GitHub : téléchargement{}",
+                        rel.version,
+                        if dev { " (version de développement : installation seulement par le bouton)" } else { "" }
+                    );
+                    write_state(&rel.version, &rel.notes, "telechargement", "");
+                    if forced {
+                        with(|s| s.events.push(Event::Found(rel.version.clone())));
+                    }
                     match download(&rel) {
                         Ok(path) => {
                             crate::say!("[mise à jour] {} téléchargée et vérifiée (SHA-256) : {}", rel.version, path.display());
+                            write_state(&rel.version, &rel.notes, "prete", "");
                             with(|s| {
                                 s.ready = Some((rel.version.clone(), path));
                                 s.events.push(Event::Ready(rel.version.clone()));
@@ -338,6 +424,7 @@ pub fn start(current: &'static str, exe: PathBuf) {
                         }
                         Err(e) => {
                             crate::say!("[mise à jour] {} : {e}", rel.version);
+                            write_state(&rel.version, &rel.notes, "erreur", &e);
                             with(|s| s.events.push(Event::Problem(format!("version {} : {e}", rel.version))));
                         }
                     }
@@ -385,6 +472,9 @@ mod tests {
         assert_eq!(r.version, "0.16.0");
         assert!(r.zip_url.ends_with("/v0.16.0/ChevaliersTranslators-0.16.0.zip") && r.sha_url.ends_with(".zip.sha256"));
         assert_eq!(r.size, 2_400_000);
+        let mut with_notes = full.clone();
+        with_notes["body"] = json!("- **Bulles** traduites\r\n- Envoyer");
+        assert_eq!(release_from_json(&with_notes).unwrap().notes, "- **Bulles** traduites\n- Envoyer");
         // Paquet pas encore déposé (publication en cours), préversion, brouillon : rien.
         let partial = json!({ "tag_name": "v0.16.0", "assets": [asset("ChevaliersTranslators-0.16.0.zip")] });
         assert!(release_from_json(&partial).is_none());

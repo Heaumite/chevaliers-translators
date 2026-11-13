@@ -36,6 +36,8 @@ const WM_TRAY: u32 = WM_APP + 1;
 /// Envoyé par un second lancement de l'application (raccourci du bureau, double-clic) : la
 /// fenêtre des modèles s'ouvre (0.15).
 const WM_OPEN_MODELS: u32 = WM_APP + 2;
+/// La prochaine bulle cliquée ouvre la fenêtre de l'application (mise à jour disponible).
+static BALLOON_OPENS_MODELS: AtomicBool = AtomicBool::new(false);
 /// Envoyé par une autre version de l'application lancée par le joueur (mise à jour, 0.15.1) :
 /// celle-ci s'arrête pour lui laisser la place.
 const WM_MAKE_WAY: u32 = WM_APP + 3;
@@ -209,6 +211,22 @@ impl Tray {
     /// Fenêtre des modèles : ouverte, ou ramenée devant si elle l'est déjà.
     pub fn open_models() {
         open_interface();
+    }
+
+    /// Fenêtre de l'application fermée (mise à jour : la nouvelle version rouvre la sienne).
+    pub fn close_models() {
+        UI.with(|u| {
+            if let Some(mut c) = u.borrow_mut().take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        });
+    }
+
+    /// Bulle dont le clic ouvre la fenêtre de l'application.
+    pub fn notify_opening_models(&self, title: &str, text: &str) {
+        BALLOON_OPENS_MODELS.store(true, Ordering::Relaxed);
+        self.notify(title, text, false);
     }
 
     pub fn set_journal(path: PathBuf) {
@@ -486,7 +504,7 @@ fn show_menu(hwnd: HWND) {
             wide("Quitter"),
             wide("Désinstaller..."),
             wide("Rechercher une mise à jour"),
-            wide("Mises à jour automatiques"),
+            wide("Rechercher les mises à jour automatiquement"),
         ];
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, head.as_ptr());
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.as_ptr());
@@ -535,6 +553,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         let event = (lp & 0xffff) as u32;
         if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
             show_menu(hwnd);
+        }
+        // Clic sur la bulle « Mise à jour disponible » : fenêtre de l'application (0.16.1).
+        const NIN_BALLOONUSERCLICK: u32 = 0x0400 + 5; // WM_USER + 5
+        if event == NIN_BALLOONUSERCLICK && BALLOON_OPENS_MODELS.swap(false, Ordering::Relaxed) {
+            open_interface();
         }
         return 0;
     }

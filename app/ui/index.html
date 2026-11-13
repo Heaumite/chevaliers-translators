@@ -65,7 +65,7 @@ header {
 .brand { font-family: var(--display); font-size: clamp(17px, 3.2vw, 30px); letter-spacing: 0.03em; line-height: 1.15;
   color: var(--or-clair); text-shadow: 0 1px 0 #000, 0 0 14px rgba(0, 0, 0, 0.9); }
 .brand small { display: block; margin-top: 6px; font-family: var(--body); font-size: clamp(11px, 1.6vw, 14.5px); color: #cfc3a2; letter-spacing: 0.01em; }
-.demo { position: absolute; top: 9%; right: 3%; font-size: 13px; color: var(--or-clair); border: 1px solid var(--or); border-radius: 3px; padding: 2px 10px; background: rgba(0, 0, 0, 0.55); }
+.demo { position: absolute; bottom: 9%; right: 3%; font-size: 13px; color: var(--or-clair); border: 1px solid var(--or); border-radius: 3px; padding: 2px 10px; background: rgba(0, 0, 0, 0.55); }
 
 /* Titres en Friz Quadrata (la police de WoW), or du filigrane. */
 h1, h2, h3 { font-family: var(--display); font-weight: normal; color: var(--or-clair); }
@@ -176,6 +176,34 @@ footer .path { overflow-wrap: anywhere; }
 .lost { position: fixed; inset: auto 0 0 0; padding: 12px 20px; background: var(--drape); border-top: 1px solid var(--gueules); color: var(--parchemin); font-weight: 600; text-align: center; display: none; }
 .lost.on { display: block; }
 
+/* Langue de la page (0.16.1) : en haut à droite de la bannière. */
+.lang { position: absolute; top: 9%; right: 3%; appearance: none; font: 13px var(--body); color: var(--or-clair);
+  background: rgba(0, 0, 0, 0.6) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c9a55a' stroke-width='1.4'/%3E%3C/svg%3E") right 8px center no-repeat;
+  border: 1px solid var(--or); border-radius: 3px; padding: 3px 26px 3px 9px; cursor: pointer; }
+.lang:hover { border-color: var(--or-clair); }
+.lang option { background: var(--fer); color: var(--parchemin); }
+/* Mise à jour (0.16.1) : plaque sertie d'or au-dessus de la carte, note de version dessous. */
+.update { margin: 14px 0 4px; padding: 16px 18px; background: linear-gradient(180deg, rgba(201, 165, 90, 0.10), transparent 60%), var(--fer);
+  border: 1px solid var(--or-sombre); box-shadow: 0 0 0 1px #000, inset 3px 0 0 var(--or); }
+.update.bad { box-shadow: 0 0 0 1px #000, inset 3px 0 0 var(--gueules); }
+.update-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.update-head > div { flex: 1 1 320px; min-width: 0; }
+.update h2 { font-size: 21px; margin: 0; }
+.update .state { margin: 4px 0 0; font-size: 14px; color: var(--terne); max-width: 72ch; }
+.update .state.bad { color: var(--gueules-texte); }
+.update .btn { flex: none; }
+.relnotes { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--filet-doux); }
+.relnotes h3 { margin: 0 0 6px; font-size: 15.5px; }
+.relnotes h3 small { font-family: var(--body); font-size: 12.5px; color: var(--terne); margin-left: 6px; }
+.md { max-height: 280px; overflow: auto; padding-right: 8px; font-size: 13.5px; color: var(--parchemin); }
+.md h4 { font-family: var(--display); font-weight: normal; color: var(--or-clair); font-size: 14.5px; margin: 10px 0 4px; }
+.md p { margin: 6px 0; }
+.md ul { margin: 6px 0; padding-left: 20px; }
+.md li + li { margin-top: 5px; }
+.md li::marker { color: var(--or); }
+.md b { color: var(--or-clair); font-weight: 600; }
+.md code { font: 12.5px Consolas, "Cascadia Mono", monospace; background: rgba(0, 0, 0, 0.35); padding: 0 4px; border-radius: 2px; overflow-wrap: anywhere; }
+
 @media (max-width: 760px) {
   .wrap { padding: 16px; }
   .row { grid-template-columns: 54px minmax(0, 1fr); }
@@ -184,7 +212,8 @@ footer .path { overflow-wrap: anywhere; }
   footer { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
-  .demo { top: auto; bottom: 8%; font-size: 11.5px; padding: 1px 7px; }
+  .demo { bottom: 6%; font-size: 11.5px; padding: 1px 7px; }
+  .lang { top: 6%; font-size: 12px; padding: 2px 22px 2px 7px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .seg, .bar > i { transition: none; }
@@ -194,9 +223,19 @@ footer .path { overflow-wrap: anywhere; }
 <body>
 <div class="wrap">
   <header>
-    <div class="brand">Chevaliers Translators<small>Modèles de traduction</small></div>
-    <span class="demo" id="demo" hidden>Démonstration</span>
+    <div class="brand">Chevaliers Translators<small data-t="brand_sub">Modèles de traduction</small></div>
+    <select class="lang" id="lang" aria-label="Langue de la page">
+      <option value="fr">Français</option>
+      <option value="en">English</option>
+      <option value="de">Deutsch</option>
+      <option value="es">Español</option>
+      <option value="it">Italiano</option>
+      <option value="ru">Русский</option>
+    </select>
+    <span class="demo" id="demo" data-t="demo" hidden>Démonstration</span>
   </header>
+
+  <section class="update" id="update" aria-live="polite" hidden></section>
 
   <section class="card" aria-labelledby="gpu">
     <h1 id="gpu">Analyse de votre PC…</h1>
@@ -209,34 +248,295 @@ footer .path { overflow-wrap: anywhere; }
   </section>
 
   <section class="models" aria-labelledby="mh">
-    <h2 id="mh">Modèles de traduction</h2>
-    <p>Du plus léger au plus lourd en mémoire vidéo. Un seul modèle est actif à la fois ; si le modèle actif ne peut pas tourner, le pack low prend le relais.</p>
+    <h2 id="mh" data-t="models_title">Modèles de traduction</h2>
+    <p data-t="models_intro">Du plus léger au plus lourd en mémoire vidéo. Un seul modèle est actif à la fois ; si le modèle actif ne peut pas tourner, le pack low prend le relais.</p>
     <div id="list"></div>
   </section>
 
   <footer>
-    <div class="engine wait" id="engine">Moteur de traduction…</div>
+    <div class="engine wait" id="engine" data-t="engine_wait">Moteur de traduction…</div>
     <div id="disk"></div>
     <div class="path" id="folder"></div>
     <div id="version"></div>
   </footer>
 </div>
-<div class="lost" id="lost" role="alert">L'application s'est arrêtée. Relancez-la pour gérer les modèles.</div>
+<div class="lost" id="lost" role="alert" data-t="lost">L'application s'est arrêtée. Relancez-la pour gérer les modèles.</div>
 
 <script>
 const JETON = "__JETON__";
 const GIB = 1024 ** 3;
 const $ = (id) => document.getElementById(id);
-const nf1 = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const nf2 = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const go = (b) => nf1.format(b / GIB) + "\u00a0Go";
-const go2 = (b) => nf2.format(b / GIB) + "\u00a0Go";
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ---- Langues de la page (0.16.1) ---------------------------------------------------------------
+// Textes de la page ici ; les explications calculées par l'application (raisons, estimations,
+// notes) arrivent déjà traduites dans la langue demandée (/api/etat?langue=).
+const LANGS = ["fr", "en", "de", "es", "it", "ru"];
+const I18N = {
+  fr: {
+    locale: "fr-FR", gb: "Go", mbs: "Mo/s", lang_label: "Langue de la page",
+    brand_sub: "Modèles de traduction", demo: "Démonstration", analyzing: "Analyse de votre PC…",
+    models_title: "Modèles de traduction",
+    models_intro: "Du plus léger au plus lourd en mémoire vidéo. Un seul modèle est actif à la fois ; si le modèle actif ne peut pas tourner, le pack low prend le relais.",
+    engine_wait: "Moteur de traduction…", lost: "L'application s'est arrêtée. Relancez-la pour gérer les modèles.",
+    no_gpu: "Pas de carte graphique utilisable",
+    cpu_lead: "La traduction tournera sur le processeur ({cpu}, {n} fils de calcul), plus lentement.",
+    lead: "{total} de mémoire vidéo. Pendant le jeu, <strong>{free} restent libres</strong> d'après l'estimation : un modèle jusqu'à <strong>{usable}</strong> tient sans gêner WoW. Plus gros, il est pris quand WoW laisse la place : sous {margin} libres (saturation), la traduction redescend d'un cran, et remonte quand la place revient.",
+    seg_other: "Windows et autres programmes", seg_wow_measured: "WoW (mesuré)", seg_wow_ref: "WoW (référence, raids compris)",
+    seg_only_when: " (seulement quand WoW laisse la place)", seg_model: "Modèle", seg_margin: "Seuil de saturation", seg_free: "Libre",
+    missing: "manque {x}", on_cpu: "sur le processeur", on_gpu: "sur la carte",
+    trial: "Test en jeu {where} : {r}", not_tested: "Pas encore testé en jeu sur ce PC.",
+    rank: " Étape {n} de la chaîne de repli.", estim: "Estimation {where} : <b>{level}</b> - {why} ({src}).{rank}",
+    level_sure: "sûr", level_likely: "probable", level_borderline: "limite", level_no: "non",
+    cancel: "Annuler", active: "Actif", activate: "Activer", confirm_delete: "Confirmer : supprimer {x}",
+    delete_file: "Supprimer le fichier", unavailable: "Indisponible sur ce PC", resume: "Reprendre ({x} restants)",
+    download: "Télécharger ({x})", advised: "Conseillé", low_text: "Par défaut, et dernier repli.",
+    high_text: "Le meilleur modèle pour votre PC, d'après l'estimation.",
+    facts: "{langs}, licence {lic}, fichier de {size}.", all_langs: "Les 23 langues", low_langs: "6 langues : {list}",
+    cpu_title: "Processeur", cpu_threads: "{n} fils de calcul, plus lent", vram_of: "de mémoire vidéo ({how})",
+    measured: "mesuré", estimated: "estimé", quality: "Qualité {q} sur 3",
+    progress: "{pct} : {got} sur {total}{speed}.{retry}", retry: " Reprise après : {m}.",
+    chain: "<b>Chaîne de repli :</b> {chain}.{more}<br>WoW : {cond}.", more: " Modèles conseillés à télécharger : {x}.",
+    fallback: "Le pack low a pris le relais : {why}.",
+    engine_dl: "Téléchargement du moteur de traduction ({name})", engine_ready: "Moteur de traduction prêt (llama.cpp, {name}).",
+    vulkan_all: "Vulkan, toutes cartes graphiques", engine_err: "Moteur de traduction : {m}", engine_missing: "Moteur de traduction absent.",
+    folder: "Dossier des modèles : {p}", disk: "{x} libres sur ce disque", version: "Version {v}", action_failed: "Action impossible.",
+    upd_title: "Mise à jour {v} disponible", upd_dl: "Téléchargement et vérification en cours…",
+    upd_ready: "Téléchargée et vérifiée. L'installation ferme l'application quelques secondes, la relance et remet l'addon à jour dans toutes vos versions de WoW (ensuite /reload en jeu, ou relancer WoW si l'application le demande).",
+    upd_installing: "Installation en cours : l'application redémarre…", upd_error: "Mise à jour impossible : {m}",
+    upd_install: "Installer la mise à jour", upd_retry: "Réessayer", upd_requested: "Installation demandée : elle commence dans un instant.",
+    upd_notes: "Notes de version", notes_lang: "", no_notes: "Pas de note pour cette version.",
+    new_title: "Version {v} installée", new_lead: "Voici ses nouveautés.", new_close: "Masquer",
+  },
+  en: {
+    locale: "en-US", gb: "GB", mbs: "MB/s", lang_label: "Page language",
+    brand_sub: "Translation models", demo: "Demo", analyzing: "Analyzing your PC…",
+    models_title: "Translation models",
+    models_intro: "From lightest to heaviest in video memory. Only one model is active at a time; if the active model can't run, the low pack takes over.",
+    engine_wait: "Translation engine…", lost: "The application has stopped. Restart it to manage the models.",
+    no_gpu: "No usable graphics card",
+    cpu_lead: "Translation will run on the processor ({cpu}, {n} threads), more slowly.",
+    lead: "{total} of video memory. While playing, an estimated <strong>{free} stays free</strong>: a model up to <strong>{usable}</strong> fits without hindering WoW. A larger one is used when WoW leaves room: below {margin} free (saturation), translation steps down one level, and steps back up when room returns.",
+    seg_other: "Windows and other programs", seg_wow_measured: "WoW (measured)", seg_wow_ref: "WoW (reference, raids included)",
+    seg_only_when: " (only when WoW leaves room)", seg_model: "Model", seg_margin: "Saturation threshold", seg_free: "Free",
+    missing: "{x} short", on_cpu: "on the processor", on_gpu: "on the graphics card",
+    trial: "In-game test {where}: {r}", not_tested: "Not yet tested in game on this PC.",
+    rank: " Step {n} of the fallback chain.", estim: "Estimate {where}: <b>{level}</b> - {why} ({src}).{rank}",
+    level_sure: "sure", level_likely: "likely", level_borderline: "borderline", level_no: "no",
+    cancel: "Cancel", active: "Active", activate: "Activate", confirm_delete: "Confirm: delete {x}",
+    delete_file: "Delete the file", unavailable: "Unavailable on this PC", resume: "Resume ({x} left)",
+    download: "Download ({x})", advised: "Recommended", low_text: "Default, and last fallback.",
+    high_text: "The best model for your PC, according to the estimate.",
+    facts: "{langs}, {lic} license, {size} file.", all_langs: "All 23 languages", low_langs: "6 languages: {list}",
+    cpu_title: "Processor", cpu_threads: "{n} threads, slower", vram_of: "of video memory ({how})",
+    measured: "measured", estimated: "estimated", quality: "Quality {q} out of 3",
+    progress: "{pct}: {got} of {total}{speed}.{retry}", retry: " Resumed after: {m}.",
+    chain: "<b>Fallback chain:</b> {chain}.{more}<br>WoW: {cond}.", more: " Recommended models to download: {x}.",
+    fallback: "The low pack took over: {why}.",
+    engine_dl: "Downloading the translation engine ({name})", engine_ready: "Translation engine ready (llama.cpp, {name}).",
+    vulkan_all: "Vulkan, all graphics cards", engine_err: "Translation engine: {m}", engine_missing: "Translation engine missing.",
+    folder: "Models folder: {p}", disk: "{x} free on this drive", version: "Version {v}", action_failed: "Action not possible.",
+    upd_title: "Update {v} available", upd_dl: "Downloading and verifying…",
+    upd_ready: "Downloaded and verified. Installing closes the application for a few seconds, restarts it and updates the addon in all your WoW versions (then /reload in game, or restart WoW if the application asks).",
+    upd_installing: "Installing: the application is restarting…", upd_error: "Update failed: {m}",
+    upd_install: "Install the update", upd_retry: "Try again", upd_requested: "Installation requested: it starts in a moment.",
+    upd_notes: "Release notes", notes_lang: "written in French", no_notes: "No notes for this version.",
+    new_title: "Version {v} installed", new_lead: "Here is what's new.", new_close: "Hide",
+  },
+  de: {
+    locale: "de-DE", gb: "GB", mbs: "MB/s", lang_label: "Sprache der Seite",
+    brand_sub: "Übersetzungsmodelle", demo: "Demo", analyzing: "Ihr PC wird analysiert…",
+    models_title: "Übersetzungsmodelle",
+    models_intro: "Vom leichtesten zum schwersten Grafikspeicherbedarf. Es ist immer nur ein Modell aktiv; kann das aktive Modell nicht laufen, übernimmt das Low-Paket.",
+    engine_wait: "Übersetzungs-Engine…", lost: "Die Anwendung wurde beendet. Starten Sie sie neu, um die Modelle zu verwalten.",
+    no_gpu: "Keine nutzbare Grafikkarte",
+    cpu_lead: "Die Übersetzung läuft auf dem Prozessor ({cpu}, {n} Threads), langsamer.",
+    lead: "{total} Grafikspeicher. Während des Spiels bleiben schätzungsweise <strong>{free} frei</strong>: Ein Modell bis <strong>{usable}</strong> passt, ohne WoW zu stören. Ein größeres wird genutzt, wenn WoW Platz lässt: Unter {margin} frei (Sättigung) geht die Übersetzung eine Stufe zurück und steigt wieder, sobald Platz frei wird.",
+    seg_other: "Windows und andere Programme", seg_wow_measured: "WoW (gemessen)", seg_wow_ref: "WoW (Referenzwert, inkl. Raids)",
+    seg_only_when: " (nur wenn WoW Platz lässt)", seg_model: "Modell", seg_margin: "Sättigungsschwelle", seg_free: "Frei",
+    missing: "{x} fehlen", on_cpu: "auf dem Prozessor", on_gpu: "auf der Grafikkarte",
+    trial: "Test im Spiel {where}: {r}", not_tested: "Auf diesem PC noch nicht im Spiel getestet.",
+    rank: " Stufe {n} der Ausweichkette.", estim: "Schätzung {where}: <b>{level}</b> - {why} ({src}).{rank}",
+    level_sure: "sicher", level_likely: "wahrscheinlich", level_borderline: "grenzwertig", level_no: "nein",
+    cancel: "Abbrechen", active: "Aktiv", activate: "Aktivieren", confirm_delete: "Bestätigen: {x} löschen",
+    delete_file: "Datei löschen", unavailable: "Auf diesem PC nicht verfügbar", resume: "Fortsetzen (noch {x})",
+    download: "Herunterladen ({x})", advised: "Empfohlen", low_text: "Standard und letzte Ausweichstufe.",
+    high_text: "Laut Schätzung das beste Modell für Ihren PC.",
+    facts: "{langs}, Lizenz {lic}, Datei mit {size}.", all_langs: "Alle 23 Sprachen", low_langs: "6 Sprachen: {list}",
+    cpu_title: "Prozessor", cpu_threads: "{n} Threads, langsamer", vram_of: "Grafikspeicher ({how})",
+    measured: "gemessen", estimated: "geschätzt", quality: "Qualität {q} von 3",
+    progress: "{pct}: {got} von {total}{speed}.{retry}", retry: " Fortgesetzt nach: {m}.",
+    chain: "<b>Ausweichkette:</b> {chain}.{more}<br>WoW: {cond}.", more: " Empfohlene Modelle zum Herunterladen: {x}.",
+    fallback: "Das Low-Paket hat übernommen: {why}.",
+    engine_dl: "Übersetzungs-Engine wird heruntergeladen ({name})", engine_ready: "Übersetzungs-Engine bereit (llama.cpp, {name}).",
+    vulkan_all: "Vulkan, alle Grafikkarten", engine_err: "Übersetzungs-Engine: {m}", engine_missing: "Übersetzungs-Engine fehlt.",
+    folder: "Modellordner: {p}", disk: "{x} frei auf diesem Laufwerk", version: "Version {v}", action_failed: "Aktion nicht möglich.",
+    upd_title: "Update {v} verfügbar", upd_dl: "Wird heruntergeladen und geprüft…",
+    upd_ready: "Heruntergeladen und geprüft. Die Installation schließt die Anwendung für einige Sekunden, startet sie neu und aktualisiert das Addon in allen Ihren WoW-Versionen (danach /reload im Spiel, oder WoW neu starten, wenn die Anwendung es verlangt).",
+    upd_installing: "Installation läuft: Die Anwendung startet neu…", upd_error: "Update fehlgeschlagen: {m}",
+    upd_install: "Update installieren", upd_retry: "Erneut versuchen", upd_requested: "Installation angefordert: Sie beginnt gleich.",
+    upd_notes: "Versionshinweise", notes_lang: "auf Französisch", no_notes: "Keine Hinweise zu dieser Version.",
+    new_title: "Version {v} installiert", new_lead: "Das ist neu.", new_close: "Ausblenden",
+  },
+  es: {
+    locale: "es-ES", gb: "GB", mbs: "MB/s", lang_label: "Idioma de la página",
+    brand_sub: "Modelos de traducción", demo: "Demostración", analyzing: "Analizando su PC…",
+    models_title: "Modelos de traducción",
+    models_intro: "Del más ligero al más pesado en memoria de vídeo. Solo hay un modelo activo a la vez; si el modelo activo no puede funcionar, el paquete low toma el relevo.",
+    engine_wait: "Motor de traducción…", lost: "La aplicación se ha detenido. Vuelva a iniciarla para gestionar los modelos.",
+    no_gpu: "No hay tarjeta gráfica utilizable",
+    cpu_lead: "La traducción se ejecutará en el procesador ({cpu}, {n} hilos), más despacio.",
+    lead: "{total} de memoria de vídeo. Durante el juego, según la estimación, <strong>quedan {free} libres</strong>: un modelo de hasta <strong>{usable}</strong> cabe sin molestar a WoW. Uno más grande se usa cuando WoW deja sitio: por debajo de {margin} libres (saturación), la traducción baja un nivel y vuelve a subir cuando hay sitio.",
+    seg_other: "Windows y otros programas", seg_wow_measured: "WoW (medido)", seg_wow_ref: "WoW (referencia, bandas incluidas)",
+    seg_only_when: " (solo cuando WoW deja sitio)", seg_model: "Modelo", seg_margin: "Umbral de saturación", seg_free: "Libre",
+    missing: "faltan {x}", on_cpu: "en el procesador", on_gpu: "en la tarjeta",
+    trial: "Prueba en el juego {where}: {r}", not_tested: "Aún no probado en el juego en este PC.",
+    rank: " Paso {n} de la cadena de respaldo.", estim: "Estimación {where}: <b>{level}</b> - {why} ({src}).{rank}",
+    level_sure: "seguro", level_likely: "probable", level_borderline: "al límite", level_no: "no",
+    cancel: "Cancelar", active: "Activo", activate: "Activar", confirm_delete: "Confirmar: eliminar {x}",
+    delete_file: "Eliminar el archivo", unavailable: "No disponible en este PC", resume: "Reanudar (quedan {x})",
+    download: "Descargar ({x})", advised: "Recomendado", low_text: "Por defecto, y último respaldo.",
+    high_text: "El mejor modelo para su PC, según la estimación.",
+    facts: "{langs}, licencia {lic}, archivo de {size}.", all_langs: "Los 23 idiomas", low_langs: "6 idiomas: {list}",
+    cpu_title: "Procesador", cpu_threads: "{n} hilos, más lento", vram_of: "de memoria de vídeo ({how})",
+    measured: "medido", estimated: "estimado", quality: "Calidad {q} de 3",
+    progress: "{pct}: {got} de {total}{speed}.{retry}", retry: " Reanudado tras: {m}.",
+    chain: "<b>Cadena de respaldo:</b> {chain}.{more}<br>WoW: {cond}.", more: " Modelos recomendados para descargar: {x}.",
+    fallback: "El paquete low tomó el relevo: {why}.",
+    engine_dl: "Descargando el motor de traducción ({name})", engine_ready: "Motor de traducción listo (llama.cpp, {name}).",
+    vulkan_all: "Vulkan, todas las tarjetas gráficas", engine_err: "Motor de traducción: {m}", engine_missing: "Falta el motor de traducción.",
+    folder: "Carpeta de modelos: {p}", disk: "{x} libres en este disco", version: "Versión {v}", action_failed: "Acción imposible.",
+    upd_title: "Actualización {v} disponible", upd_dl: "Descargando y verificando…",
+    upd_ready: "Descargada y verificada. La instalación cierra la aplicación unos segundos, la vuelve a abrir y actualiza el addon en todas sus versiones de WoW (después /reload en el juego, o reinicie WoW si la aplicación lo pide).",
+    upd_installing: "Instalando: la aplicación se está reiniciando…", upd_error: "Actualización imposible: {m}",
+    upd_install: "Instalar la actualización", upd_retry: "Reintentar", upd_requested: "Instalación solicitada: empezará en un momento.",
+    upd_notes: "Notas de la versión", notes_lang: "en francés", no_notes: "Sin notas para esta versión.",
+    new_title: "Versión {v} instalada", new_lead: "Estas son sus novedades.", new_close: "Ocultar",
+  },
+  it: {
+    locale: "it-IT", gb: "GB", mbs: "MB/s", lang_label: "Lingua della pagina",
+    brand_sub: "Modelli di traduzione", demo: "Dimostrazione", analyzing: "Analisi del PC in corso…",
+    models_title: "Modelli di traduzione",
+    models_intro: "Dal più leggero al più pesante in memoria video. Un solo modello è attivo alla volta; se il modello attivo non può funzionare, subentra il pacchetto low.",
+    engine_wait: "Motore di traduzione…", lost: "L'applicazione si è chiusa. Riavviala per gestire i modelli.",
+    no_gpu: "Nessuna scheda grafica utilizzabile",
+    cpu_lead: "La traduzione girerà sul processore ({cpu}, {n} thread), più lentamente.",
+    lead: "{total} di memoria video. Durante il gioco, secondo la stima, <strong>restano liberi {free}</strong>: un modello fino a <strong>{usable}</strong> ci sta senza disturbare WoW. Uno più grande viene usato quando WoW lascia spazio: sotto {margin} liberi (saturazione), la traduzione scende di un livello e risale quando lo spazio torna.",
+    seg_other: "Windows e altri programmi", seg_wow_measured: "WoW (misurato)", seg_wow_ref: "WoW (riferimento, incursioni comprese)",
+    seg_only_when: " (solo quando WoW lascia spazio)", seg_model: "Modello", seg_margin: "Soglia di saturazione", seg_free: "Libero",
+    missing: "mancano {x}", on_cpu: "sul processore", on_gpu: "sulla scheda",
+    trial: "Test in gioco {where}: {r}", not_tested: "Non ancora testato in gioco su questo PC.",
+    rank: " Passo {n} della catena di ripiego.", estim: "Stima {where}: <b>{level}</b> - {why} ({src}).{rank}",
+    level_sure: "sicuro", level_likely: "probabile", level_borderline: "al limite", level_no: "no",
+    cancel: "Annulla", active: "Attivo", activate: "Attiva", confirm_delete: "Conferma: elimina {x}",
+    delete_file: "Elimina il file", unavailable: "Non disponibile su questo PC", resume: "Riprendi (mancano {x})",
+    download: "Scarica ({x})", advised: "Consigliato", low_text: "Predefinito, e ultimo ripiego.",
+    high_text: "Il modello migliore per il tuo PC, secondo la stima.",
+    facts: "{langs}, licenza {lic}, file da {size}.", all_langs: "Tutte le 23 lingue", low_langs: "6 lingue: {list}",
+    cpu_title: "Processore", cpu_threads: "{n} thread, più lento", vram_of: "di memoria video ({how})",
+    measured: "misurato", estimated: "stimato", quality: "Qualità {q} su 3",
+    progress: "{pct}: {got} su {total}{speed}.{retry}", retry: " Ripreso dopo: {m}.",
+    chain: "<b>Catena di ripiego:</b> {chain}.{more}<br>WoW: {cond}.", more: " Modelli consigliati da scaricare: {x}.",
+    fallback: "Il pacchetto low è subentrato: {why}.",
+    engine_dl: "Download del motore di traduzione ({name})", engine_ready: "Motore di traduzione pronto (llama.cpp, {name}).",
+    vulkan_all: "Vulkan, tutte le schede grafiche", engine_err: "Motore di traduzione: {m}", engine_missing: "Motore di traduzione assente.",
+    folder: "Cartella dei modelli: {p}", disk: "{x} liberi su questo disco", version: "Versione {v}", action_failed: "Azione impossibile.",
+    upd_title: "Aggiornamento {v} disponibile", upd_dl: "Download e verifica in corso…",
+    upd_ready: "Scaricato e verificato. L'installazione chiude l'applicazione per qualche secondo, la riavvia e aggiorna l'addon in tutte le tue versioni di WoW (poi /reload in gioco, o riavvia WoW se l'applicazione lo chiede).",
+    upd_installing: "Installazione in corso: l'applicazione si riavvia…", upd_error: "Aggiornamento non riuscito: {m}",
+    upd_install: "Installa l'aggiornamento", upd_retry: "Riprova", upd_requested: "Installazione richiesta: inizia tra un istante.",
+    upd_notes: "Note di rilascio", notes_lang: "in francese", no_notes: "Nessuna nota per questa versione.",
+    new_title: "Versione {v} installata", new_lead: "Ecco le novità.", new_close: "Nascondi",
+  },
+  ru: {
+    locale: "ru-RU", gb: "ГБ", mbs: "МБ/с", lang_label: "Язык страницы",
+    brand_sub: "Модели перевода", demo: "Демонстрация", analyzing: "Анализ вашего ПК…",
+    models_title: "Модели перевода",
+    models_intro: "От самой лёгкой к самой тяжёлой по видеопамяти. Активна только одна модель; если активная модель не может работать, её заменяет пакет low.",
+    engine_wait: "Движок перевода…", lost: "Приложение остановлено. Перезапустите его, чтобы управлять моделями.",
+    no_gpu: "Нет подходящей видеокарты",
+    cpu_lead: "Перевод будет выполняться на процессоре ({cpu}, потоков: {n}), медленнее.",
+    lead: "{total} видеопамяти. Во время игры, по оценке, <strong>остаётся свободно {free}</strong>: модель до <strong>{usable}</strong> помещается, не мешая WoW. Более крупная используется, когда WoW освобождает место: если свободно меньше {margin} (насыщение), перевод опускается на ступень и возвращается, когда место освобождается.",
+    seg_other: "Windows и другие программы", seg_wow_measured: "WoW (измерено)", seg_wow_ref: "WoW (эталон, с учётом рейдов)",
+    seg_only_when: " (только когда WoW освобождает место)", seg_model: "Модель", seg_margin: "Порог насыщения", seg_free: "Свободно",
+    missing: "не хватает {x}", on_cpu: "на процессоре", on_gpu: "на видеокарте",
+    trial: "Проверка в игре {where}: {r}", not_tested: "Ещё не проверено в игре на этом ПК.",
+    rank: " Шаг {n} резервной цепочки.", estim: "Оценка {where}: <b>{level}</b> - {why} ({src}).{rank}",
+    level_sure: "надёжно", level_likely: "вероятно", level_borderline: "на грани", level_no: "нет",
+    cancel: "Отмена", active: "Активна", activate: "Включить", confirm_delete: "Подтвердить: удалить {x}",
+    delete_file: "Удалить файл", unavailable: "Недоступно на этом ПК", resume: "Продолжить (осталось {x})",
+    download: "Скачать ({x})", advised: "Рекомендуется", low_text: "По умолчанию и последний резерв.",
+    high_text: "Лучшая модель для вашего ПК по оценке.",
+    facts: "{langs}, лицензия {lic}, файл {size}.", all_langs: "Все 23 языка", low_langs: "6 языков: {list}",
+    cpu_title: "Процессор", cpu_threads: "потоков: {n}, медленнее", vram_of: "видеопамяти ({how})",
+    measured: "измерено", estimated: "оценка", quality: "Качество {q} из 3",
+    progress: "{pct}: {got} из {total}{speed}.{retry}", retry: " Возобновлено после: {m}.",
+    chain: "<b>Резервная цепочка:</b> {chain}.{more}<br>WoW: {cond}.", more: " Рекомендуемые модели для загрузки: {x}.",
+    fallback: "Пакет low взял работу на себя: {why}.",
+    engine_dl: "Загрузка движка перевода ({name})", engine_ready: "Движок перевода готов (llama.cpp, {name}).",
+    vulkan_all: "Vulkan, все видеокарты", engine_err: "Движок перевода: {m}", engine_missing: "Движок перевода отсутствует.",
+    folder: "Папка моделей: {p}", disk: "{x} свободно на этом диске", version: "Версия {v}", action_failed: "Действие невозможно.",
+    upd_title: "Доступно обновление {v}", upd_dl: "Загрузка и проверка…",
+    upd_ready: "Загружено и проверено. Установка закроет приложение на несколько секунд, перезапустит его и обновит аддон во всех ваших версиях WoW (затем /reload в игре или перезапуск WoW, если приложение попросит).",
+    upd_installing: "Установка: приложение перезапускается…", upd_error: "Обновление не удалось: {m}",
+    upd_install: "Установить обновление", upd_retry: "Повторить", upd_requested: "Установка запрошена: она скоро начнётся.",
+    upd_notes: "Примечания к выпуску", notes_lang: "на французском", no_notes: "Нет примечаний к этой версии.",
+    new_title: "Версия {v} установлена", new_lead: "Вот что нового.", new_close: "Скрыть",
+  },
+};
+
+function storedLang() {
+  try { return localStorage.getItem("ct-langue"); } catch (e) { return null; }
+}
+function browserLang() {
+  for (const l of navigator.languages || [navigator.language || ""]) {
+    const code = String(l).toLowerCase().split(/[-_]/)[0];
+    if (LANGS.includes(code)) return code;
+  }
+  return "en";
+}
+// Langue : celle choisie (gardée par l'application, l'adresse de la page changeant à chaque
+// ouverture), sinon celle du navigateur ; fixée à la première réponse de l'application.
+let lang = LANGS.includes(storedLang()) ? storedLang() : null;
+const t = (key, vars = {}) => String((I18N[lang || "fr"] || I18N.fr)[key] ?? I18N.fr[key] ?? key)
+  .replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+let nf0, nf1, nf2, pctf;
+function setFormats() {
+  const loc = t("locale");
+  nf0 = new Intl.NumberFormat(loc, { maximumFractionDigits: 0 });
+  nf1 = new Intl.NumberFormat(loc, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  nf2 = new Intl.NumberFormat(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  pctf = new Intl.NumberFormat(loc, { style: "percent", maximumFractionDigits: 0 });
+}
+const go = (b) => nf1.format(b / GIB) + "\u00a0" + t("gb");
+const go2 = (b) => nf2.format(b / GIB) + "\u00a0" + t("gb");
+
+// Noms des langues du pack low dans la langue de la page.
+function langNames(codes) {
+  try {
+    const dn = new Intl.DisplayNames([t("locale")], { type: "language" });
+    return codes.map((c) => dn.of(c)).join(", ");
+  } catch (e) {
+    return null;
+  }
+}
+
+function applyLang() {
+  setFormats();
+  document.documentElement.lang = lang || "fr";
+  for (const el of document.querySelectorAll("[data-t]")) el.textContent = t(el.dataset.t);
+  $("lang").value = lang || "fr";
+  $("lang").setAttribute("aria-label", t("lang_label"));
+  if (!state) $("gpu").textContent = t("analyzing");
+}
+setFormats();
 
 let state = null;
 let preview = null;
 const keys = new Map();
 const confirmDelete = new Set();
+let updKey = "";
+let updRequested = null;
 
 // Losange d'or (clous de l'anneau du médaillon) : plein ou vide.
 function stud(filled) {
@@ -254,8 +554,8 @@ function renderGauge() {
   const c = state.carte;
   const m = shownModel();
   if (!c) {
-    $("gpu").textContent = "Pas de carte graphique utilisable";
-    $("lead").innerHTML = `La traduction tournera sur le processeur (${esc(state.processeur.nom)}, ${state.processeur.fils} fils de calcul), plus lentement.`;
+    $("gpu").textContent = t("no_gpu");
+    $("lead").innerHTML = t("cpu_lead", { cpu: esc(state.processeur.nom), n: state.processeur.fils });
     $("gauge").hidden = true;
     $("legend").innerHTML = "";
     return;
@@ -263,18 +563,18 @@ function renderGauge() {
   $("gauge").hidden = false;
   $("gpu").textContent = c.nom;
   const usable = Math.max(0, c.libre_jeu - c.marge);
-  $("lead").innerHTML = `${go(c.total)} de mémoire vidéo. Pendant le jeu, <strong>${go(c.libre_jeu)} restent libres</strong> d'après l'estimation : un modèle jusqu'à <strong>${go(usable)}</strong> tient sans gêner WoW. Plus gros, il est pris quand WoW laisse la place : sous ${go(c.marge)} libres (saturation), la traduction redescend d'un cran, et remonte quand la place revient.`;
+  $("lead").innerHTML = t("lead", { total: go(c.total), free: go(c.libre_jeu), usable: go(usable), margin: go(c.marge) });
   const need = m ? m.empreinte : 0;
   const fits = m && need + c.marge <= c.libre_jeu;
   const model = m && m.lieu !== "cpu" ? need : 0;
   const free = c.total - c.autres - c.wow - model - c.marge;
   const pct = (b) => (Math.max(0, b) / c.total) * 100 + "%";
   const segs = [
-    ["t-sable", c.autres, "Windows et autres programmes"],
-    ["t-vert", c.wow, c.wow_mesure ? "WoW (mesuré)" : "WoW (référence, raids compris)"],
-    [fits ? "t-or" : "t-gules", model, m ? m.nom + (fits ? "" : " (seulement quand WoW laisse la place)") : "Modèle"],
-    ["t-gules", c.marge, "Seuil de saturation"],
-    ["t-argent", free, "Libre"],
+    ["t-sable", c.autres, t("seg_other")],
+    ["t-vert", c.wow, c.wow_mesure ? t("seg_wow_measured") : t("seg_wow_ref")],
+    [fits ? "t-or" : "t-gules", model, m ? m.nom + (fits ? "" : t("seg_only_when")) : t("seg_model")],
+    ["t-gules", c.marge, t("seg_margin")],
+    ["t-argent", free, t("seg_free")],
   ];
   const g = $("gauge");
   if (g.children.length !== segs.length) g.innerHTML = segs.map(() => '<div class="seg"></div>').join("");
@@ -285,10 +585,10 @@ function renderGauge() {
   });
   g.setAttribute("aria-label", segs.filter(([, b]) => b > 0).map(([, b, l]) => `${l} ${go(b)}`).join(", "));
   const legend = segs.map(([cls, b, label], i) => {
-    if (i === 2 && m && m.lieu === "cpu") return `<li><span class="sw t-argent"></span>${esc(m.nom)} <b>sur le processeur</b></li>`;
+    if (i === 2 && m && m.lieu === "cpu") return `<li><span class="sw t-argent"></span>${esc(m.nom)} <b>${esc(t("on_cpu"))}</b></li>`;
     if (b <= 0 && i !== 4) return "";
-    const val = i === 4 && free < 0 ? `manque ${go(-free)}` : go(Math.max(0, b));
-    return `<li><span class="sw ${cls}"></span>${esc(label)} <b>${val}</b></li>`;
+    const val = i === 4 && free < 0 ? t("missing", { x: go(-free) }) : go(Math.max(0, b));
+    return `<li><span class="sw ${cls}"></span>${esc(label)} <b>${esc(val)}</b></li>`;
   });
   $("legend").innerHTML = legend.join("");
 }
@@ -297,26 +597,27 @@ function trialLine(m) {
   // Déjà dit dans la raison (modèle écarté par son test en jeu) : pas de doublon.
   if (m.essai && m.raison && m.raison.includes(m.essai.resume)) return "";
   if (m.essai) {
-    const where = m.lieu === "cpu" ? "sur le processeur" : "sur la carte";
+    const where = m.lieu === "cpu" ? t("on_cpu") : t("on_gpu");
     const cls = m.essai.verdict === "ok" ? "ok" : "bad";
-    return `<p class="trial ${cls}">Test en jeu ${where} : ${esc(m.essai.resume)}</p>`;
+    return `<p class="trial ${cls}">${esc(t("trial", { where, r: m.essai.resume }))}</p>`;
   }
   if (!m.lieu) return "";
-  return `<p class="trial none">Pas encore testé en jeu sur ce PC.</p>`;
+  return `<p class="trial none">${esc(t("not_tested"))}</p>`;
 }
 
 // Estimation sans test : temps par message, messages par minute sous 5 % de baisse, niveau.
 function estimLine(m) {
   const e = m.estimation;
-  if (!e || (e.niveau === "non" && !m.lieu)) return "";
-  const where = e.lieu === "cpu" ? "sur le processeur" : "sur la carte";
-  const rank = m.rang ? ` Étape ${m.rang} de la chaîne de repli.` : "";
-  return `<p class="estim">Estimation ${where} : <b>${esc(e.niveau)}</b> - ${esc(e.raison)} (${esc(e.source)}).${rank}</p>`;
+  if (!e || (e.niveau_code === "no" && !m.lieu)) return "";
+  const where = e.lieu === "cpu" ? t("on_cpu") : t("on_gpu");
+  const rank = m.rang ? t("rank", { n: m.rang }) : "";
+  const level = t("level_" + e.niveau_code) || e.niveau;
+  return `<p class="estim">${t("estim", { where: esc(where), level: esc(level), why: esc(e.raison), src: esc(e.source), rank: esc(rank) })}</p>`;
 }
 
 function rowKey(m) {
   const d = m.dl;
-  return JSON.stringify([m.installe, m.actif, m.high, m.conseille, m.rang, m.estimation && m.estimation.raison,
+  return JSON.stringify([lang, m.installe, m.actif, m.high, m.conseille, m.rang, m.estimation && m.estimation.raison,
     m.lieu, m.raison, m.essai && m.essai.resume, m.empreinte,
     d && d.etat, d && d.message, confirmDelete.has(m.id), state.carte && state.carte.libre_jeu]);
 }
@@ -326,55 +627,61 @@ function actionHtml(m) {
   if (d && d.etat === "en_cours") {
     return `<div class="progress" data-progress="${m.id}">
       <div class="bar"><i class="t-or"></i></div><span></span></div>
-      <button class="link" data-act="annuler" data-id="${m.id}">Annuler</button>`;
+      <button class="link" data-act="annuler" data-id="${m.id}">${esc(t("cancel"))}</button>`;
   }
   let html = "";
   if (m.installe) {
     if (m.actif) {
-      html += `<div class="is-active"><img src="/logo.png" alt=""> Actif</div>`;
+      html += `<div class="is-active"><img src="/logo.png" alt=""> ${esc(t("active"))}</div>`;
     } else if (m.lieu) {
-      html += `<button class="btn secondary" data-act="activer" data-id="${m.id}">Activer</button>`;
+      html += `<button class="btn secondary" data-act="activer" data-id="${m.id}">${esc(t("activate"))}</button>`;
     } else {
-      html += `<button class="btn secondary" disabled>Activer</button>`;
+      html += `<button class="btn secondary" disabled>${esc(t("activate"))}</button>`;
     }
     if (!m.low) {
       html += confirmDelete.has(m.id)
-        ? `<button class="link danger" data-act="supprimer" data-id="${m.id}">Confirmer : supprimer ${go2(m.taille)}</button>`
-        : `<button class="link" data-ask="${m.id}">Supprimer le fichier</button>`;
+        ? `<button class="link danger" data-act="supprimer" data-id="${m.id}">${esc(t("confirm_delete", { x: go2(m.taille) }))}</button>`
+        : `<button class="link" data-ask="${m.id}">${esc(t("delete_file"))}</button>`;
     }
     return html;
   }
-  if (!m.lieu) return `<div class="unavailable">Indisponible sur ce PC</div>`;
+  if (!m.lieu) return `<div class="unavailable">${esc(t("unavailable"))}</div>`;
   if (d && d.etat === "erreur") html += `<p class="err">${esc(d.message)}</p>`;
   const label = d && (d.etat === "annule" || d.etat === "erreur") && d.recu > 0
-    ? `Reprendre (${go2(d.total - d.recu)} restants)`
-    : `Télécharger (${go2(m.taille)})`;
-  html += `<button class="btn primary" data-act="telecharger" data-id="${m.id}">${label}</button>`;
+    ? t("resume", { x: go2(d.total - d.recu) })
+    : t("download", { x: go2(m.taille) });
+  html += `<button class="btn primary" data-act="telecharger" data-id="${m.id}">${esc(label)}</button>`;
   return html;
+}
+
+function langsText(m) {
+  if (m.nb_langues === 23) return t("all_langs");
+  const names = m.codes_langues && m.codes_langues.length ? langNames(m.codes_langues) : null;
+  return names ? t("low_langs", { list: names }) : m.langues;
 }
 
 function rowHtml(m) {
   const c = state.carte;
   const studs = [1, 2, 3].map((i) => stud(i <= m.qualite)).join("");
   const tags = (m.low ? `<span class="tag low">Low</span>` : "") + (m.high ? `<span class="tag high">High</span>` : "")
-    + (m.conseille && !m.low ? `<span class="tag advised">Conseillé</span>` : "");
-  const tagText = m.low ? "Par défaut, et dernier repli." : m.high ? "Le meilleur modèle pour votre PC, d'après l'estimation." : "";
-  const facts = `${m.nb_langues === 23 ? "Les 23 langues" : esc(m.langues)}, licence ${esc(m.licence)}, fichier de ${go2(m.taille)}.`;
+    + (m.conseille && !m.low ? `<span class="tag advised">${esc(t("advised"))}</span>` : "");
+  const tagText = m.low ? t("low_text") : m.high ? t("high_text") : "";
+  const facts = esc(t("facts", { langs: langsText(m), lic: m.licence, size: go2(m.taille) }));
   const bad = !m.lieu;
   let vram;
   if (m.lieu === "cpu") {
-    vram = `<b>Processeur</b>${state.processeur.fils} fils de calcul, plus lent`;
+    vram = `<b>${esc(t("cpu_title"))}</b>${esc(t("cpu_threads", { n: state.processeur.fils }))}`;
   } else {
     const ratio = c ? Math.min(1, m.empreinte / Math.max(1, c.libre_jeu - c.marge)) : 0;
     // Rouge : plus gros que la place estimée pendant le jeu (pris seulement quand WoW la laisse) ;
     // gris : écarté par son test.
     const tooBig = c && m.empreinte + c.marge > c.libre_jeu;
     const tint = tooBig ? "t-gules" : bad ? "t-sable" : "t-or";
-    vram = `<b>${go(m.empreinte)}</b>de mémoire vidéo (${m.mesuree ? "mesuré" : "estimé"})
+    vram = `<b>${go(m.empreinte)}</b>${esc(t("vram_of", { how: m.mesuree ? t("measured") : t("estimated") }))}
       ${c ? `<div class="mini" aria-hidden="true"><i class="${tint}" style="width:${ratio * 100}%"></i></div>` : ""}`;
   }
   return `<div class="row${m.actif ? " active" : ""}${bad ? " off" : ""}" data-row="${m.id}">
-    <div class="studs" role="img" aria-label="Qualité ${m.qualite} sur 3">${studs}</div>
+    <div class="studs" role="img" aria-label="${esc(t("quality", { q: m.qualite }))}">${studs}</div>
     <div>
       <div class="name"><h3>${esc(m.nom)}</h3>${tags}</div>
       <p class="facts">${tagText ? esc(tagText) + " " : ""}${facts}</p>
@@ -396,26 +703,103 @@ function updateProgress() {
     if (!d) continue;
     const p = d.total ? d.recu / d.total : 0;
     el.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
-    const speed = d.debit > 0 ? `, ${Math.round(d.debit / 1048576)}\u00a0Mo/s` : "";
-    const retry = d.message ? ` Reprise après : ${d.message}.` : "";
-    el.querySelector("span").textContent = `${Math.floor(p * 100)}\u00a0% : ${go2(d.recu)} sur ${go2(d.total)}${speed}.${retry}`;
+    const speed = d.debit > 0 ? `, ${nf0.format(Math.round(d.debit / 1048576))}\u00a0${t("mbs")}` : "";
+    const retry = d.message ? t("retry", { m: d.message }) : "";
+    el.querySelector("span").textContent = t("progress", { pct: pctf.format(Math.floor(p * 100) / 100), got: go2(d.recu), total: go2(d.total), speed, retry });
+  }
+}
+
+// ---- Mise à jour (0.16.1) ---------------------------------------------------------------------
+// Note de version (Markdown de GitHub) : titres, listes (lignes de suite indentées), gras, code ;
+// tout est échappé d'abord, aucun lien ni HTML de la note n'est gardé. La partie après « --- »
+// (installation à la main, politique de signature) reste sur GitHub.
+function md(src) {
+  const text = String(src || "").replace(/\r/g, "").split(/\n-{3,}\s*(\n|$)/)[0];
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  const out = [];
+  let list = null;
+  let para = null;
+  const flush = () => { if (para !== null) { out.push(`<p>${inline(para)}</p>`); para = null; } };
+  const close = () => { if (list) { out.push(`<ul>${list.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`); list = null; } };
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    let m;
+    if (!line) { flush(); continue; }
+    if ((m = line.match(/^#{1,6}\s+(.*)$/))) { flush(); close(); out.push(`<h4>${inline(m[1])}</h4>`); continue; }
+    if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { flush(); (list = list || []).push(m[1]); continue; }
+    if (/^\s/.test(line) && list && para === null) { list[list.length - 1] += " " + line.trim(); continue; }
+    close();
+    para = para === null ? line.trim() : para + " " + line.trim();
+  }
+  flush();
+  close();
+  return out.join("");
+}
+
+function notesHtml(notes) {
+  const body = md(notes);
+  const fr = t("notes_lang");
+  return `<div class="relnotes"><h3>${esc(t("upd_notes"))}${fr ? `<small>(${esc(fr)})</small>` : ""}</h3>
+    <div class="md" tabindex="0">${body || `<p>${esc(t("no_notes"))}</p>`}</div></div>`;
+}
+
+function renderUpdate() {
+  const u = state.maj;
+  const n = state.nouveautes;
+  const box = $("update");
+  const key = JSON.stringify([lang, u, n, updRequested]);
+  if (key === updKey) return;
+  updKey = key;
+  if (u) {
+    const requested = updRequested === u.version && u.etat !== "erreur" && u.etat !== "installation";
+    let line;
+    let button = "";
+    if (u.etat === "installation") line = t("upd_installing");
+    else if (u.etat === "erreur") line = t("upd_error", { m: u.message || "?" });
+    else if (requested) line = t("upd_requested");
+    else if (u.etat === "prete") line = t("upd_ready");
+    else line = t("upd_dl");
+    if (u.etat === "prete" || u.etat === "erreur") {
+      const label = u.etat === "erreur" ? t("upd_retry") : t("upd_install");
+      button = `<button class="btn primary" data-maj="installer"${requested ? " disabled" : ""}>${esc(label)}</button>`;
+    }
+    box.className = "update" + (u.etat === "erreur" ? " bad" : "");
+    box.innerHTML = `<div class="update-head"><div>
+        <h2>${esc(t("upd_title", { v: u.version }))}</h2>
+        <p class="state${u.etat === "erreur" ? " bad" : ""}">${esc(line)}</p>
+      </div>${button}</div>${notesHtml(u.notes)}`;
+    box.hidden = false;
+  } else if (n) {
+    box.className = "update";
+    box.innerHTML = `<div class="update-head"><div>
+        <h2>${esc(t("new_title", { v: n.version }))}</h2>
+        <p class="state">${esc(t("new_lead"))}</p>
+      </div><button class="btn secondary" data-maj="vu">${esc(t("new_close"))}</button></div>${notesHtml(n.notes)}`;
+    box.hidden = false;
+  } else {
+    box.hidden = true;
+    box.innerHTML = "";
   }
 }
 
 function render() {
   $("demo").hidden = !state.demo;
+  renderUpdate();
   renderGauge();
   $("notes").innerHTML = state.notes.map((n) => `<li>${esc(n)}</li>`).join("");
   const est = state.estimation;
   const ch = $("chain");
   ch.hidden = !est || !est.chaine.length;
   if (est && est.chaine.length) {
-    const more = est.a_telecharger > 0 ? ` Modèles conseillés à télécharger : ${go2(est.a_telecharger)}.` : "";
-    ch.innerHTML = `<b>Chaîne de repli :</b> ${est.chaine.map(esc).join(" → ")}.${more}<br>WoW : ${esc(est.conditions)}.`;
+    const more = est.a_telecharger > 0 ? t("more", { x: go2(est.a_telecharger) }) : "";
+    ch.innerHTML = t("chain", { chain: est.chaine.map(esc).join(" → "), more: esc(more), cond: esc(est.conditions) });
   }
   const fb = $("fallback");
   fb.hidden = !state.repli;
-  if (state.repli) fb.textContent = `Le pack low a pris le relais : ${state.repli}.`;
+  if (state.repli) fb.textContent = t("fallback", { why: state.repli });
 
   const list = $("list");
   const ids = state.modeles.map((m) => m.id).join();
@@ -437,42 +821,60 @@ function render() {
   }
   const e = state.moteur;
   const eng = $("engine");
+  delete eng.dataset.t;
   if (e.dl && e.dl.etat === "en_cours") {
     eng.className = "engine wait";
-    if (!eng.querySelector("[data-progress]")) eng.innerHTML = `Téléchargement du moteur de traduction (${esc(e.nom)})<div class="progress" data-progress="moteur"><div class="bar"><i class="t-or"></i></div><span></span></div>`;
+    const head = t("engine_dl", { name: e.nom });
+    if (!eng.querySelector("[data-progress]") || eng.dataset.head !== head) {
+      eng.dataset.head = head;
+      eng.innerHTML = `${esc(head)}<div class="progress" data-progress="moteur"><div class="bar"><i class="t-or"></i></div><span></span></div>`;
+    }
   } else if (e.pret) {
     eng.className = "engine";
-    eng.textContent = `Moteur de traduction prêt (llama.cpp, ${e.nom === "vulkan" ? "Vulkan, toutes cartes graphiques" : e.nom}).`;
+    eng.textContent = t("engine_ready", { name: e.nom === "vulkan" ? t("vulkan_all") : e.nom });
   } else {
     eng.className = "engine wait";
-    eng.textContent = e.dl && e.dl.etat === "erreur" ? `Moteur de traduction : ${e.dl.message}` : "Moteur de traduction absent.";
+    eng.textContent = e.dl && e.dl.etat === "erreur" ? t("engine_err", { m: e.dl.message }) : t("engine_missing");
   }
-  $("folder").textContent = `Dossier des modèles : ${state.dossier}`;
-  $("disk").textContent = state.disque_libre != null ? `${go(state.disque_libre)} libres sur ce disque` : "";
-  $("version").textContent = `Version ${state.version}`;
+  $("folder").textContent = t("folder", { p: state.dossier });
+  $("disk").textContent = state.disque_libre != null ? t("disk", { x: go(state.disque_libre) }) : "";
+  $("version").textContent = t("version", { v: state.version });
   updateProgress();
 }
 
 let failures = 0;
 async function poll() {
   try {
-    const r = await fetch("/api/etat", { cache: "no-store" });
-    state = await r.json();
+    const r = await fetch("/api/etat" + (lang ? "?langue=" + lang : ""), { cache: "no-store" });
+    const s = await r.json();
     failures = 0;
     $("lost").classList.remove("on");
+    if (!lang) {
+      // Première réponse : langue gardée par l'application, sinon celle du navigateur.
+      lang = LANGS.includes(s.langue_choisie) ? s.langue_choisie : browserLang();
+      applyLang();
+      if (s.langue !== lang) return poll();
+    }
+    state = s;
     render();
   } catch (e) {
     if (++failures >= 4) $("lost").classList.add("on");
   }
 }
 
+async function post(action, id) {
+  const r = await fetch(`/api/${action}?id=${encodeURIComponent(id)}`, { method: "POST", headers: { "X-CT-Jeton": JETON } });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.erreur || t("action_failed"));
+  }
+}
+
 async function act(action, id) {
   try {
-    const r = await fetch(`/api/${action}?id=${encodeURIComponent(id)}`, { method: "POST", headers: { "X-CT-Jeton": JETON } });
-    if (!r.ok) {
-      const e = await r.json().catch(() => ({}));
-      alertRow(id, e.erreur || "Action impossible.");
-    }
+    await post(action, id);
+  } catch (e) {
+    alertRow(id, e.message);
   } finally {
     poll();
   }
@@ -489,21 +891,47 @@ function alertRow(id, msg) {
 }
 
 document.addEventListener("click", (ev) => {
-  const t = ev.target.closest("button");
-  if (!t) return;
-  if (t.dataset.ask) {
-    confirmDelete.add(t.dataset.ask);
-    const id = t.dataset.ask;
+  const t0 = ev.target.closest("button");
+  if (!t0) return;
+  if (t0.dataset.maj) {
+    t0.disabled = true;
+    const what = t0.dataset.maj;
+    if (what === "installer" && state && state.maj) updRequested = state.maj.version;
+    post(what === "vu" ? "maj_vu" : "maj", "").catch((e) => {
+      updRequested = null;
+      const p = document.createElement("p");
+      p.className = "state bad";
+      p.textContent = e.message;
+      $("update").querySelector(".update-head > div").append(p);
+    }).finally(() => { updKey = ""; poll(); });
+    return;
+  }
+  if (t0.dataset.ask) {
+    confirmDelete.add(t0.dataset.ask);
+    const id = t0.dataset.ask;
     setTimeout(() => { confirmDelete.delete(id); keys.delete(id); if (state) render(); }, 5000);
     keys.delete(id);
     render();
     return;
   }
-  if (t.dataset.act) {
-    if (t.dataset.act === "supprimer") confirmDelete.delete(t.dataset.id);
-    t.disabled = true;
-    act(t.dataset.act, t.dataset.id);
+  if (t0.dataset.act) {
+    if (t0.dataset.act === "supprimer") confirmDelete.delete(t0.dataset.id);
+    t0.disabled = true;
+    act(t0.dataset.act, t0.dataset.id);
   }
+});
+$("lang").addEventListener("change", (ev) => {
+  const l = ev.target.value;
+  if (!LANGS.includes(l) || l === lang) return;
+  lang = l;
+  try { localStorage.setItem("ct-langue", l); } catch (e) { /* mémoire du navigateur indisponible */ }
+  post("langue", l).catch(() => {});
+  applyLang();
+  keys.clear();
+  $("list").dataset.ids = "";
+  updKey = "";
+  if (state) render();
+  poll();
 });
 document.addEventListener("mouseover", (ev) => {
   const row = ev.target.closest("[data-row]");
@@ -515,6 +943,7 @@ document.addEventListener("focusin", (ev) => {
   if (row && row.dataset.row !== preview) { preview = row.dataset.row; if (state) renderGauge(); }
 });
 
+if (lang) applyLang();
 poll();
 setInterval(poll, 800);
 </script>

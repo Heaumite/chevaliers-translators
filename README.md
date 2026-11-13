@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.16.0)
+# Chevaliers Translators (v0.16.1)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -48,16 +48,30 @@ traduction...** (fenêtre des modèles : moteur, pack low, autres modèles), **J
 l'application**, **Rechercher une mise à jour**, **Mises à jour automatiques** (cochée par
 défaut), **Désinstaller...**, **Quitter**.
 
-### Mises à jour automatiques (0.16)
+### Mises à jour automatiques (0.16 ; 0.16.1 : sur demande, avec la note de version)
 
 L'application regarde la dernière version publiée sur GitHub 20 s après son lancement, puis toutes
 les 30 minutes. Une version plus récente est téléchargée en fond et vérifiée : son paquet doit avoir
-exactement l'empreinte SHA-256 publiée avec lui, sinon il est refusé. Elle s'installe **dès qu'aucun
-WoW n'est ouvert** (jamais pendant une partie) : le nouvel exécutable prend la place de l'ancien,
-se lance, et pose son addon dans toutes les versions de WoW trouvées, vérifié fichier par fichier ;
-les copies de l'application rangées dans les dossiers de l'addon sont remplacées aussi. Une bulle
-le signale. Une copie compilée sur place (dossier `target`) ne se met jamais à jour seule.
-Pour couper : menu de l'icône, décocher **Mises à jour automatiques**.
+exactement l'empreinte SHA-256 publiée avec lui, sinon il est refusé. Prête, elle est **proposée** :
+la fenêtre de l'application s'ouvre (pendant une partie : une bulle près de l'horloge, un clic
+dessus ouvre la fenêtre) avec l'encadré **Mise à jour X.Y.Z disponible**, le bouton **Installer la
+mise à jour** et, dessous, la **note de version** (celle publiée sur GitHub). Le bouton lance
+l'installation : l'application se ferme quelques secondes, le nouvel exécutable prend la place de
+l'ancien, se lance, et pose son addon dans toutes les versions de WoW trouvées, vérifié fichier par
+fichier ; les copies de l'application rangées dans les dossiers de l'addon sont remplacées aussi.
+Ensuite `/reload` en jeu (ou relancer WoW si l'application le demande). À l'ouverture suivante,
+l'encadré **Version X.Y.Z installée** rappelle les nouveautés (**Masquer** pour le fermer).
+Téléchargement raté : **Réessayer**. Une copie compilée sur place (dossier `target`) ne se met
+jamais à jour seule. Pour couper la recherche : menu de l'icône, décocher **Mises à jour
+automatiques** (« Rechercher une mise à jour » reste possible).
+
+### Fenêtre de l'application en six langues (0.16.1)
+
+Liste en haut à droite de la bannière : français, English, Deutsch, Español, Italiano, Русский.
+Au premier affichage, la langue de Windows (sinon l'anglais) ; le choix est gardé
+(`%LOCALAPPDATA%\ChevaliersTranslators\langue-fenetre.txt`). Les explications calculées par
+l'application (raisons, estimations, chaîne de repli) suivent la langue choisie ; la note de version
+reste en français.
 
 ### Désinstallation (0.14.3)
 
@@ -117,6 +131,23 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.16.1 (13/11/2026)
+
+- **Mise à jour sur demande, avec sa note** : une nouvelle version téléchargée et vérifiée ouvre la
+  fenêtre de l'application (en jeu : une bulle, un clic l'ouvre) sur l'encadré « Mise à jour
+  disponible », le bouton **Installer la mise à jour** et la note de version dessous. Après
+  l'installation, l'encadré « Version installée » rappelle les nouveautés. Plus d'installation
+  sans le joueur.
+- **Fenêtre de l'application en six langues** : français, anglais, allemand, espagnol, italien,
+  russe ; liste en haut à droite, choix gardé. Les explications de l'application suivent.
+- **Bulle de ses propres messages traduite** : un `/dire` du joueur traduit dans le chat l'est
+  aussi dans la bulle au-dessus de son personnage.
+- **Sous-menus des réglages du chat visibles** : « Taille de la police » et les autres sous-menus
+  ouverts à côté du menu ne sont plus recouverts par le chat traduit.
+- **Chat traduit effacé au ras des menus** : il s'arrête à la bordure de chaque menu ou bulle
+  d'aide, sans le vide laissé par l'ombre portée ni la bordure du bas recouverte.
+- Publication : la note de version sur GitHub est la section de cette version dans ce README.
 
 ## 0.16.0 (13/11/2026)
 
@@ -423,15 +454,17 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.0.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.1.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.16.0)
+## Vérifié avant livraison (0.16.1)
 
-- 127 tests Rust sous Linux : dont, en 0.16, les versions comparées par leurs nombres, la
+- 128 tests Rust sous Linux : dont, en 0.16.1, les explications de l'application traduites dans les cinq
+  autres langues (raisons, estimations, notes, unités), la langue de la page gardée et reprise,
+  langue inconnue refusée ; en 0.16, les versions comparées par leurs nombres, la
   dernière version publiée reconnue seulement avec son paquet et son empreinte, SHA-256 (vecteurs de
   la norme), l'exécutable extrait du zip (stocké ou compressé, CRC contrôlé, zip abîmé refusé) puis
   mis à la place de celui qui tourne (et remis en cas d'échec), les copies de développement jamais
@@ -466,7 +499,9 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   bulle de dialogue retrouvée par son message (couleurs, repères de raid ignorés), trame des
   bulles décodée par l'application, bulle protégée ignorée, bulle sous une fenêtre du jeu non
   traduite, `/chevaliers bulles off` qui envoie une liste vide (0.15) ; bouton Envoyer, son infobulle
-  et l'envoi traduit qu'il déclenche (0.15.1) ;
+  et l'envoi traduit qu'il déclenche (0.15.1) ; sous-menu ouvert à côté du menu des réglages du chat
+  signalé, rectangle d'un menu au ras de sa bordure sans son ombre, bulle du joueur lui-même
+  retrouvée, chuchotement envoyé jamais cherché dans une bulle (0.16.1) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
@@ -475,13 +510,22 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   téléchargements, serveur arrêté avec l'application) compilé contre `windows-sys` avec la
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
+- Fenêtre de l'application (0.16.1) ouverte dans Chromium en français, allemand, russe, anglais et
+  espagnol : textes, nombres et unités de chaque langue, encadré de mise à jour avec sa note
+  (Markdown rendu, HTML de la note échappé), bouton qui dépose la demande d'installation, encadré
+  « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
+  erreur JavaScript.
 
-## Test de la 0.16.0 (PowerShell)
+## Test de la 0.16.1 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
+| Langue de la fenêtre | liste en haut à droite : Deutsch -> toute la page en allemand (jauge, raisons, boutons) ; fermer et rouvrir : toujours en allemand |
+| Mise à jour proposée | vraie : à la publication de la 0.16.2. Aperçu dès maintenant : application lancée, écrire un faux `maj\etat.json` (commande de la livraison) : encadré « Mise à jour 9.9.9 disponible », bouton, note dessous ; clic : « Installation demandée » puis bulle « Pas de mise à jour » (rien à installer) ; supprimer le fichier |
+| Bulle à soi | `/dire hello` : le chat montre `[EN] bonjour` et la bulle au-dessus du personnage aussi |
+| Sous-menu du chat | clic droit sur l'onglet Général > Taille de la police : le sous-menu reste entièrement visible, chat traduit effacé au ras des deux menus (pas de vide sombre autour, bordure du bas visible) |
 | Lancement | fenêtre des modèles ouverte ; médaillon près de l'horloge ; raccourci « Chevaliers Translators » sur le bureau (premier lancement) |
 | Second lancement | double-clic sur le raccourci : la fenêtre des modèles revient devant, pas de second médaillon |
 | Bandeau caché | en jeu, plus de blocs colorés en bas à droite ; journal : `[bandeau] caché aux yeux du joueur` ; la traduction continue |

@@ -129,6 +129,13 @@ ancienne version de l'application arrêtée par la nouvelle ; guide réaffiché 
 vérifié par SHA-256, installée dès qu'aucun WoW n'est ouvert, addon et copies de l'application
 remis partout) ; menu « Rechercher une mise à jour » et « Mises à jour automatiques ».
 
+**0.16.1 (13/11)** : mise à jour proposée dans la fenêtre de l'application (bouton « Installer la
+mise à jour », note de version publiée avec elle sur GitHub, tirée du README ; nouveautés
+rappelées après l'installation) ; fenêtre de l'application en six langues (fr, en, de, es, it, ru),
+explications de l'application traduites côté application ; bulle de ses propres messages traduite ;
+sous-menus des réglages du chat non recouverts, chat traduit effacé au ras des bordures (ombre
+ignorée).
+
 **J2 - Installation et démarrage**
 - Premier lancement guidé : WoW trouvé, addon posé dans toutes les versions, moteur llama.cpp et
   pack low téléchargés, matériel détecté, modèles proposés (interface de la phase 0).

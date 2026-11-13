@@ -55,9 +55,11 @@ function B:Enabled()
   return not (ChevaliersTranslatorsDB and ChevaliersTranslatorsDB.bubbles == false)
 end
 
--- Message relayé (Core.lua) : retenu pour retrouver sa bulle.
-function B:Note(id, event, text, own)
-  if own or not BUBBLE_EVENTS[event] then return end
+-- Message relayé (Core.lua) : retenu pour retrouver sa bulle (les siens compris, 0.16.1 : un
+-- message du joueur traduit dans le chat l'est aussi dans sa bulle). `skip` : message à ne pas
+-- chercher dans une bulle (chuchotement envoyé).
+function B:Note(id, event, text, skip)
+  if skip or not BUBBLE_EVENTS[event] then return end
   local key = Norm(text)
   if not key then return end
   local now = GetTime()

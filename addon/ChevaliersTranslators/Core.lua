@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.16.0"
+CT.VERSION = "0.16.1"
 
 local floor = math.floor
 local format = string.format
@@ -574,7 +574,8 @@ Relay = function(event, late, text, sender, ...)
     return true
   end
   -- Bulle de dialogue qui affichera ce message : retrouvée par son texte (0.15).
-  if CT.Bubbles then CT.Bubbles:Note(msgId, event, text, own or INFORM[event]) end
+  -- Ses propres messages aussi (0.16.1) : traduits dans le chat, ils le sont dans sa bulle.
+  if CT.Bubbles then CT.Bubbles:Note(msgId, event, text, INFORM[event]) end
   if shown then
     CT.ChatFragments(msgId, code, sender, text, MaxPayload(),
       function(p, len) Enqueue(CT.FRAME_CHAT, p, len) end)

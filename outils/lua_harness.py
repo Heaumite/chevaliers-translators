@@ -764,6 +764,50 @@ def mock(root, binary):
     assert "1 menu(s), bulle(s) ou fenêtre(s) du jeu sur le chat" in out, "bulle d'aide non signalée"
     g.GameTooltip.visible = False
     collect("bulle-fin")
+    # Menu des réglages du chat ouvert et son sous-menu « Taille de la police » à côté, la souris
+    # restée sur le menu (0.16.1) : les deux rectangles partent à l'application.
+    lua.execute('''
+      local function menuFrame(l, b, parent)
+        return { IsVisible = function() return true end, GetLeft = function() return l end,
+          GetBottom = function() return b end, GetWidth = function() return 160 end,
+          GetHeight = function() return 120 end, GetEffectiveScale = function() return 0.64 end,
+          GetFrameStrata = function() return "FULLSCREEN_DIALOG" end, GetParent = function() return parent end }
+      end
+      ROOTMENU = menuFrame(40, 60, UIParent)
+      SUBMENU = menuFrame(205, 40, UIParent)
+      local other = menuFrame(900, 900, UIParent)
+      other.GetFrameStrata = function() return "MEDIUM" end
+      local all = { other, ROOTMENU, SUBMENU }
+      function EnumerateFrames(f)
+        if not f then return all[1] end
+        for i, x in ipairs(all) do if x == f then return all[i + 1] end end
+      end
+      Menu = { GetManager = function() return { IsAnyMenuOpen = function() return true end,
+        GetOpenMenu = function() return ROOTMENU end } end }
+      GetMouseFoci = function() return { ROOTMENU } end
+    ''')
+    out = feed(collect("sous-menu"), os.path.join(work, "sous-menu"))
+    assert "2 menu(s), bulle(s) ou fenêtre(s) du jeu sur le chat" in out, out
+    # Rectangle d'un menu (0.16.1) : au ras de sa bordure, l'ombre portée ignorée.
+    lua.execute('''
+      local function piece(l, b, w, h, atlas)
+        return { IsVisible = function() return true end, GetLeft = function() return l end,
+          GetBottom = function() return b end, GetWidth = function() return w end,
+          GetHeight = function() return h end, GetAtlas = function() return atlas end }
+      end
+      local box = { IsVisible = function() return true end, GetLeft = function() return 100 end,
+        GetBottom = function() return 100 end, GetWidth = function() return 50 end,
+        GetHeight = function() return 40 end, GetEffectiveScale = function() return 1 end }
+      local edge, shadow = piece(97, 97, 56, 46, "UI-Frame-Border"), piece(88, 86, 74, 64, "ui-frame-dropshadow")
+      box.NineSlice = { IsVisible = function() return true end, GetLeft = function() return 100 end,
+        GetBottom = function() return 100 end, GetWidth = function() return 50 end,
+        GetHeight = function() return 40 end, GetRegions = function() return edge, shadow end }
+      local r = CT_TABLE.Mirror.Rect(box, 1)
+      RECTBOX = table.concat(r, ",")
+    ''')
+    assert g.RECTBOX == "96,96,58,48", g.RECTBOX
+    lua.execute("Menu = nil; GetMouseFoci = nil; EnumerateFrames = nil")
+    collect("sous-menu-fin")
     # ---- 0.15 : bulles de dialogue au-dessus des joueurs ----------------------------------
     # Une bulle visible affiche un message relayé : sa place part à l'application (trame 18), qui
     # retrouve le message par son numéro.
@@ -791,6 +835,12 @@ def mock(root, binary):
         g.TICK(1 / 60)
     assert ct.Bubbles.stats.hidden > hidden0, "bulle sous une fenêtre du jeu"
     g.GameTooltip.visible = False
+    # Sa propre bulle (0.16.1) : le message du joueur lui-même est retrouvé aussi (traduit dans le
+    # chat, il l'est dans sa bulle) ; un chuchotement envoyé n'a pas de bulle.
+    g.FIRE("CHAT_MSG_SAY", "hello", "Testeur Batonnoir", "Commun", "", "Testeur Batonnoir", "", 0, 0, "", 0, 60, "Player-1-0ABC")
+    assert ct.Bubbles.Lookup(ct.Bubbles, "hello") is not None, "bulle du joueur lui-même non retrouvée"
+    g.FIRE("CHAT_MSG_WHISPER_INFORM", "secret plan", "Ami-Hyjal", "", "", "", "", 0, 0, "", 0, 61, "Player-5")
+    assert ct.Bubbles.Lookup(ct.Bubbles, "secret plan") is None, "chuchotement envoyé cherché dans une bulle"
     # Désactivées par le joueur : une trame vide (l'application retire ses traductions).
     g.SLASH("bulles off")
     assert "désactivé" in list(g.LOG.values())[-1]

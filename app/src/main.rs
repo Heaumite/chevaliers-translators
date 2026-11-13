@@ -208,12 +208,12 @@ mod app {
             if after_update {
                 let from = std::env::args().skip_while(|a| a != "--apres-maj").nth(1).unwrap_or_default();
                 ct::say!("[mise à jour] installée : {from} -> {VERSION}");
+                // La fenêtre de l'application montre les nouveautés de cette version, une fois.
+                ct::maj::mark_installed(VERSION);
                 tray.notify("Chevaliers Translators mis à jour", &format!("Version {VERSION} installée depuis GitHub ; l'addon suit dans toutes les versions de WoW."), false);
             }
-            if ct::maj::is_dev_build(&exe) {
-                ct::say!("[mise à jour] version de développement ({}) : pas d'installation automatique", exe.display());
-            } else if !ct::maj::auto_enabled() {
-                ct::say!("[mise à jour] automatiques coupées (menu de l'icône) ; « Rechercher une mise à jour » reste possible");
+            if !ct::maj::auto_enabled() {
+                ct::say!("[mise à jour] recherche automatique coupée (menu de l'icône) ; « Rechercher une mise à jour » reste possible");
             }
             ct::maj::start(VERSION, exe);
         }
@@ -255,16 +255,16 @@ mod app {
                 }
                 said = Some(Instant::now());
             }
-            update_events(tray);
+            if update_events(tray) {
+                // La nouvelle version est lancée : celle-ci s'arrête.
+                break;
+            }
             if !capture_win::wow_windows().is_empty() {
                 translate_all(tray, &mut roots, &mut last_error);
                 if Tray::quit_asked() {
                     break;
                 }
                 tray.set_status("En attente de World of Warcraft");
-            } else if install_update(tray) {
-                // La nouvelle version est lancée : celle-ci s'arrête.
-                break;
             }
             wait(Duration::from_millis(500));
         }
@@ -277,39 +277,82 @@ mod app {
         }
     }
 
-    /// Nouvelles du fil des mises à jour : bulles de l'icône.
-    fn update_events(tray: &Tray) {
+    /// Mise à jour prête à montrer dès que WoW n'est plus au premier plan.
+    static SHOW_UPDATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    /// Le joueur a cliqué « Installer la mise à jour » (installée dès qu'elle est téléchargée,
+    /// demande oubliée après 10 minutes sans version prête).
+    static INSTALL_WANTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static INSTALL_ASKED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+    /// Nouvelles du fil des mises à jour (0.16.1) : une nouvelle version téléchargée et vérifiée
+    /// est montrée dans la fenêtre de l'application, avec son bouton d'installation et sa note de
+    /// mise à jour ; WoW au premier plan, une bulle d'abord (son clic ouvre la fenêtre), la fenêtre
+    /// dès que WoW n'est plus devant. Vrai si la mise à jour vient d'être installée (arrêt).
+    fn update_events(tray: &Tray) -> bool {
+        use std::sync::atomic::Ordering;
+        let in_game = ct::overlay_win::Overlay::wow_in_front();
         for e in ct::maj::take_events() {
             match e {
                 ct::maj::Event::UpToDate(v) => tray.notify("Pas de mise à jour", &format!("La version {v} est la dernière publiée sur GitHub."), false),
                 ct::maj::Event::Found(v) => tray.notify("Mise à jour trouvée", &format!("Version {v} publiée sur GitHub : téléchargement en cours."), false),
                 ct::maj::Event::Ready(v) => {
-                    let when = if capture_win::wow_windows().is_empty() { "elle s'installe maintenant" } else { "elle s'installera à la fermeture de WoW" };
-                    tray.notify("Mise à jour prête", &format!("Version {v} téléchargée et vérifiée : {when}."), false);
+                    ct::say!("[mise à jour] {v} prête : proposée au joueur");
+                    if in_game {
+                        tray.notify_opening_models(
+                            "Mise à jour disponible",
+                            &format!("Chevaliers Translators {v} est prêt. Clique ici pour voir les nouveautés et l'installer."),
+                        );
+                        SHOW_UPDATE.store(true, Ordering::Relaxed);
+                    } else {
+                        Tray::open_models();
+                    }
                 }
                 ct::maj::Event::Problem(p) => tray.notify("Mise à jour impossible", &p, true),
             }
         }
+        if !in_game && SHOW_UPDATE.swap(false, Ordering::Relaxed) {
+            Tray::open_models();
+        }
+        if ct::maj::take_install_request() {
+            ct::say!("[mise à jour] installation demandée par le joueur");
+            INSTALL_WANTED.store(true, Ordering::Relaxed);
+            *INSTALL_ASKED.lock().unwrap() = Some(std::time::Instant::now());
+            // Téléchargement raté : bouton « Réessayer », nouvelle recherche tout de suite.
+            if ct::maj::ready().is_none() {
+                ct::maj::check_now();
+            }
+        }
+        if INSTALL_WANTED.load(Ordering::Relaxed)
+            && ct::maj::ready().is_none()
+            && INSTALL_ASKED.lock().unwrap().is_some_and(|t| t.elapsed() > std::time::Duration::from_secs(600))
+        {
+            ct::say!("[mise à jour] aucune version prête 10 minutes après la demande : demande oubliée");
+            INSTALL_WANTED.store(false, Ordering::Relaxed);
+        }
+        INSTALL_WANTED.load(Ordering::Relaxed) && install_update(tray)
     }
 
-    /// Mise à jour prête et aucun WoW ouvert : le nouvel exécutable prend la place de celui-ci et
-    /// est lancé. Vrai si celui-ci doit s'arrêter.
+    /// Mise à jour demandée par le joueur et téléchargée : le nouvel exécutable prend la place de
+    /// celui-ci et est lancé (il rouvre la fenêtre de l'application). Vrai si celui-ci doit
+    /// s'arrêter.
     fn install_update(tray: &Tray) -> bool {
         let Some((v, new_exe)) = ct::maj::ready() else { return false };
+        INSTALL_WANTED.store(false, std::sync::atomic::Ordering::Relaxed);
         let Ok(exe) = std::env::current_exe() else { return false };
-        if ct::maj::is_dev_build(&exe) {
-            return false;
-        }
         ct::say!("{} [mise à jour] installation de la {v} : {}", journal::clock(), exe.display());
+        ct::maj::set_step(&v, "installation", "");
         if let Err(e) = ct::maj::apply(&new_exe, &exe) {
             ct::say!("[mise à jour] {e}");
+            ct::maj::set_step(&v, "erreur", &e);
             tray.notify("Mise à jour impossible", &format!("Version {v} : {e}. Elle est sur GitHub : {}", ct::maj::REPO), true);
             // Plus d'autre essai pendant cette session.
             ct::maj::forget_ready();
             return false;
         }
+        // La fenêtre de cette version se ferme : la nouvelle ouvre la sienne, avec ses nouveautés.
+        Tray::close_models();
         let mut c = std::process::Command::new(&exe);
-        c.args(["--discret", "--apres-maj", VERSION]);
+        c.args(["--apres-maj", VERSION]);
         match c.spawn() {
             Ok(_) => {
                 ct::say!("[mise à jour] {v} lancée : arrêt de la {VERSION}");
@@ -468,7 +511,10 @@ mod app {
                     return false;
                 }
                 downloads_tick(tray, &mut downloading, &mut shown_at, &status.borrow());
-                update_events(tray);
+                if update_events(tray) {
+                    why = "mise à jour installée";
+                    return false;
+                }
                 let now = Instant::now();
                 if now.duration_since(checked) < Duration::from_secs(1) {
                     return true;

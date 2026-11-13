@@ -159,16 +159,21 @@ fn dl_json(d: Option<&Dl>) -> Value {
     }
 }
 
-fn trial_json(t: &Trial) -> Value {
+fn trial_json(t: &Trial, lang: &str) -> Value {
     json!({
         "verdict": t.verdict.code(),
-        "resume": t.summary(),
+        "resume": tr(lang, &t.summary()),
         "date": t.when,
         "baisse": t.drop,
     })
 }
 
-fn state_json(s: &Shared) -> Value {
+/// Explication de l'application dans la langue de la page (0.16.1).
+fn tr(lang: &str, text: &str) -> String {
+    crate::textes::translate(lang, text)
+}
+
+fn state_json(s: &Shared, lang: &str) -> Value {
     let o = s.offer();
     let p = s.plan();
     let active = s.active();
@@ -183,16 +188,18 @@ fn state_json(s: &Shared) -> Value {
                 "nom": m.name,
                 "fichier": m.file,
                 "taille": m.size,
-                "langues": m.langs.label(),
+                "langues": tr(lang, m.langs.label()),
                 "nb_langues": if m.langs == catalog::Langs::Low { 6 } else { 23 },
+                // Langues du pack low, nommées par la page dans sa langue.
+                "codes_langues": if m.langs == catalog::Langs::Low { json!(["fr", "en", "es", "it", "de", "ru"]) } else { json!([]) },
                 "licence": m.license,
                 "qualite": m.quality,
                 "empreinte": e.footprint,
                 "mesuree": e.measured,
                 "lieu": e.place.map(|p| p.code()),
-                "raison": e.reason,
-                "essai": e.trial.as_ref().map(trial_json),
-                "echec_carte": e.gpu_failed.as_ref().map(|t| t.summary()),
+                "raison": tr(lang, &e.reason),
+                "essai": e.trial.as_ref().map(|t| trial_json(t, lang)),
+                "echec_carte": e.gpu_failed.as_ref().map(|t| tr(lang, &t.summary())),
                 "installe": e.installed,
                 "low": m.id == LOW_PACK.id,
                 "high": p.high().map(|h| h.id) == Some(m.id),
@@ -203,8 +210,9 @@ fn state_json(s: &Shared) -> Value {
                     "niveau": c.level.label(),
                     "latence": c.latency.is_finite().then_some(c.latency),
                     "capacite": c.capacity.is_finite().then_some(c.capacity),
-                    "raison": c.why,
-                    "source": c.source,
+                    "niveau_code": format!("{:?}", c.level).to_lowercase(),
+                    "raison": tr(lang, &c.why),
+                    "source": tr(lang, &c.source),
                 })),
                 "actif": eff.model.id == m.id,
                 "dl": dl_json(s.dls.get(m.id)),
@@ -224,7 +232,11 @@ fn state_json(s: &Shared) -> Value {
         "carte": card,
         "processeur": { "nom": s.hw.cpu.name, "fils": o.cpu_threads, "ram_libre": o.ram_free },
         "modeles": models,
-        "repli": why,
+        // « Modèle : raison » : la raison traduite.
+        "repli": why.map(|w| match w.split_once(" : ") {
+            Some((name, r)) => format!("{name} : {}", tr(lang, r)),
+            None => tr(lang, &w),
+        }),
         "moteur": {
             "nom": o.runtime,
             "pret": s.runtime_ready(o.runtime),
@@ -233,10 +245,15 @@ fn state_json(s: &Shared) -> Value {
         },
         "dossier": s.dir.display().to_string(),
         "disque_libre": catalog::free_disk(&s.dir),
-        "notes": o.notes,
+        "notes": o.notes.iter().map(|n| tr(lang, n)).collect::<Vec<_>>(),
+        "langue": crate::textes::normalize(lang),
+        // Mise à jour publiée sur GitHub (0.16.1) : bouton et note de mise à jour dans la page ;
+        // nouveautés de la version qui vient d'être installée.
+        "maj": crate::maj::read_state(env!("CARGO_PKG_VERSION")),
+        "nouveautes": crate::maj::read_installed(env!("CARGO_PKG_VERSION")),
         "estimation": {
-            "conditions": p.conditions.label(),
-            "chaine": p.chain.iter().map(|&i| p.candidates[i].label()).collect::<Vec<_>>(),
+            "conditions": tr(lang, &p.conditions.label()),
+            "chaine": p.chain.iter().map(|&i| tr(lang, &p.candidates[i].label())).collect::<Vec<_>>(),
             "a_telecharger": p.downloads.iter().filter(|m| !s.installed(m)).map(|m| m.size).sum::<u64>(),
         },
     })
@@ -340,8 +357,33 @@ fn simulate(total: u64, cancel: &AtomicBool, report: &mut dyn FnMut(&catalog::Pr
     Ok(())
 }
 
+/// Langue choisie dans la page (gardée à côté du dossier des modèles : l'adresse de la page change
+/// à chaque ouverture, la mémoire du navigateur ne la retrouverait pas).
+fn lang_file(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.parent().unwrap_or(dir).join("langue-fenetre.txt")
+}
+
+fn saved_lang(dir: &std::path::Path) -> Option<String> {
+    let l = std::fs::read_to_string(lang_file(dir)).ok()?;
+    let l = l.trim();
+    crate::textes::LANGS.contains(&l).then(|| l.to_string())
+}
+
 fn act(state: &State, action: &str, id: &str) -> Result<(), String> {
     match action {
+        "langue" => {
+            if !crate::textes::LANGS.contains(&id) {
+                return Err(format!("langue inconnue : {id}"));
+            }
+            let dir = state.lock().unwrap().dir.clone();
+            std::fs::write(lang_file(&dir), id).map_err(|e| e.to_string())
+        }
+        // Bouton « Installer la mise à jour » : l'application (icône) l'installe et redémarre.
+        "maj" => crate::maj::request_install(),
+        "maj_vu" => {
+            crate::maj::dismiss_installed();
+            Ok(())
+        }
         "telecharger" => start_download(state, id),
         "annuler" => {
             if let Some(d) = state.lock().unwrap().dls.get(id) {
@@ -477,7 +519,12 @@ fn handle(mut s: TcpStream, state: &State, token: &str, port: u16) {
             None => respond(&mut s, 404, "text/plain", b""),
         },
         ("GET", "/api/etat") => {
-            let v = state_json(&state.lock().unwrap());
+            let st = state.lock().unwrap();
+            // Langue de la page (0.16.1) : celle demandée, sinon celle choisie la dernière fois.
+            let saved = saved_lang(&st.dir);
+            let lang = query_param(&path, "langue").map(str::to_string).or(saved.clone()).unwrap_or_else(|| "fr".into());
+            let mut v = state_json(&st, &lang);
+            v["langue_choisie"] = json!(saved);
             respond(&mut s, 200, "application/json; charset=utf-8", v.to_string().as_bytes())
         }
         ("POST", r) if r.starts_with("/api/") => {
@@ -661,9 +708,11 @@ mod tests {
     fn demo_server_states_and_actions() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
+        let dir = std::env::temp_dir().join(format!("ct-ui-test-{}", std::process::id())).join("modeles");
+        std::fs::create_dir_all(&dir).unwrap();
         let state: State = Arc::new(Mutex::new(Shared {
             demo: true,
-            dir: std::env::temp_dir(),
+            dir: dir.clone(),
             hw: demo_hw(),
             dls: HashMap::new(),
             last_hit: Instant::now(),
@@ -726,5 +775,18 @@ mod tests {
         let (_, body) = get(port, "/api/etat", &host, None, "GET");
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!((v["modeles"][0]["actif"].as_bool(), v["modeles"][1]["installe"].as_bool()), (Some(true), Some(false)));
+        // Langue de la page (0.16.1) : gardée par l'application, reprise sans paramètre ; la
+        // demande de la page passe avant ; langue inconnue refusée.
+        assert_eq!(v["langue_choisie"], Value::Null);
+        assert_eq!(get(port, "/api/langue?id=xx", &host, Some("jeton"), "POST").0, 400);
+        assert_eq!(get(port, "/api/langue?id=de", &host, Some("jeton"), "POST").0, 200);
+        let (_, body) = get(port, "/api/etat", &host, None, "GET");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!((v["langue"].as_str(), v["langue_choisie"].as_str()), (Some("de"), Some("de")));
+        assert_eq!(v["modeles"][0]["estimation"]["niveau_code"].as_str().map(|c| ["sure", "likely", "borderline", "no"].contains(&c)), Some(true));
+        let (_, body) = get(port, "/api/etat?langue=ru", &host, None, "GET");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["langue"], "ru");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }
