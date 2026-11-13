@@ -125,6 +125,10 @@ traduction liée (jeux 1, 2, 3), fenêtre active d'abord dans la file, WoW cach�
 mises à jour vérifiées fichier par fichier, « redémarre WoW » quand des fichiers sont ajoutés,
 ancienne version de l'application arrêtée par la nouvelle ; guide réaffiché quand son texte change.
 
+**0.16.0 (13/11)** : mises à jour automatiques depuis GitHub (dernière version publiée, paquet
+vérifié par SHA-256, installée dès qu'aucun WoW n'est ouvert, addon et copies de l'application
+remis partout) ; menu « Rechercher une mise à jour » et « Mises à jour automatiques ».
+
 **J2 - Installation et démarrage**
 - Premier lancement guidé : WoW trouvé, addon posé dans toutes les versions, moteur llama.cpp et
   pack low téléchargés, matériel détecté, modèles proposés (interface de la phase 0).

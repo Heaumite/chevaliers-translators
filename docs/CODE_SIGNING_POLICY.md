@@ -40,6 +40,10 @@ requested by the user or the person installing or operating it. In detail:
 - It downloads the llama.cpp translation engine from GitHub (`api.github.com`, `github.com`) and
   translation models from Hugging Face (`huggingface.co`), on first launch and when the user asks
   for a model. These requests contain only the names of the requested files.
+- Automatic updates (enabled by default, can be turned off in the tray icon menu, "Mises à jour
+  automatiques"): 20 seconds after launch and then every 30 minutes, it asks the GitHub API
+  (`api.github.com`) for the latest published release of this project, and downloads it from
+  `github.com` when it is newer. These requests contain no user or game data.
 - Chat messages are translated on the player's PC, by a local server listening on `127.0.0.1`. No
   message, player name or game data is sent anywhere.
 - The application reads, locally, a small area at the bottom right of the game window (the addon's
@@ -97,6 +101,10 @@ Le programme n'envoie aucune information sur le réseau sans demande de l'utilis
 - il télécharge le moteur llama.cpp sur GitHub et les modèles de traduction sur Hugging Face (au
   premier lancement et quand le joueur demande un modèle) ; ces requêtes ne contiennent que le nom
   des fichiers demandés ;
+- mises à jour automatiques (actives par défaut, coupables dans le menu de l'icône, « Mises à jour
+  automatiques ») : 20 s après le lancement puis toutes les 30 minutes, il demande à l'API de GitHub
+  (`api.github.com`) la dernière version publiée de ce projet, et la télécharge sur `github.com` si
+  elle est plus récente ; ces requêtes ne contiennent aucune donnée du joueur ou du jeu ;
 - les messages sont traduits sur le PC du joueur (serveur local sur `127.0.0.1`) : aucun message,
   nom de joueur ou donnée du jeu n'est envoyé ;
 - l'application lit, sur place, une petite zone en bas à droite de la fenêtre du jeu (le bandeau de

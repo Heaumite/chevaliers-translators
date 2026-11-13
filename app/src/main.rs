@@ -133,7 +133,18 @@ mod app {
             use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
+        let after_update = std::env::args().any(|a| a == "--apres-maj");
         let mut instance = single_instance();
+        // Lancée par une mise à jour (0.16) : l'ancienne version est en train de s'arrêter.
+        if instance.is_none() && after_update {
+            for _ in 0..60 {
+                std::thread::sleep(Duration::from_millis(250));
+                instance = single_instance();
+                if instance.is_some() {
+                    break;
+                }
+            }
+        }
         // Une autre version tourne déjà (mise à jour lancée sans quitter l'ancienne, 0.15.1) : elle
         // s'arrête, et celle-ci prend la suite (sinon l'ancienne continuait, addon compris).
         if instance.is_none() {
@@ -190,6 +201,22 @@ mod app {
         if !std::env::args().any(|a| a == "--discret") {
             Tray::open_models();
         }
+        // Mises à jour depuis GitHub (0.16) : l'ancien exécutable laissé par la précédente est
+        // retiré, puis recherche en fond.
+        if let Ok(exe) = std::env::current_exe() {
+            ct::maj::cleanup_old(&exe);
+            if after_update {
+                let from = std::env::args().skip_while(|a| a != "--apres-maj").nth(1).unwrap_or_default();
+                ct::say!("[mise à jour] installée : {from} -> {VERSION}");
+                tray.notify("Chevaliers Translators mis à jour", &format!("Version {VERSION} installée depuis GitHub ; l'addon suit dans toutes les versions de WoW."), false);
+            }
+            if ct::maj::is_dev_build(&exe) {
+                ct::say!("[mise à jour] version de développement ({}) : pas d'installation automatique", exe.display());
+            } else if !ct::maj::auto_enabled() {
+                ct::say!("[mise à jour] automatiques coupées (menu de l'icône) ; « Rechercher une mise à jour » reste possible");
+            }
+            ct::maj::start(VERSION, exe);
+        }
         run(&tray);
         ct::say!("{} fin", journal::clock());
         ExitCode::SUCCESS
@@ -228,12 +255,16 @@ mod app {
                 }
                 said = Some(Instant::now());
             }
+            update_events(tray);
             if !capture_win::wow_windows().is_empty() {
                 translate_all(tray, &mut roots, &mut last_error);
                 if Tray::quit_asked() {
                     break;
                 }
                 tray.set_status("En attente de World of Warcraft");
+            } else if install_update(tray) {
+                // La nouvelle version est lancée : celle-ci s'arrête.
+                break;
             }
             wait(Duration::from_millis(500));
         }
@@ -243,6 +274,54 @@ mod app {
         }
         if let Some(data) = Tray::uninstall_asked() {
             uninstall(&roots, data);
+        }
+    }
+
+    /// Nouvelles du fil des mises à jour : bulles de l'icône.
+    fn update_events(tray: &Tray) {
+        for e in ct::maj::take_events() {
+            match e {
+                ct::maj::Event::UpToDate(v) => tray.notify("Pas de mise à jour", &format!("La version {v} est la dernière publiée sur GitHub."), false),
+                ct::maj::Event::Found(v) => tray.notify("Mise à jour trouvée", &format!("Version {v} publiée sur GitHub : téléchargement en cours."), false),
+                ct::maj::Event::Ready(v) => {
+                    let when = if capture_win::wow_windows().is_empty() { "elle s'installe maintenant" } else { "elle s'installera à la fermeture de WoW" };
+                    tray.notify("Mise à jour prête", &format!("Version {v} téléchargée et vérifiée : {when}."), false);
+                }
+                ct::maj::Event::Problem(p) => tray.notify("Mise à jour impossible", &p, true),
+            }
+        }
+    }
+
+    /// Mise à jour prête et aucun WoW ouvert : le nouvel exécutable prend la place de celui-ci et
+    /// est lancé. Vrai si celui-ci doit s'arrêter.
+    fn install_update(tray: &Tray) -> bool {
+        let Some((v, new_exe)) = ct::maj::ready() else { return false };
+        let Ok(exe) = std::env::current_exe() else { return false };
+        if ct::maj::is_dev_build(&exe) {
+            return false;
+        }
+        ct::say!("{} [mise à jour] installation de la {v} : {}", journal::clock(), exe.display());
+        if let Err(e) = ct::maj::apply(&new_exe, &exe) {
+            ct::say!("[mise à jour] {e}");
+            tray.notify("Mise à jour impossible", &format!("Version {v} : {e}. Elle est sur GitHub : {}", ct::maj::REPO), true);
+            // Plus d'autre essai pendant cette session.
+            ct::maj::forget_ready();
+            return false;
+        }
+        let mut c = std::process::Command::new(&exe);
+        c.args(["--discret", "--apres-maj", VERSION]);
+        match c.spawn() {
+            Ok(_) => {
+                ct::say!("[mise à jour] {v} lancée : arrêt de la {VERSION}");
+                Tray::quit_now();
+                true
+            }
+            Err(e) => {
+                ct::say!("[mise à jour] lancement de la {v} impossible : {e}");
+                tray.notify("Mise à jour installée", &format!("Version {v} en place : relance Chevaliers Translators (raccourci du bureau)."), true);
+                ct::maj::forget_ready();
+                false
+            }
         }
     }
 
@@ -389,6 +468,7 @@ mod app {
                     return false;
                 }
                 downloads_tick(tray, &mut downloading, &mut shown_at, &status.borrow());
+                update_events(tray);
                 let now = Instant::now();
                 if now.duration_since(checked) < Duration::from_secs(1) {
                     return true;
@@ -481,6 +561,9 @@ mod app {
                     );
                 }
             }
+            // Copies de l'application rangées dans les dossiers de l'addon (paquet décompressé dans
+            // une version du jeu) : remplacées par celle-ci (0.16, toutes les installations suivent).
+            refresh_exe_copies(root);
             // Jeu déjà ouvert dans une version qui vient d'être mise à jour : un seul message, une
             // fois la mise à jour vérifiée. /reload suffit si la liste des fichiers n'a pas changé ;
             // sinon il faut redémarrer le jeu (il ne relit la liste qu'à son démarrage).
@@ -495,6 +578,25 @@ mod app {
             }
         }
         roots
+    }
+
+    /// Copies de l'exécutable dans les dossiers de l'addon de chaque version du jeu : mises à jour.
+    fn refresh_exe_copies(root: &Path) {
+        let Ok(exe) = std::env::current_exe() else { return };
+        if ct::maj::is_dev_build(&exe) {
+            return;
+        }
+        let Ok(me) = std::fs::read(&exe) else { return };
+        for f in install::flavor_dirs(root) {
+            let copy = install::addons_dir(root, &f).join(install::ADDON).join("ChevaliersTranslators.exe");
+            if !copy.is_file() || same_path(&copy, &exe) || std::fs::read(&copy).ok().as_deref() == Some(me.as_slice()) {
+                continue;
+            }
+            match std::fs::write(&copy, &me) {
+                Ok(()) => ct::say!("  {f} : application mise à jour en {VERSION} ({})", copy.display()),
+                Err(e) => ct::say!("  {f} : copie de l'application non remplacée ({}) : {e}", copy.display()),
+            }
+        }
     }
 
     /// Jeu ouvert : addon présent et à jour dans sa version (dossier de WoW inhabituel, version du

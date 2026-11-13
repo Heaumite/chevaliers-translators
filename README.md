@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.15.1)
+# Chevaliers Translators (v0.16.0)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -45,7 +45,19 @@ Phase 1, jalon J1 (fondation) : `docs/PLAN_PHASE1.md`. Phase 0 (kit de test, ré
 
 Menu de l'icône (clic gauche ou droit) : état (version du jeu, langue de traduction), **Modèles de
 traduction...** (fenêtre des modèles : moteur, pack low, autres modèles), **Journal de
-l'application**, **Désinstaller...**, **Quitter**.
+l'application**, **Rechercher une mise à jour**, **Mises à jour automatiques** (cochée par
+défaut), **Désinstaller...**, **Quitter**.
+
+### Mises à jour automatiques (0.16)
+
+L'application regarde la dernière version publiée sur GitHub 20 s après son lancement, puis toutes
+les 30 minutes. Une version plus récente est téléchargée en fond et vérifiée : son paquet doit avoir
+exactement l'empreinte SHA-256 publiée avec lui, sinon il est refusé. Elle s'installe **dès qu'aucun
+WoW n'est ouvert** (jamais pendant une partie) : le nouvel exécutable prend la place de l'ancien,
+se lance, et pose son addon dans toutes les versions de WoW trouvées, vérifié fichier par fichier ;
+les copies de l'application rangées dans les dossiers de l'addon sont remplacées aussi. Une bulle
+le signale. Une copie compilée sur place (dossier `target`) ne se met jamais à jour seule.
+Pour couper : menu de l'icône, décocher **Mises à jour automatiques**.
 
 ### Désinstallation (0.14.3)
 
@@ -60,7 +72,9 @@ jeu, puis `%LOCALAPPDATA%\ChevaliersTranslators`, puis l'exécutable.
 ### Confidentialité
 
 Rien n'est envoyé sur le réseau, sauf les téléchargements demandés : le moteur llama.cpp (GitHub)
-et les modèles (Hugging Face), qui ne contiennent que le nom des fichiers. Les messages sont
+et les modèles (Hugging Face), qui ne contiennent que le nom des fichiers ; et la recherche de mise
+à jour (GitHub, toutes les 30 minutes, coupable dans le menu de l'icône), sans aucune donnée du
+joueur. Les messages sont
 traduits sur le PC (serveur local `127.0.0.1`) ; l'application lit sur place une petite zone en bas
 à droite de la fenêtre du jeu (le bandeau), sans garder ni envoyer de capture ; le presse-papiers et
 Ctrl+V puis Entrée ne servent qu'après Maj+Entrée. Ni télémétrie, ni compte.
@@ -103,6 +117,14 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.16.0 (13/11/2026)
+
+- **Mises à jour automatiques depuis GitHub** (voir « Pour le joueur ») : recherche au lancement
+  puis toutes les 30 minutes, téléchargement vérifié par SHA-256, installation dès qu'aucun WoW
+  n'est ouvert, nouvelle version lancée à la place de l'ancienne, addon remis dans toutes les
+  versions du jeu. Menu de l'icône : « Rechercher une mise à jour » et « Mises à jour
+  automatiques ». Contient aussi tout le contenu de la 0.15.1.
 
 ## 0.15.1 (13/11/2026)
 
@@ -401,15 +423,19 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.15.1.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.0.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.15.1)
+## Vérifié avant livraison (0.16.0)
 
-- 123 tests Rust sous Linux : dont, en 0.15.1, l'ordre de la file avec la fenêtre active d'abord,
+- 127 tests Rust sous Linux : dont, en 0.16, les versions comparées par leurs nombres, la
+  dernière version publiée reconnue seulement avec son paquet et son empreinte, SHA-256 (vecteurs de
+  la norme), l'exécutable extrait du zip (stocké ou compressé, CRC contrôlé, zip abîmé refusé) puis
+  mis à la place de celui qui tourne (et remis en cas d'échec), les copies de développement jamais
+  mises à jour ; en 0.15.1, l'ordre de la file avec la fenêtre active d'abord,
   chaque demande marquée de son jeu, la mise à jour vue et refaite fichier par fichier (même numéro
   de version, fichier absent, .toc changé) ; en 0.15, la trame des bulles (aller-retour), la bulle traduite
   qui recouvre le texte d'origine, suit son déplacement, s'efface sous une autre fenêtre et
@@ -450,7 +476,7 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
 
-## Test de la 0.15.1 (PowerShell)
+## Test de la 0.16.0 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
@@ -464,7 +490,8 @@ Voir la réponse de livraison pour les commandes à copier-coller. Points à vé
 | Bouton Envoyer | à droite de Trad ; infobulle « Traduire et envoyer » ; écrire un message puis clic : envoyé traduit |
 | Mise à jour | journal : `_forever_ : 0.15.0 … -> à remplacer`, puis `-> 0.15.1, vérifié` |
 | Cache 8 bits | `traduction-serveur.log` : `-ctk q8_0` accepté ; sinon, journal « cache 8 bits refusé … relance » et traduction normale |
-| Installation | journal : addon 0.15.1 posé et vérifié dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Installation | journal : addon 0.16.0 posé et vérifié dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Mise à jour automatique | version de développement : journal « pas d'installation automatique » ; exécutable du paquet GitHub : menu « Rechercher une mise à jour » -> « Pas de mise à jour » ou « Mise à jour trouvée » |
 | Téléchargements | infobulle de l'icône : pourcentage ; WoW ouvert : « débit bridé » ; à la fin : bulle « Modèles de traduction prêts » |
 | Télévision | WoW sur la télé : « Écran de télévision » à la connexion ; chat traduit sur plaque sombre ; `/chevaliers tele off` le cache comme sur un écran de PC |
 | Combat | rien de dessiné pendant le combat ; à la fin, chat traduit et bilan |

@@ -47,6 +47,8 @@ const CMD_INTERFACE: usize = 1;
 const CMD_JOURNAL: usize = 2;
 const CMD_QUIT: usize = 3;
 const CMD_UNINSTALL: usize = 4;
+const CMD_UPDATE: usize = 5;
+const CMD_AUTO_UPDATE: usize = 6;
 
 /// Quitter confirmé dans le menu.
 static QUIT: AtomicBool = AtomicBool::new(false);
@@ -182,6 +184,11 @@ impl Tray {
                 }
             }
         });
+    }
+
+    /// Arrêt sans confirmation (mise à jour installée : la nouvelle version prend la suite).
+    pub fn quit_now() {
+        QUIT.store(true, Ordering::Relaxed);
     }
 
     /// Quitter demandé (et confirmé) dans le menu.
@@ -478,12 +485,18 @@ fn show_menu(hwnd: HWND) {
             wide("Journal de l'application"),
             wide("Quitter"),
             wide("Désinstaller..."),
+            wide("Rechercher une mise à jour"),
+            wide("Mises à jour automatiques"),
         ];
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, head.as_ptr());
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(menu, MF_STRING, CMD_INTERFACE, items[0].as_ptr());
         AppendMenuW(menu, MF_STRING, CMD_JOURNAL, items[1].as_ptr());
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
+        AppendMenuW(menu, MF_STRING, CMD_UPDATE, items[4].as_ptr());
+        let checked = if crate::maj::auto_enabled() { windows_sys::Win32::UI::WindowsAndMessaging::MF_CHECKED } else { 0 };
+        AppendMenuW(menu, MF_STRING | checked, CMD_AUTO_UPDATE, items[5].as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(menu, MF_STRING, CMD_UNINSTALL, items[3].as_ptr());
         AppendMenuW(menu, MF_STRING, CMD_QUIT, items[2].as_ptr());
@@ -500,6 +513,8 @@ fn show_menu(hwnd: HWND) {
             CMD_JOURNAL => open_journal(),
             CMD_QUIT => confirm_quit(hwnd),
             CMD_UNINSTALL => confirm_uninstall(hwnd),
+            CMD_UPDATE => crate::maj::check_now(),
+            CMD_AUTO_UPDATE => crate::maj::set_auto(!crate::maj::auto_enabled()),
             _ => {}
         }
     }

@@ -27,6 +27,7 @@ pub mod icons;
 pub mod ingame;
 pub mod install;
 pub mod lang;
+pub mod maj;
 pub mod live;
 pub mod llama;
 pub mod md5;
@@ -41,6 +42,7 @@ pub mod raccourci;
 pub mod regul;
 pub mod render;
 pub mod selftest;
+pub mod sha256;
 pub mod ttf;
 pub mod ui;
 #[cfg(windows)]
