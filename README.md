@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.16.2)
+# Chevaliers Translators (v0.16.3)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -24,6 +24,13 @@ Phase 1, jalon J1 (fondation) : `docs/PLAN_PHASE1.md`. Phase 0 (kit de test, ré
 `docs/PHASE0.md`, `docs/BILAN_PHASE0.md`, `docs/REGLE_MODELES.md`.
 
 ## Pour le joueur
+
+Guide d'installation en vidéo : <https://youtu.be/VoAq1cGtAFY>. Les mises à jour se font
+automatiquement depuis ce dépôt.
+
+**Addon incompatible** : *WoW Translator* (il ajoute ses traductions dans le texte des messages du
+chat ; Chevaliers Translators ne retrouve plus ces messages). L'addon le signale à la connexion et
+dans le guide : le désactiver dans la liste des addons.
 
 1. Lancer `ChevaliersTranslators.exe` : la **fenêtre des modèles** s'ouvre, et le **médaillon aux
    deux lions** apparaît près de l'horloge (flèche ^ si Windows l'a rangée). Au premier lancement,
@@ -111,7 +118,7 @@ proprement : `/chevaliers off`.
 | `/chevaliers diag` | rapport (fenêtres de chat, messages reçus), recopié dans le journal de l'application |
 | `/chevaliers monter` / `non` | accepter / écarter le modèle supérieur proposé sur l'écran (0.14) |
 | `/chevaliers tele auto` / `on` / `off` | dispositif télévision : selon l'écran vu par l'application (par défaut), forcé, coupé (0.14) |
-| `/chevaliers bulles on` / `off` | bulles de dialogue au-dessus des joueurs traduites, avec l'acronyme de la langue (0.15, actif par défaut) |
+| `/chevaliers bulles on` / `off` | bulles de dialogue au-dessus des joueurs remplacées par celles de l'application, traduites avec l'acronyme de la langue (0.15 ; 0.16.3 : la bulle de Blizzard est effacée ; actif par défaut) |
 | `/chevaliers guide` | guide d'installation de l'application |
 | `/chevaliers dev` | liste des outils de développement (test, ping, miroir, perf, essai...) |
 
@@ -134,6 +141,26 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.16.3 (13/11/2026)
+
+- **Le cache du bandeau ne disparaît plus au changement de fenêtre** : avant, passer sur une autre
+  fenêtre (ou la fenêtre de l'application à son ouverture) rendait le bandeau illisible quelques
+  instants, et trois fois en une minute suffisaient à abandonner le cache pour toute la session
+  (journal : « la capture ne lit plus le bandeau sous son cache »). Seuls comptent maintenant les
+  retraits jeu au premier plan et rien devant lui ; un cache qui a fait ses preuves n'est plus
+  jamais abandonné (pause de 30 s au pire) ; une fenêtre posée sur une partie du bandeau découpe le
+  cache à son bord au lieu de le retirer ; un instant sans image du bandeau (1,2 s) ne le retire plus.
+- **Une seule bulle** : la bulle de Blizzard est effacée sous celle de l'application, qui est
+  dessinée en entier (plaque, bord, pointe) : traduite avec l'acronyme de la langue, ou avec le
+  texte d'origine si rien n'est à traduire. Elle revient telle quelle en combat, chat verrouillé,
+  miroir coupé ou `/chevaliers bulles off`. Le texte de la bulle part avec sa place : la bulle est
+  dessinée même si l'application a manqué le message.
+- **Guide** : bannière titrée « Chevaliers Translators », lien de la vidéo du guide d'installation
+  et lien du dépôt GitHub des mises à jour automatiques, chacun dans un cadre où un clic le
+  sélectionne (Ctrl+C pour le copier). Il s'affiche de nouveau une fois.
+- **Addon incompatible signalé** : WoW Translator chargé, l'addon le dit à la connexion (et au
+  journal de l'application) et dans le guide.
 
 ## 0.16.2 (13/11/2026)
 
@@ -466,15 +493,19 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.2.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.3.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.16.2)
+## Vérifié avant livraison (0.16.3)
 
-- 129 tests Rust sous Linux : dont, en 0.16.2, la mise à jour proposée (ou à réessayer)
+- 133 tests Rust sous Linux : dont, en 0.16.3, la garde du cache du bandeau (changements de
+  fenêtre jamais comptés, retraits lents ignorés, pauses courtes et jamais d'abandon une fois le
+  cache prouvé, abandon seulement s'il n'a jamais fonctionné), le cache découpé sous une autre
+  fenêtre, les textes des bulles lus après la police (trame d'avant toujours lue), chaque bulle
+  dessinée avec sa pointe, traduite ou avec son texte d'origine ; en 0.16.2, la mise à jour proposée (ou à réessayer)
   gardée d'un lancement à l'autre, téléchargement ou installation interrompus et version déjà
   installée oubliés ; en 0.16.1, les explications de l'application traduites dans les cinq
   autres langues (raisons, estimations, notes, unités), la langue de la page gardée et reprise,
@@ -515,7 +546,10 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   traduite, `/chevaliers bulles off` qui envoie une liste vide (0.15) ; bouton Envoyer, son infobulle
   et l'envoi traduit qu'il déclenche (0.15.1) ; sous-menu ouvert à côté du menu des réglages du chat
   signalé, rectangle d'un menu au ras de sa bordure sans son ombre, bulle du joueur lui-même
-  retrouvée, chuchotement envoyé jamais cherché dans une bulle (0.16.1) ;
+  retrouvée, chuchotement envoyé jamais cherché dans une bulle (0.16.1) ; bulle de Blizzard effacée sous
+  la nôtre et rendue en combat et après `/chevaliers bulles off`, texte de la bulle dans la trame,
+  guide avec ses deux liens non modifiables, addon incompatible signalé à la connexion et dans le
+  guide (0.16.3) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
@@ -530,12 +564,16 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
   erreur JavaScript.
 
-## Test de la 0.16.2 (PowerShell)
+## Test de la 0.16.3 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
+| Cache du bandeau | passer plusieurs fois sur une autre fenêtre (Alt+Tab, clic sur le second écran) puis revenir : le bandeau reste caché ; journal : plus de « la capture ne lit plus le bandeau sous son cache » ; « bandeau lu à travers son cache : le cache tient » |
+| Une seule bulle | en ville, `/dire hello` puis un joueur qui parle une autre langue : une seule bulle (celle de l'application, avec sa pointe), traduite `[EN] …` ; un message en français : bulle de l'application avec le texte d'origine ; en combat : bulles de Blizzard |
+| Guide | `/chevaliers guide` : bannière titrée « Chevaliers Translators », lien de la vidéo et lien GitHub ; clic dans un cadre puis Ctrl+C : lien copié |
+| Addon incompatible | WoW Translator activé : à la connexion, ligne rouge « Addon incompatible : WoW Translator » ; même ligne dans le guide |
 | Langue de la fenêtre | liste en haut à droite : Deutsch -> toute la page en allemand (jauge, raisons, boutons) ; fermer et rouvrir : toujours en allemand |
 | Mise à jour proposée | de bout en bout : la 0.16.1 lancée (sans recompiler), publier la 0.16.2 sur GitHub, puis menu de l'icône « Rechercher une mise à jour » : fenêtre ouverte sur l'encadré « Mise à jour 0.16.2 disponible », bouton, note dessous ; l'encadré reste (fenêtre fermée et rouverte) ; clic : l'application redémarre en 0.16.2, encadré « Version 0.16.2 installée » ; ensuite (0.16.2) l'entrée du menu de l'icône pour les versions suivantes |
 | Bulle à soi | `/dire hello` : le chat montre `[EN] bonjour` et la bulle au-dessus du personnage aussi |

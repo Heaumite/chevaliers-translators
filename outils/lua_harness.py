@@ -818,8 +818,11 @@ def mock(root, binary):
         GetEffectiveScale = function() return 0.64 end,
         GetFont = function() return "Fonts\\FRIZQT__.TTF", 13, "" end,
         GetTextColor = function() return 1, 1, 1 end }
+      HOLDER = { String = fs, alpha = 1 }
+      function HOLDER:SetAlpha(a) self.alpha = a end
+      function HOLDER:GetAlpha() return self.alpha end
       BUBBLE = { IsForbidden = function() return false end, IsVisible = function() return true end,
-        GetChildren = function() return { String = fs } end }
+        GetChildren = function() return HOLDER end }
       PROTECTED = { IsForbidden = function() return true end }
       C_ChatBubbles = { GetAllChatBubbles = function(forbidden) return { PROTECTED, BUBBLE } end }
     ''')
@@ -827,6 +830,23 @@ def mock(root, binary):
     out = feed(collect("bulles"), os.path.join(work, "bulles"))
     assert "[bulles] 1 bulle(s) de dialogue au-dessus des joueurs" in out, out
     assert ct.Bubbles.stats.matched >= 1 and ct.Bubbles.stats.errors == 0, ct.Bubbles.lastError
+    # 0.16.3 : la bulle de Blizzard est effacée sous la nôtre ; son texte part avec sa place.
+    assert g.HOLDER.alpha == 0, "bulle de Blizzard non effacée"
+    lua.execute("HOLDER:SetAlpha(1)")  # fondu d'apparition du jeu
+    assert g.HOLDER.alpha == 0, "bulle de Blizzard réaffichée par le jeu"
+    assert "Guten Abend, wer kommt mit nach Schwarzfels?" in out or ct.Bubbles.stats.replaced >= 1
+    p = ct.Bubbles.Payload(ct.Bubbles.Scan())
+    raw = bytes(p[i] for i in range(1, len(p) + 1))
+    assert b"Guten Abend, wer kommt mit nach Schwarzfels?" in raw, raw
+    # En combat : la bulle de Blizzard revient (l'application ne dessine rien en combat).
+    lua.execute("IN_COMBAT = true")
+    for _ in range(12):
+        g.TICK(1 / 60)
+    assert g.HOLDER.alpha == 1, "bulle de Blizzard laissée effacée en combat"
+    lua.execute("IN_COMBAT = false")
+    for _ in range(12):
+        g.TICK(1 / 60)
+    assert g.HOLDER.alpha == 0, "bulle de Blizzard non effacée après le combat"
     # Bulle cachée sous une fenêtre du jeu : pas traduite.
     hidden0 = ct.Bubbles.stats.hidden
     lua.execute("GameTooltip.GetLeft = function() return 480 end; GameTooltip.GetBottom = function() return 380 end")
@@ -844,6 +864,7 @@ def mock(root, binary):
     # Désactivées par le joueur : une trame vide (l'application retire ses traductions).
     g.SLASH("bulles off")
     assert "désactivé" in list(g.LOG.values())[-1]
+    assert g.HOLDER.alpha == 1, "bulle de Blizzard laissée effacée après /chevaliers bulles off"
     collect("bulles-off")
     assert ct.Bubbles.sentSig == "", "trame vide non envoyée"
     g.SLASH("bulles on")
@@ -1102,6 +1123,35 @@ def mock(root, binary):
     assert "proposé sera essayé hors combat" in list(g.LOG.values())[-1]
     g.SLASH("non")
     assert "ne te sera plus proposé" in list(g.LOG.values())[-1]
+    # ---- 0.16.3 : guide (bannière titrée, liens de la vidéo et du dépôt) et addon incompatible ----
+    lua.execute('''
+      local F = getmetatable(CreateFrame("Frame"))
+      for _, k in ipairs({ "SetMovable", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetAutoFocus",
+        "SetFontObject", "SetCursorPosition", "HighlightText", "ClearFocus", "SetHeight", "SetWidth" }) do
+        F[k] = F[k] or function() end
+      end
+      local P = getmetatable(CreateFrame("Frame"):CreateFontString())
+      for _, k in ipairs({ "SetJustifyH", "SetJustifyV", "SetTextColor", "SetShadowOffset", "SetShadowColor", "SetSpacing" }) do
+        P[k] = P[k] or function() end
+      end
+      local T = getmetatable(CreateFrame("Frame"):CreateTexture())
+      for _, k in ipairs({ "SetTexture", "SetSize", "SetHeight", "SetWidth" }) do T[k] = T[k] or function() end end
+      C_AddOns.IsAddOnLoaded = function(name) return name == "WoWTranslator" end
+    ''')
+    g.FIRE("PLAYER_LOGIN")
+    assert any("Addon incompatible : WoW Translator" in m for m in list(g.LOG.values())[-8:]), list(g.LOG.values())[-8:]
+    g.SLASH("guide")
+    gf = g.ChevaliersTranslatorsGuide
+    assert gf is not None and gf.shown, "guide non affiché"
+    assert gf.video.url == "https://youtu.be/VoAq1cGtAFY" and gf.video.text == gf.video.url, "lien de la vidéo"
+    assert gf.repo.url == "https://github.com/Heaumite/chevaliers-translators", "lien du dépôt"
+    assert gf.warnings == 1, "addon incompatible absent du guide"
+    assert g.ChevaliersTranslatorsDB.guideSeen == 3
+    # Le lien ne se modifie pas : une frappe le remet.
+    gf.video.text = "abc"
+    gf.video.scripts["OnTextChanged"](gf.video, True)
+    assert gf.video.text == gf.video.url
+    lua.execute("C_AddOns.IsAddOnLoaded = function() return false end")
     print(f"Harnais OK : {decoded} trames peintes par l'addon décodées par ct-outils")
 
 

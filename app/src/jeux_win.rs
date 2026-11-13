@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::HWND;
 
-use crate::bandeau::{cover_canvas, cover_strip, CoverStrip};
+use crate::bandeau::{clip_cover, cover_canvas, cover_strip, CoverGuard, CoverStrip, CoverVerdict};
 use crate::capture_win::{self, Capturer};
 use crate::decode::Decoded;
 use crate::hub::Hub;
@@ -57,8 +57,11 @@ const FAST_FOR: Duration = Duration::from_millis(1500);
 /// Image du cache du bandeau renouvelée au plus à cette cadence.
 const COVER_EVERY: Duration = Duration::from_millis(100);
 /// Plus d'image du cache depuis ce temps (bandeau caché par l'addon, écran de chargement) : le
-/// cache s'en va.
-const COVER_STALE: Duration = Duration::from_millis(400);
+/// cache s'en va. 0.16.3 : 1,2 s (avant 0,4 s, à peine plus que l'écart entre deux images : une
+/// trame illisible suffisait à le retirer un instant).
+const COVER_STALE: Duration = Duration::from_millis(1200);
+/// Image du cache renvoyée au moins à cette cadence (signe que le bandeau est là).
+const COVER_RESEND: Duration = Duration::from_millis(200);
 
 enum Cap {
     Dims(i32, i32, usize, usize),
@@ -168,8 +171,8 @@ fn capture_loop(game: usize, hwnd: isize, width: usize, height: usize, poll_ms: 
             }
             if let Some(s) = strip {
                 cover_at = now;
-                // Renvoyée si elle change, et toutes les 300 ms (signe que le bandeau est là).
-                if s.row != last_cover || now.saturating_duration_since(cover_sent) >= Duration::from_millis(300) {
+                // Renvoyée si elle change, et toutes les 200 ms (signe que le bandeau est là).
+                if s.row != last_cover || now.saturating_duration_since(cover_sent) >= COVER_RESEND {
                     last_cover = s.row.clone();
                     cover_sent = now;
                     if tx.send((game, Cap::Cover(s))).is_err() {
@@ -238,10 +241,11 @@ struct CoverState {
     /// Dernière image reçue, et moment.
     strip: Option<(CoverStrip, Instant)>,
     shown_at: Option<Instant>,
-    /// Dernière pose (gauche, haut, image reçue à) : rien n'est renvoyé à Windows si rien n'a changé.
-    posted: Option<(i32, i32, Instant)>,
-    /// Retraits du cache juste après sa pose (capture qui ne le traverse pas).
-    strikes: Vec<Instant>,
+    /// Dernière pose (gauche, haut, image reçue à, fenêtre devant) : rien n'est renvoyé à Windows
+    /// si rien n'a changé.
+    posted: Option<(i32, i32, Instant, Option<(i32, i32, i32, i32)>)>,
+    /// Retraits juste après la pose, pauses (0.16.3 : plus d'abandon sur un changement de fenêtre).
+    guard: CoverGuard,
     off: bool,
     said: bool,
 }
@@ -278,36 +282,45 @@ impl Session {
         self.live.ctx & (crate::engine::CTX_COMBAT | crate::engine::CTX_LOCKED) != 0
     }
 
-    /// Cache du bandeau : posé tant que le bandeau est lu, retiré sinon.
+    /// Cache du bandeau : posé tant que le bandeau est lu, retiré sinon. Une autre fenêtre en
+    /// partie devant lui (changement de fenêtre, 0.16.3) : le cache s'arrête à son bord au lieu de
+    /// disparaître entièrement.
     fn update_cover(&mut self, now: Instant) {
         if self.cover.off {
+            return;
+        }
+        if !self.cover.guard.allowed(now) {
+            if self.cover.shown_at.take().is_some() {
+                self.overlay.hide(COVER);
+            }
+            self.cover.posted = None;
             return;
         }
         let fresh = self.cover.strip.as_ref().is_some_and(|(_, t)| now.saturating_duration_since(*t) < COVER_STALE);
         let rect = self.rect();
         let place = match (&self.cover.strip, rect) {
-            (Some((s, at)), Some((_, _, r, b))) if fresh => Some((r - s.from_right, b - s.from_bottom, s, *at)),
+            (Some((s, at)), Some((_, _, r, b))) if fresh => Some((r - s.from_right, b - s.from_bottom, s.clone(), *at)),
             _ => None,
         };
-        // Une autre fenêtre passée devant le bandeau : rien n'est posé sur elle.
-        let blocked = match (&place, self.over) {
-            (Some((l, t, s, _)), Some((ol, ot, or, ob))) => *l < or && ol < *l + s.row.len() as i32 && *t < ob && ot < *t + s.h as i32,
-            _ => false,
-        };
-        match place {
-            // Même image, même place, déjà posée : rien à refaire.
-            Some((l, t, _, at)) if !blocked && self.cover.shown_at.is_some() && self.cover.posted == Some((l, t, at)) => {}
-            Some((l, t, s, at)) if !blocked => {
-                let cv = cover_canvas(s);
-                self.cover.posted = Some((l, t, at));
-                match self.overlay.show_cover(COVER, l, t, &cv) {
-                    Ok(()) => {
-                        self.cover.shown_at.get_or_insert(now);
-                    }
-                    Err(e) => {
-                        crate::say!("[bandeau] cache impossible : {e} ; le bandeau reste visible");
-                        self.cover.off = true;
-                        self.overlay.hide(COVER);
+        // Une autre fenêtre passée devant le bandeau : rien n'est posé sur elle (cache découpé à
+        // son bord, ou retiré s'il est entièrement dessous).
+        let canvas = place.as_ref().map(|(l, t, s, _)| clip_cover(&cover_canvas(s), *l, *t, self.over));
+        match (place, canvas) {
+            (Some((l, t, _, at)), Some(Some(cv))) => {
+                let key = (l, t, at, self.over);
+                if self.cover.shown_at.is_some() && self.cover.posted == Some(key) {
+                    // Même image, même place, déjà posée : rien à refaire.
+                } else {
+                    self.cover.posted = Some(key);
+                    match self.overlay.show_cover(COVER, l, t, &cv) {
+                        Ok(()) => {
+                            self.cover.shown_at.get_or_insert(now);
+                        }
+                        Err(e) => {
+                            crate::say!("[bandeau] cache impossible : {e} ; le bandeau reste visible");
+                            self.cover.off = true;
+                            self.overlay.hide(COVER);
+                        }
                     }
                 }
             }
@@ -315,14 +328,20 @@ impl Session {
                 self.cover.posted = None;
                 if let Some(at) = self.cover.shown_at.take() {
                     self.overlay.hide(COVER);
-                    // Retiré faute de bandeau lu moins de 1,5 s après sa pose : la capture ne le
-                    // traverse peut-être pas. Trois fois en une minute : abandon.
-                    if !fresh && now.saturating_duration_since(at) < Duration::from_millis(1500) {
-                        self.cover.strikes.push(now);
-                        self.cover.strikes.retain(|t| now.saturating_duration_since(*t) < Duration::from_secs(60));
-                        if self.cover.strikes.len() >= 3 {
-                            self.cover.off = true;
-                            crate::say!("[bandeau] la capture ne lit plus le bandeau sous son cache : bandeau laissé visible pour cette session");
+                    // Retiré faute de bandeau lu juste après sa pose, jeu devant et rien sur lui :
+                    // la capture ne le traverse peut-être pas. La garde décide (pause, abandon).
+                    if !fresh {
+                        let steady = self.in_front() && self.over.is_none();
+                        match self.cover.guard.on_lost(now, at, steady) {
+                            CoverVerdict::Keep => {}
+                            CoverVerdict::Pause(d) => crate::say!(
+                                "[bandeau] bandeau illisible plusieurs fois juste après la pose du cache : cache retiré {} s, puis nouvel essai",
+                                d.as_secs()
+                            ),
+                            CoverVerdict::Off => {
+                                self.cover.off = true;
+                                crate::say!("[bandeau] la capture ne lit jamais le bandeau sous son cache : bandeau laissé visible pour cette session");
+                            }
                         }
                     }
                 }
@@ -740,7 +759,14 @@ pub fn run_games(
                     s.live.feed_result(r, now);
                     fresh.push(game);
                 }
-                Cap::Cover(strip) => s.cover.strip = Some((strip, now)),
+                Cap::Cover(strip) => {
+                    let proven = s.cover.guard.proven();
+                    s.cover.guard.on_strip(now, s.cover.shown_at);
+                    if !proven && s.cover.guard.proven() {
+                        crate::say!("[bandeau] bandeau lu à travers son cache : le cache tient (changements de fenêtre compris)");
+                    }
+                    s.cover.strip = Some((strip, now));
+                }
                 Cap::Note(t) => crate::say!("{t}"),
                 Cap::Fail(e) => failed.push((token, e)),
             }

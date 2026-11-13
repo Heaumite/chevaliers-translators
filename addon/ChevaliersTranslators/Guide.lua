@@ -1,37 +1,67 @@
 -- Chevaliers Translators
 -- Guide.lua : petit panneau « Guide d'installation » affiché une fois, à la première utilisation
--- de l'addon et à chaque nouvelle révision de son texte (et par /chevaliers guide), avec la
--- bannière et le logo. Il dit où se trouve
--- l'application compagnon et comment la lancer. Fermeture par la croix ou au bout de 60 s.
--- Le panneau n'est construit qu'au premier affichage (rien à la connexion tant qu'il n'est pas
--- demandé). Appelé par Core.lua via CT.ShowGuide().
+-- de l'addon et à chaque nouvelle révision de son contenu (et par /chevaliers guide).
+-- 0.16.3 : bannière titrée « Chevaliers Translators », lien de la vidéo du guide d'installation et
+-- lien du dépôt GitHub d'où viennent les mises à jour automatiques. WoW ne peut ni lire une vidéo
+-- ni ouvrir un lien : chaque lien est dans un cadre où il se sélectionne d'un clic, Ctrl+C le
+-- copie, il se colle dans le navigateur. Addons incompatibles chargés : signalés en rouge.
+-- Fermeture par la croix, ou au bout de 60 s si aucun lien n'a été touché.
+-- Le panneau n'est construit qu'au premier affichage. Appelé par Core.lua via CT.ShowGuide().
 
 local _, CT = ...
 CT = CT or {}
 
 local MEDIA = "Interface\\AddOns\\ChevaliersTranslators\\Media\\"
--- Révision du texte du guide : un guide changé s'affiche de nouveau une fois (0.15.1).
-CT.GUIDE_REV = 2
-local GUIDE_TEXT =
-  "Bienvenue dans Chevaliers Translators !\n\n" ..
-  "L'addon transmet le chat à l'application compagnon, qui le traduit sur ton PC (aucun serveur " ..
-  "en ligne).\n\n" ..
-  "|cffe6c77e1.|r L'application se trouve dans le dossier de l'addon : " ..
-  "|cffffffffChevaliersTranslators.exe|r. Double-clique dessus pour la lancer ; elle pose ensuite " ..
-  "un raccourci |cffffffffChevaliers Translators|r sur ton bureau et ouvre la fenêtre des modèles.\n" ..
-  "|cffe6c77e2.|r Lance ensuite World of Warcraft : la traduction démarre à la connexion du " ..
-  "personnage (si l'application a été lancée après, fais /reload).\n\n" ..
-  "L'application n'est pas encore signée numériquement (une demande est en cours auprès de la " ..
-  "SignPath Foundation) : Windows peut la présenter comme venant d'un éditeur inconnu. Le code " ..
-  "est ouvert et vérifiable :\n|cff79b8ffgithub.com/Heaumite/chevaliers-translators|r\n\n" ..
-  "Tu peux revoir ce guide avec |cffe6c77e/chevaliers guide|r."
+-- Révision du contenu du guide : un guide changé s'affiche de nouveau une fois (0.15.1).
+CT.GUIDE_REV = 3
+CT.GUIDE_VIDEO = "https://youtu.be/VoAq1cGtAFY"
+CT.GUIDE_REPO = "https://github.com/Heaumite/chevaliers-translators"
+
+local GOLD = { 0.902, 0.78, 0.494 }
+
+-- Cadre d'un lien : texte sélectionné d'un clic, prêt pour Ctrl+C ; le lien ne se modifie pas.
+local function LinkBox(f, url, y)
+  local ok, eb = pcall(CreateFrame, "EditBox", nil, f, "InputBoxTemplate")
+  if not ok or not eb then eb = CreateFrame("EditBox", nil, f) end
+  pcall(eb.SetAutoFocus, eb, false)
+  eb:SetSize(446, 24)
+  eb:SetPoint("TOPLEFT", f, "TOPLEFT", 30, y)
+  pcall(eb.SetFontObject, eb, ChatFontNormal or GameFontHighlight)
+  eb:SetText(url)
+  pcall(eb.SetCursorPosition, eb, 0)
+  local function selectAll(self)
+    self:HighlightText()
+    -- Lien touché : le panneau ne se ferme plus tout seul.
+    f.hideAt = nil
+  end
+  eb:SetScript("OnEditFocusGained", selectAll)
+  eb:SetScript("OnMouseUp", function(self) self:SetFocus() selectAll(self) end)
+  eb:SetScript("OnTextChanged", function(self, user)
+    if user then self:SetText(url) self:HighlightText() end
+  end)
+  eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  eb:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+  eb:SetScript("OnEditFocusLost", function(self) pcall(self.HighlightText, self, 0, 0) end)
+  eb.url = url
+  return eb
+end
+
+local function Label(f, template, text, y, color)
+  local fs = f:CreateFontString(nil, "OVERLAY", template)
+  fs:SetPoint("TOPLEFT", f, "TOPLEFT", 24, y)
+  fs:SetPoint("RIGHT", f, "RIGHT", -24, 0)
+  pcall(fs.SetJustifyH, fs, "LEFT")
+  if color then fs:SetTextColor(color[1], color[2], color[3]) end
+  fs:SetText(text)
+  return fs
+end
 
 local guideFrame
 local function BuildGuide()
   if guideFrame then return guideFrame end
   local f = CreateFrame("Frame", "ChevaliersTranslatorsGuide", UIParent)
   f:SetFrameStrata("DIALOG")
-  f:SetSize(500, 420)
+  f:SetSize(500, 300)
   f:SetPoint("CENTER")
   f:EnableMouse(true)
   pcall(f.SetClampedToScreen, f, true)
@@ -53,32 +83,43 @@ local function BuildGuide()
     elseif s == "LEFT" then e:SetPoint("TOPLEFT"); e:SetPoint("BOTTOMLEFT"); e:SetWidth(2)
     else e:SetPoint("TOPRIGHT"); e:SetPoint("BOTTOMRIGHT"); e:SetWidth(2) end
   end
-  -- Bannière de l'addon en haut.
+  -- Bannière de l'addon en haut, titrée dans son champ sombre (comme la fenêtre de l'application).
   local ban = f:CreateTexture(nil, "ARTWORK")
   ban:SetPoint("TOP", f, "TOP", 0, -8)
   ban:SetSize(468, 117)
   ban:SetTexture(MEDIA .. "Banniere")
-  -- Logo et titre.
-  local logo = f:CreateTexture(nil, "ARTWORK")
-  logo:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -134)
-  logo:SetSize(40, 40)
-  logo:SetTexture(MEDIA .. "Logo")
-  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
-  title:SetText("Guide d'installation")
+  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+  pcall(title.SetFont, title, "Fonts\\FRIZQT__.TTF", 24, "")
+  title:SetPoint("LEFT", ban, "LEFT", 150, 8)
+  title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+  pcall(title.SetShadowOffset, title, 1, -1)
+  pcall(title.SetShadowColor, title, 0, 0, 0, 1)
+  title:SetText("Chevaliers Translators")
+  local sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 1, -5)
+  sub:SetTextColor(0.81, 0.765, 0.635)
+  pcall(sub.SetShadowOffset, sub, 1, -1)
+  sub:SetText("Traduction du chat, sur ton PC")
   -- Croix de fermeture.
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
-  -- Texte du guide.
-  local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  body:SetPoint("TOPLEFT", f, "TOPLEFT", 20, -186)
-  body:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 16)
-  body:SetJustifyH("LEFT")
-  body:SetJustifyV("TOP")
-  pcall(body.SetSpacing, body, 3)
-  body:SetText(GUIDE_TEXT)
-  -- Fermeture automatique au bout de 60 s après l'affichage.
+  -- Guide d'installation en vidéo.
+  Label(f, "GameFontNormalLarge", "Guide d'installation :", -140, GOLD)
+  f.video = LinkBox(f, CT.GUIDE_VIDEO, -164)
+  Label(f, "GameFontDisableSmall",
+    "Vidéo YouTube : clique dans le cadre, Ctrl+C pour copier le lien, puis colle-le dans ton navigateur.", -192)
+  -- Mises à jour.
+  Label(f, "GameFontHighlight", "Les mises à jour se font automatiquement depuis :", -222)
+  f.repo = LinkBox(f, CT.GUIDE_REPO, -244)
+  -- Addons incompatibles chargés (rempli à chaque affichage).
+  f.warn = Label(f, "GameFontHighlightSmall", "", -278, { 1, 0.35, 0.3 })
+  pcall(f.warn.SetSpacing, f.warn, 2)
+  -- Fermeture automatique au bout de 60 s après l'affichage (sauf lien touché).
   f:SetScript("OnShow", function(self) self.hideAt = GetTime() + 60 end)
+  f:SetScript("OnHide", function(self)
+    pcall(self.video.ClearFocus, self.video)
+    pcall(self.repo.ClearFocus, self.repo)
+  end)
   f:SetScript("OnUpdate", function(self)
     if self.hideAt and GetTime() >= self.hideAt then self.hideAt = nil self:Hide() end
   end)
@@ -86,9 +127,24 @@ local function BuildGuide()
   return f
 end
 
+-- Addons incompatibles chargés : une ligne par addon dans le guide, panneau agrandi d'autant.
+local function FillWarnings(f)
+  local ok, bad = pcall(function() return CT.IncompatibleAddons and CT.IncompatibleAddons() or {} end)
+  local lines = {}
+  for _, a in ipairs(ok and bad or {}) do
+    lines[#lines + 1] = "Addon incompatible : " .. a.title .. ". " .. a.why
+  end
+  f.warn:SetText(table.concat(lines, "\n"))
+  f:SetHeight(#lines > 0 and 300 + 40 * #lines or 290)
+  f.warnings = #lines
+end
+
 -- Affiche le guide (et retient qu'il a été vu, pour ne plus l'ouvrir tout seul).
 function CT.ShowGuide()
   if ChevaliersTranslatorsDB then ChevaliersTranslatorsDB.guideSeen = CT.GUIDE_REV end
   local ok, f = pcall(BuildGuide)
-  if ok and f then f:Show() end
+  if ok and f then
+    pcall(FillWarnings, f)
+    f:Show()
+  end
 end

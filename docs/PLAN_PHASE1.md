@@ -139,6 +139,12 @@ ignorée).
 **0.16.2 (13/11)** : la mise à jour proposée reste jusqu'au clic du joueur (fenêtre et entrée en
 tête du menu de l'icône, même après un redémarrage) ; téléchargement interrompu refait.
 
+**0.16.3 (13/11)** : cache du bandeau gardé aux changements de fenêtre (garde : plus d'abandon pour
+la session une fois le cache prouvé, cache découpé sous une autre fenêtre) ; bulle de Blizzard
+effacée sous celle de l'application (une seule bulle, avec pointe, texte d'origine si rien à
+traduire) ; guide avec bannière titrée, vidéo et dépôt GitHub ; addon incompatible (WoW Translator)
+signalé.
+
 **J2 - Installation et démarrage**
 - Premier lancement guidé : WoW trouvé, addon posé dans toutes les versions, moteur llama.cpp et
   pack low téléchargés, matériel détecté, modèles proposés (interface de la phase 0).

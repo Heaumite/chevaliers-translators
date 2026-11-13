@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.16.2"
+CT.VERSION = "0.16.3"
 
 local floor = math.floor
 local format = string.format
@@ -111,6 +111,24 @@ local function IsLoadedCompat(name)
   if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name) end
   if IsAddOnLoaded then return IsAddOnLoaded(name) end
   return false
+end
+
+-- Addons incompatibles avec Chevaliers Translators (0.16.3), signalés à la connexion et dans le
+-- guide : ceux qui réécrivent le texte des messages dans le chat (l'application ne retrouve plus
+-- les messages qu'elle traduit dans les lignes affichées).
+local INCOMPATIBLE = {
+  { name = "WoWTranslator", title = "WoW Translator",
+    why = "Il ajoute ses propres traductions dans le texte des messages du chat : Chevaliers Translators ne retrouve plus ces messages (traductions manquées ou en double). Désactive-le dans la liste des addons." },
+}
+CT.INCOMPATIBLE = INCOMPATIBLE
+
+function CT.IncompatibleAddons()
+  local out = {}
+  for _, a in ipairs(INCOMPATIBLE) do
+    local ok, loaded = pcall(IsLoadedCompat, a.name)
+    if ok and loaded then out[#out + 1] = a end
+  end
+  return out
 end
 
 local function NumAddOns()
@@ -1431,6 +1449,13 @@ boot:SetScript("OnEvent", function(self, event)
     CT.screenTV = fresh and live.e == 1 or false
     if CT.liveSeen and CT.VERSION and live.v ~= CT.VERSION then
       Print("|cffff8000Application " .. tostring(live.v) .. " et addon " .. tostring(CT.VERSION) .. " : relance l'application (elle met l'addon à jour), puis /reload.|r")
+    end
+    -- Addons incompatibles chargés : signalés ici et au journal de l'application.
+    for _, a in ipairs(CT.IncompatibleAddons()) do
+      Print("|cffff4040Addon incompatible : " .. a.title .. ".|r " .. a.why)
+      local text = "addon incompatible chargé : " .. a.title
+      local p = { string.byte(text, 1, math.min(#text, MaxPayload())) }
+      Enqueue(CT.FRAME_NOTE, p, #p)
     end
     -- Première utilisation : guide d'installation affiché une fois, peu après la connexion (pas
     -- pendant l'écran de chargement). C_Timer absent (hors jeu) : pas de guide.

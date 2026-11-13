@@ -5,6 +5,10 @@
 //! traduction, une petite fenêtre est posée sur la bulle : plaque sombre, texte traduit centré
 //! comme dans le jeu, précédé de l'acronyme de la langue d'origine (« [DE] ... »).
 //!
+//! 0.16.3 : la bulle de Blizzard est effacée par l'addon (plus de double bulle) ; la nôtre est
+//! dessinée en entier, avec sa pointe, traduite ou non (texte d'origine tant que rien n'est à
+//! traduire ou que la traduction n'est pas arrivée).
+//!
 //! Les bulles suivent le personnage qui parle : entre deux relevés de l'addon (10 par seconde au
 //! plus, et toute la chaîne capture-affichage), la place est prolongée selon la vitesse mesurée,
 //! pour que la traduction colle à la bulle quand la caméra tourne.
@@ -16,6 +20,8 @@ use super::{advances, parse_markup, wrap, Canvas, FontBook, Item, Layout, Rgb, U
 /// Première fenêtre des bulles (les fenêtres de chat sont numérotées de 1 à ~10, les panneaux
 /// à partir de 248).
 pub const FIRST_FRAME: u8 = 200;
+/// Bord de la bulle (et de sa pointe).
+const BUBBLE_EDGE: Rgb = [150, 140, 118];
 pub const MAX_BUBBLES: usize = 8;
 /// Bulle sans nouvelles de l'addon depuis ce temps : retirée (il renvoie toutes les 2 s).
 const STALE: Duration = Duration::from_millis(3500);
@@ -63,6 +69,24 @@ pub fn parse(p: &[u8]) -> Result<(Vec<Seen>, String), String> {
     let len = p[need] as usize;
     let path = p.get(need + 1..need + 1 + len).ok_or("chemin de police tronqué")?;
     Ok((list, String::from_utf8_lossy(path).into_owned()))
+}
+
+/// Textes des bulles placés après la police (addon 0.16.3), tant qu'il restait de la place :
+/// [rang] [longueur] [texte]. Un texte par bulle au plus ; `None` : pas envoyé.
+pub fn texts(p: &[u8], n: usize) -> Vec<Option<String>> {
+    let mut out = vec![None; n];
+    let need = 1 + 15 * n;
+    let Some(&len) = p.get(need) else { return out };
+    let mut i = need + 1 + len as usize;
+    while i + 2 <= p.len() {
+        let (k, l) = (p[i] as usize, p[i + 1] as usize);
+        let Some(t) = p.get(i + 2..i + 2 + l) else { break };
+        if k < n && out[k].is_none() {
+            out[k] = Some(String::from_utf8_lossy(t).into_owned());
+        }
+        i += 2 + l;
+    }
+    out
 }
 
 /// Image d'une bulle traduite, et décalage de son coin bas-gauche par rapport à celui du texte
@@ -178,13 +202,9 @@ impl Bubbles {
         });
         for s in &mut self.states {
             let frame = FIRST_FRAME + s.slot;
-            let Some(text) = translation(&s.body) else {
-                // Pas (encore) de traduction : rien sur la bulle.
-                if s.posted.take().is_some() {
-                    ups.push(Update { frame, left: 0, bottom: 0, canvas: None, hits: Vec::new() });
-                }
-                continue;
-            };
+            // Pas (encore) de traduction, ou rien à traduire : la bulle porte le texte d'origine
+            // (celle de Blizzard est effacée par l'addon).
+            let text = translation(&s.body).unwrap_or_else(|| s.body.clone());
             if s.drawn.as_ref().is_none_or(|d| d.text != text) {
                 s.drawn = Some(draw(book, &font, &s.seen, &text));
             }
@@ -221,9 +241,9 @@ fn clear_under(cv: &mut Canvas, left: i32, bottom: i32, occ: &[(i32, i32, i32, i
     }
 }
 
-/// Plaque de la bulle traduite : au moins la taille du texte d'origine (qu'elle recouvre), centrée
-/// sur lui, s'agrandissant vers le haut si la traduction est plus longue ; texte centré ligne par
-/// ligne, comme les bulles du jeu.
+/// Plaque de la bulle : au moins la taille du texte d'origine, centrée sur lui, s'agrandissant vers
+/// le haut si la traduction est plus longue ; texte centré ligne par ligne, comme les bulles du
+/// jeu ; pointe en bas à gauche vers celui qui parle (0.16.3, la bulle de Blizzard étant effacée).
 pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
     let px = s.px.clamp(8.0, 64.0);
     let base = book.base(font);
@@ -245,26 +265,49 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
     let pad = (px * 0.45).round().max(3.0);
     let w = (content_w.max(s.width as f32) + 2.0 * pad).ceil() as usize;
     let text_h = rows.len().max(1) as f32 * line_h;
-    let h = (text_h.max(s.height as f32) + 2.0 * pad).ceil() as usize;
+    let plate_h = (text_h.max(s.height as f32) + 2.0 * pad).ceil() as usize;
+    // Pointe sous la plaque, à gauche.
+    let tail_h = (px * 0.6).round().max(5.0) as usize;
+    let h = plate_h + tail_h;
     let mut cv = Canvas::new(w, h);
     // Plaque aux coins arrondis, bord clair discret.
     let r = (px * 0.5).max(4.0);
-    for y in 0..h {
+    let ph = plate_h;
+    for y in 0..ph {
         for x in 0..w {
             let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
             let cx = fx.clamp(r, w as f32 - r);
-            let cy = fy.clamp(r, h as f32 - r);
+            let cy = fy.clamp(r, ph as f32 - r);
             let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
             let inside = (r - d + 0.5).clamp(0.0, 1.0);
             if inside > 0.0 {
-                let edge = (d - (r - 1.5)).clamp(0.0, 1.0).max(if x == 0 || y == 0 || x == w - 1 || y == h - 1 { 1.0 } else { 0.0 });
-                let c = if edge > 0.0 { [120, 112, 96] } else { PLATE };
+                let edge = (d - (r - 1.5)).clamp(0.0, 1.0).max(if x == 0 || y == 0 || x == w - 1 || y == ph - 1 { 1.0 } else { 0.0 });
+                let c = if edge > 0.0 { BUBBLE_EDGE } else { PLATE };
                 cv.blend(x as i32, y as i32, c, 0.93 * inside);
             }
         }
     }
+    // Pointe : triangle dont la base est sur le bas de la plaque, sommet en bas à gauche.
+    let base_l = (r + px * 0.4).min(w as f32 * 0.3);
+    let base_r = base_l + px * 0.9;
+    let tip = (base_l - px * 0.25, (ph + tail_h) as f32);
+    for y in ph.saturating_sub(1)..h {
+        let fy = y as f32 + 0.5;
+        // Bords gauche et droit du triangle à cette hauteur.
+        let t = ((fy - ph as f32) / tail_h as f32).clamp(0.0, 1.0);
+        let xl = base_l + (tip.0 - base_l) * t;
+        let xr = base_r + (tip.0 - base_r) * t;
+        for x in 0..w {
+            let fx = x as f32 + 0.5;
+            let cov = ((fx - xl + 0.5).min(xr - fx + 0.5)).clamp(0.0, 1.0);
+            if cov > 0.0 {
+                let border = fx - xl < 1.5 || xr - fx < 1.5 || fy > tip.1 - 1.5;
+                cv.blend(x as i32, y as i32, if border { BUBBLE_EDGE } else { PLATE }, 0.93 * cov);
+            }
+        }
+    }
     // Texte centré verticalement dans la plaque, chaque ligne centrée.
-    let top = (h as f32 - text_h) / 2.0;
+    let top = (ph as f32 - text_h) / 2.0;
     let asc = ascent * line_h / natural.max(1.0);
     for (j, row) in rows.iter().enumerate() {
         let x_off = (w as f32 - widths[j]) / 2.0 - row.first().map_or(0.0, |(x, _)| *x);
@@ -288,7 +331,8 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
         }
     }
     let dx = -((w as i32 - s.width) / 2);
-    let dy = -(pad as i32);
+    // Coin bas-gauche de l'image : sous la plaque, la pointe.
+    let dy = -(pad as i32) - tail_h as i32;
     Drawn { text: text.to_string(), canvas: cv, dx, dy }
 }
 
@@ -321,6 +365,23 @@ mod tests {
     }
 
     #[test]
+    fn bubble_texts_after_the_font() {
+        let list = vec![seen(1, 800, 500), seen(2, 300, 400)];
+        let mut p = payload(&list, "Fonts\\FRIZQT__.TTF");
+        assert_eq!(texts(&p, 2), vec![None, None], "addon d'avant 0.16.3");
+        let t = "Привет всем";
+        p.extend_from_slice(&[1, t.len() as u8]);
+        p.extend_from_slice(t.as_bytes());
+        p.extend_from_slice(&[0, 3]);
+        p.extend_from_slice(b"Hi!");
+        assert_eq!(texts(&p, 2), vec![Some("Hi!".to_string()), Some(t.to_string())]);
+        assert_eq!(parse(&p).unwrap().0, list, "trame toujours lue par l'ancien format");
+        // Texte tronqué en fin de trame : ignoré.
+        p.extend_from_slice(&[0, 50, b'x']);
+        assert_eq!(texts(&p, 2)[0].as_deref(), Some("Hi!"));
+    }
+
+    #[test]
     fn bubble_frame_round_trip() {
         let list = vec![seen(0x2A, 812, 540), Seen { color: [255, 64, 64], px: 13.3, ..seen(7, 1500, 610) }];
         let (got, font) = parse(&payload(&list, "Fonts\\FRIZQT__.TTF")).unwrap();
@@ -339,20 +400,27 @@ mod tests {
         let mut b = Bubbles::default();
         let t0 = Instant::now();
         let tr = |body: &str| (body == "Guten Abend zusammen!").then(|| "[DE] Bonsoir à tous !".to_string());
-        // Une bulle traduite, une bulle dans la langue du client (rien dessus).
+        // Une bulle traduite, une bulle dans la langue du client : toutes deux dessinées (0.16.3,
+        // la bulle de Blizzard est effacée), la seconde avec son texte d'origine.
         b.update(
             vec![(seen(1, 800, 500), Some("Guten Abend zusammen!".into())), (seen(2, 300, 400), Some("Salut".into()))],
             "Fonts\\FRIZQT__.TTF".into(),
             t0,
         );
         let ups = b.tick(&mut book, &tr, &[], t0);
-        assert_eq!(ups.len(), 1, "seule la bulle traduite a une fenêtre");
-        let u = &ups[0];
-        assert_eq!(u.frame, FIRST_FRAME + slots(&b)[&1]);
+        assert_eq!(ups.len(), 2, "chaque bulle a sa fenêtre");
+        let u = ups.iter().find(|u| u.frame == FIRST_FRAME + slots(&b)[&1]).unwrap();
+        let plain = ups.iter().find(|u| u.frame == FIRST_FRAME + slots(&b)[&2]).unwrap();
+        assert!(plain.canvas.as_ref().is_some_and(|c| c.px.iter().any(|p| (p >> 16) & 0xFF > 200)), "texte d'origine absent");
         let cv = u.canvas.as_ref().unwrap();
         // La plaque recouvre le texte d'origine (centrée, débordant de la marge).
         assert!(cv.w as i32 >= 180 && cv.h as i32 >= 30);
         assert!(u.left <= 800 && u.left + cv.w as i32 >= 980 && u.bottom <= 500);
+        // Pointe en bas à gauche : pixels dessinés sous la plaque à gauche, rien à droite.
+        let row = cv.h - 3;
+        let painted = |x: usize| cv.px[row * cv.w + x] >> 24 != 0;
+        assert!((0..cv.w / 3).any(painted), "pointe absente");
+        assert!(!(cv.w * 2 / 3..cv.w).any(painted), "pointe mal placée");
         // Du texte clair est dessiné sur la plaque sombre.
         assert!(cv.px.iter().any(|p| (p >> 16) & 0xFF > 200), "texte absent");
         // Même place : rien de renvoyé.

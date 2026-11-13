@@ -635,10 +635,14 @@ impl Live {
                 Ok((list, font)) => {
                     if let Some(m) = self.mirror.as_mut() {
                         let n = list.len();
+                        // Texte du message relayé ; sinon (message manqué) celui envoyé avec la
+                        // bulle (addon 0.16.3).
+                        let texts = mirror::bulles::texts(&f.payload, n);
                         let list: Vec<_> = list
                             .into_iter()
-                            .map(|s| {
-                                let body = self.bodies.get(&s.id).map(|(b, _)| b.clone());
+                            .zip(texts)
+                            .map(|(s, text)| {
+                                let body = self.bodies.get(&s.id).map(|(b, _)| b.clone()).or(text);
                                 (s, body)
                             })
                             .collect();

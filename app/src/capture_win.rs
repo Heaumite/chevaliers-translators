@@ -551,18 +551,27 @@ impl Capturer {
 }
 
 impl Capturer {
-    /// Une autre fenêtre (un autre WoW, une application) est-elle posée sur le coin du bandeau ?
-    /// Les fenêtres du miroir, traversées par la souris, ne comptent pas.
+    /// Une autre fenêtre (un autre WoW, une application) est-elle posée sur le bandeau ? Coin
+    /// bas-droit, milieu et bord gauche de la zone (0.16.3 : une fenêtre sur une partie seulement
+    /// du bandeau le rendait illisible). Les fenêtres du miroir, traversées par la souris, ne
+    /// comptent pas.
     pub fn covered(&self) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT};
         if self.wow.is_null() {
             return false;
         }
-        let pt = POINT { x: self.x + self.w as i32 - 3, y: self.y + self.h as i32 - 3 };
-        unsafe {
+        let (w, h) = (self.w as i32, self.h as i32);
+        let y = self.y + h - 3;
+        let points = [
+            POINT { x: self.x + w - 3, y },
+            POINT { x: self.x + w / 2, y },
+            POINT { x: self.x + 3, y },
+            POINT { x: self.x + w - 3, y: self.y + 3 },
+        ];
+        points.iter().any(|&pt| unsafe {
             let h = WindowFromPoint(pt);
             !h.is_null() && GetAncestor(h, GA_ROOT) != self.wow
-        }
+        })
     }
 
     /// Image de la zone prise dans la fenêtre de WoW elle-même (PrintWindow, contenu DirectX

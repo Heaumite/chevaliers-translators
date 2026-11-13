@@ -8,6 +8,11 @@
 -- Le jeu protège les bulles en donjon, raid, champ de bataille et arène (illisibles pour un
 -- addon) : elles y restent telles quelles. Bulles cachées sous une fenêtre du jeu (carte,
 -- sacs...) : pas traduites.
+-- 0.16.3 : la bulle de Blizzard est effacée sous la nôtre (plus de double bulle) : l'application
+-- dessine toute la bulle, traduite ou non (texte d'origine si rien n'est à traduire). Elle revient
+-- telle quelle en combat, chat verrouillé, miroir coupé ou /chevaliers bulles off. Le texte de
+-- chaque bulle part aussi avec sa place, tant qu'il y a de la place dans la trame : l'application
+-- dessine la bulle même si elle a manqué le message.
 -- /chevaliers bulles on | off
 
 local _, CT = ...
@@ -29,10 +34,14 @@ local BUBBLE_EVENTS = {
   CHAT_MSG_INSTANCE_CHAT = true, CHAT_MSG_INSTANCE_CHAT_LEADER = true,
 }
 
+local TEXT_MAX = 120    -- octets de texte au plus par bulle dans la trame
+
 local B = {
   recent = {},              -- texte normalisé -> { id, at }
   sentSig = "", sentAt = -100,
-  stats = { frames = 0, matched = 0, unknown = 0, hidden = 0, errors = 0 },
+  stats = { frames = 0, matched = 0, unknown = 0, hidden = 0, errors = 0, replaced = 0 },
+  -- Cadres de bulles de Blizzard effacés (0.16.3) : rendus visibles dès qu'ils ne sont plus à nous.
+  erased = setmetatable({}, { __mode = "k" }),
 }
 CT.Bubbles = B
 
@@ -103,6 +112,49 @@ local function FontStringOf(bubble)
   return fs or scan(holder) or scan(bubble)
 end
 
+-- Cadre visible d'une bulle (fond, bord, pointe et texte) : celui que Blizzard affiche.
+local function VisualOf(bubble)
+  local holder = bubble.GetChildren and bubble:GetChildren()
+  return (type(holder) == "table" and holder.SetAlpha and holder) or bubble
+end
+
+-- La bulle de Blizzard s'efface sous la nôtre : hors combat et chat verrouillé, miroir actif
+-- (l'application dessine alors la bulle entière).
+function B:Replaces()
+  return self:Enabled() and CT.Mirror and CT.Mirror.mode == "on"
+    and not (CT.InLockdown and CT.InLockdown()) and not (CT.InCombat and CT.InCombat())
+end
+
+-- Un jeu qui remet l'opacité de la bulle (apparition en fondu) la retrouve effacée aussitôt.
+local hooked = setmetatable({}, { __mode = "k" })
+local function Guard(visual)
+  if hooked[visual] or not hooksecurefunc or not visual.SetAlpha then return end
+  hooked[visual] = true
+  pcall(hooksecurefunc, visual, "SetAlpha", function(self, a)
+    if B.erased[self] and a ~= 0 then self:SetAlpha(0) end
+  end)
+end
+
+-- Vrai si la bulle vient d'être effacée (elle ne l'était pas au relevé précédent).
+local function Erase(visual)
+  Guard(visual)
+  if visual.GetAlpha and visual:GetAlpha() ~= 0 then visual:SetAlpha(0) end
+  local new = not B.erased[visual]
+  B.erased[visual] = true
+  return new
+end
+
+-- Bulles de Blizzard rendues visibles, sauf celles de `keep` (encore remplacées).
+local function Restore(keep)
+  for visual in pairs(B.erased) do
+    if not (keep and keep[visual]) then
+      B.erased[visual] = nil
+      pcall(visual.SetAlpha, visual, 1)
+    end
+  end
+end
+B.Restore = Restore
+
 local function Overlaps(a, b)
   return a[1] < b[1] + b[3] and b[1] < a[1] + a[3] and a[2] < b[2] + b[4] and b[2] < a[2] + a[4]
 end
@@ -114,7 +166,7 @@ local function U16(t, v)
   t[#t + 1] = v % 256
 end
 
--- Bulles visibles et traduisibles : { id, l, b, w, h, r, g, bl, px, font }.
+-- Bulles visibles et traduisibles : { id, l, b, w, h, r, g, bl, px, font, text, visual }.
 local function Scan()
   local list = {}
   if not (C_ChatBubbles and C_ChatBubbles.GetAllChatBubbles) then return list end
@@ -152,7 +204,8 @@ local function Scan()
       local r, g, bl = fs:GetTextColor()
       if IsSecret(path) or IsSecret(size) or IsSecret(r) then return nil end
       return { id = id, l = rect[1], b = rect[2], w = rect[3], h = rect[4],
-        r = r or 1, g = g or 1, bl = bl or 1, px = (size or 12) * k, font = type(path) == "string" and path or "" }
+        r = r or 1, g = g or 1, bl = bl or 1, px = (size or 12) * k, font = type(path) == "string" and path or "",
+        text = Norm(text), visual = VisualOf(bubble) }
     end)
     if not okB then
       B.stats.errors = B.stats.errors + 1
@@ -180,6 +233,24 @@ local function Payload(list)
   local path = (list[1] and list[1].font or ""):sub(1, 80)
   U8(p, #path)
   for c = 1, #path do p[#p + 1] = path:byte(c) end
+  -- Textes des bulles (0.16.3), tant qu'il reste de la place : [rang] [longueur] [texte UTF-8].
+  -- L'application s'en sert si elle a manqué le message (les anciennes versions l'ignorent).
+  local room = (CT.MaxPayload and CT.MaxPayload() or 255) - #p
+  for i, e in ipairs(list) do
+    local t = e.text or ""
+    if #t > TEXT_MAX then
+      t = t:sub(1, TEXT_MAX)
+      -- Pas de caractère coupé en deux.
+      while #t > 0 and t:byte(#t) >= 0x80 and t:byte(#t) < 0xC0 do t = t:sub(1, #t - 1) end
+      if #t > 0 and t:byte(#t) >= 0xC0 then t = t:sub(1, #t - 1) end
+    end
+    if #t > 0 and #t + 2 <= room then
+      U8(p, i - 1)
+      U8(p, #t)
+      for c = 1, #t do p[#p + 1] = t:byte(c) end
+      room = room - #t - 2
+    end
+  end
   return p
 end
 B.Payload = Payload
@@ -189,6 +260,19 @@ function B:Poll(now)
   if self:Enabled() and CT.Mirror and CT.Mirror.mode ~= "off" and not (CT.InLockdown and CT.InLockdown()) then
     list = Scan()
   end
+  -- Bulles de Blizzard effacées sous les nôtres ; les autres (inconnues, sous une fenêtre du jeu,
+  -- combat) rendues visibles.
+  local keep
+  if self:Replaces() then
+    keep = {}
+    for _, e in ipairs(list) do
+      if e.visual then
+        if Erase(e.visual) then self.stats.replaced = self.stats.replaced + 1 end
+        keep[e.visual] = true
+      end
+    end
+  end
+  Restore(keep)
   local parts = {}
   for _, e in ipairs(list) do
     parts[#parts + 1] = format("%d:%d:%d:%d:%d", e.id, floor(e.l / MOVE), floor(e.b / MOVE), floor(e.w / MOVE), floor(e.h / MOVE))
@@ -212,15 +296,16 @@ function B:Command(arg)
     if arg == "off" then
       ChevaliersTranslatorsDB.bubbles = false
       self.sentSig = "?"
+      Restore()
     else
       ChevaliersTranslatorsDB.bubbles = nil
     end
     CT.Print(arg == "on"
-      and "Bulles traduites : la traduction des bulles de dialogue s'affiche dessus, avec l'acronyme de la langue (hors donjons et raids, où le jeu les protège)."
+      and "Bulles traduites : la bulle de dialogue est remplacée par celle de l'application, traduite avec l'acronyme de la langue (hors donjons et raids, où le jeu les protège)."
       or "Bulles traduites : désactivé, les bulles restent telles quelles.")
   else
-    CT.Print(format("Bulles traduites : %s - trames %d, bulles reconnues %d, inconnues %d, sous une fenêtre %d%s",
-      self:Enabled() and "actif" or "désactivé", self.stats.frames, self.stats.matched, self.stats.unknown,
+    CT.Print(format("Bulles traduites : %s - trames %d, bulles reconnues %d, remplacées %d, inconnues %d, sous une fenêtre %d%s",
+      self:Enabled() and "actif" or "désactivé", self.stats.frames, self.stats.matched, self.stats.replaced, self.stats.unknown,
       self.stats.hidden, self.lastError and (", erreur : " .. self.lastError) or ""))
     CT.Print("/chevaliers bulles on | off")
   end
@@ -236,5 +321,7 @@ driver:SetScript("OnUpdate", function(_, elapsed)
   if not ok then
     B.stats.errors = B.stats.errors + 1
     B.lastError = tostring(err)
+    -- Jamais de bulle de Blizzard laissée effacée après une erreur.
+    pcall(Restore)
   end
 end)
