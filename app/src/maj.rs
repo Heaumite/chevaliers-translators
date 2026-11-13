@@ -357,6 +357,33 @@ pub fn dismiss_installed() {
     let _ = std::fs::remove_file(installed_file());
 }
 
+/// Mise à jour proposée au joueur et pas encore installée (« prete », ou « erreur » à réessayer) :
+/// sa version. L'encadré de la fenêtre et l'entrée du menu de l'icône restent jusqu'à son clic.
+pub fn pending(current: &str) -> Option<String> {
+    let v = read_state(current)?;
+    matches!(v["etat"].as_str(), Some("prete" | "erreur")).then(|| v["version"].as_str().unwrap_or_default().to_string())
+}
+
+/// Au lancement (0.16.1) : une mise à jour proposée reste proposée (fenêtre, menu de l'icône)
+/// jusqu'au clic du joueur ; un téléchargement ou une installation interrompus par l'arrêt de
+/// l'application, ou un état d'une version qui n'est plus nouvelle, sont oubliés (la recherche
+/// les refait).
+pub fn tidy_state(current: &str) {
+    tidy_state_in(&state_file(), current);
+}
+
+fn tidy_state_in(file: &std::path::Path, current: &str) {
+    let keep = std::fs::read(file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| {
+            v["version"].as_str().is_some_and(|ver| is_newer(ver, current)) && matches!(v["etat"].as_str(), Some("prete" | "erreur"))
+        });
+    if !keep {
+        let _ = std::fs::remove_file(file);
+    }
+}
+
 /// Au premier lancement de la version installée : l'état de la mise à jour devient « nouveautés ».
 pub fn mark_installed(current: &str) {
     if let Ok(Some(v)) = std::fs::read(state_file()).map(|b| serde_json::from_slice::<Value>(&b).ok()) {
@@ -409,7 +436,12 @@ pub fn start(current: &'static str, exe: PathBuf) {
                         rel.version,
                         if dev { " (version de développement : installation seulement par le bouton)" } else { "" }
                     );
-                    write_state(&rel.version, &rel.notes, "telechargement", "");
+                    // Déjà proposée avant un redémarrage : l'encadré garde son bouton pendant le
+                    // nouveau téléchargement (l'exécutable vérifié n'est pas gardé d'une session à
+                    // l'autre).
+                    if pending(current).as_deref() != Some(rel.version.as_str()) {
+                        write_state(&rel.version, &rel.notes, "telechargement", "");
+                    }
                     if forced {
                         with(|s| s.events.push(Event::Found(rel.version.clone())));
                     }
@@ -448,6 +480,30 @@ pub fn start(current: &'static str, exe: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proposed_update_kept_until_clicked() {
+        let d = std::env::temp_dir().join(format!("ct-maj-test-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("etat.json");
+        let put = |ver: &str, step: &str| std::fs::write(&f, json!({ "version": ver, "notes": "- x", "etat": step, "message": "" }).to_string()).unwrap();
+        // Proposée (ou à réessayer) : gardée d'un lancement à l'autre.
+        for step in ["prete", "erreur"] {
+            put("0.16.2", step);
+            tidy_state_in(&f, "0.16.1");
+            assert!(f.exists(), "{step} oubliée");
+        }
+        // Téléchargement ou installation interrompus, version plus nouvelle : oubliés.
+        for step in ["telechargement", "installation"] {
+            put("0.16.2", step);
+            tidy_state_in(&f, "0.16.1");
+            assert!(!f.exists(), "{step} gardée");
+        }
+        put("0.16.1", "prete");
+        tidy_state_in(&f, "0.16.1");
+        assert!(!f.exists(), "version déjà installée gardée");
+        let _ = std::fs::remove_dir_all(&d);
+    }
     use serde_json::json;
     use std::io::Write;
 

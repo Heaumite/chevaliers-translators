@@ -211,6 +211,11 @@ mod app {
                 // La fenêtre de l'application montre les nouveautés de cette version, une fois.
                 ct::maj::mark_installed(VERSION);
                 tray.notify("Chevaliers Translators mis à jour", &format!("Version {VERSION} installée depuis GitHub ; l'addon suit dans toutes les versions de WoW."), false);
+            } else {
+                ct::maj::tidy_state(VERSION);
+                if let Some(v) = ct::maj::pending(VERSION) {
+                    ct::say!("[mise à jour] {v} toujours proposée : fenêtre de l'application et menu de l'icône, jusqu'au clic sur « Installer la mise à jour »");
+                }
             }
             if !ct::maj::auto_enabled() {
                 ct::say!("[mise à jour] recherche automatique coupée (menu de l'icône) ; « Rechercher une mise à jour » reste possible");

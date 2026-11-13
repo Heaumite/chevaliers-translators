@@ -136,6 +136,9 @@ explications de l'application traduites côté application ; bulle de ses propre
 sous-menus des réglages du chat non recouverts, chat traduit effacé au ras des bordures (ombre
 ignorée).
 
+**0.16.2 (13/11)** : la mise à jour proposée reste jusqu'au clic du joueur (fenêtre et entrée en
+tête du menu de l'icône, même après un redémarrage) ; téléchargement interrompu refait.
+
 **J2 - Installation et démarrage**
 - Premier lancement guidé : WoW trouvé, addon posé dans toutes les versions, moteur llama.cpp et
   pack low téléchargés, matériel détecté, modèles proposés (interface de la phase 0).

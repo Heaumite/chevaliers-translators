@@ -51,6 +51,7 @@ const CMD_QUIT: usize = 3;
 const CMD_UNINSTALL: usize = 4;
 const CMD_UPDATE: usize = 5;
 const CMD_AUTO_UPDATE: usize = 6;
+const CMD_SHOW_UPDATE: usize = 7;
 
 /// Quitter confirmé dans le menu.
 static QUIT: AtomicBool = AtomicBool::new(false);
@@ -508,6 +509,14 @@ fn show_menu(hwnd: HWND) {
         ];
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, head.as_ptr());
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.as_ptr());
+        // Mise à jour proposée (0.16.1) : l'entrée reste jusqu'à l'installation ; elle ouvre la
+        // fenêtre sur son bouton et sa note de version.
+        let pending = crate::maj::pending(env!("CARGO_PKG_VERSION"));
+        let pending_item = wide(&format!("Mise à jour {} disponible : voir et installer...", pending.as_deref().unwrap_or("")));
+        if pending.is_some() {
+            AppendMenuW(menu, MF_SEPARATOR, 0, null());
+            AppendMenuW(menu, MF_STRING, CMD_SHOW_UPDATE, pending_item.as_ptr());
+        }
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(menu, MF_STRING, CMD_INTERFACE, items[0].as_ptr());
         AppendMenuW(menu, MF_STRING, CMD_JOURNAL, items[1].as_ptr());
@@ -518,7 +527,7 @@ fn show_menu(hwnd: HWND) {
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(menu, MF_STRING, CMD_UNINSTALL, items[3].as_ptr());
         AppendMenuW(menu, MF_STRING, CMD_QUIT, items[2].as_ptr());
-        SetMenuDefaultItem(menu, CMD_INTERFACE as u32, 0);
+        SetMenuDefaultItem(menu, if pending.is_some() { CMD_SHOW_UPDATE } else { CMD_INTERFACE } as u32, 0);
         let mut pt = POINT { x: 0, y: 0 };
         GetCursorPos(&mut pt);
         // Sans cela, le menu ne se referme pas quand on clique ailleurs.
@@ -527,7 +536,7 @@ fn show_menu(hwnd: HWND) {
         PostMessageW(hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
         match cmd as usize {
-            CMD_INTERFACE => open_interface(),
+            CMD_INTERFACE | CMD_SHOW_UPDATE => open_interface(),
             CMD_JOURNAL => open_journal(),
             CMD_QUIT => confirm_quit(hwnd),
             CMD_UNINSTALL => confirm_uninstall(hwnd),
