@@ -41,7 +41,10 @@ pub fn cover_strip(img: &Image, g: &Geometry) -> Option<CoverStrip> {
 
 /// Image du cache : chaque colonne prend la couleur du pixel au-dessus, adoucie sur 5 colonnes.
 pub fn cover_canvas(s: &CoverStrip) -> Canvas {
-    let w = s.row.len().max(1);
+    if s.row.is_empty() {
+        return Canvas::new(1, 1);
+    }
+    let w = s.row.len();
     let mut cv = Canvas::new(w, s.h.max(1));
     for x in 0..w {
         let (a, b) = (x.saturating_sub(2), (x + 2).min(w - 1));

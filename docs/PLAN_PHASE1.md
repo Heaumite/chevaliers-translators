@@ -119,6 +119,12 @@ adaptative et resserrée (8 à 40 fois moins de lectures d'écran), bandeau repe
 cache du modèle en 8 bits (130 à 170 Mo de mémoire vidéo rendus), effacement du chat à 15 images/s ;
 `Guide.lua` séparé.
 
+**0.15.1 (13/11)** : correctif de la capture (arrêtée en 0.15.0 dès le resserrement sur le
+bandeau), capture relancée après une erreur interne ; bouton « Envoyer » ; une fenêtre de WoW = une
+traduction liée (jeux 1, 2, 3), fenêtre active d'abord dans la file, WoW caché lu dans sa fenêtre ;
+mises à jour vérifiées fichier par fichier, « redémarre WoW » quand des fichiers sont ajoutés,
+ancienne version de l'application arrêtée par la nouvelle ; guide réaffiché quand son texte change.
+
 **J2 - Installation et démarrage**
 - Premier lancement guidé : WoW trouvé, addon posé dans toutes les versions, moteur llama.cpp et
   pack low téléchargés, matériel détecté, modèles proposés (interface de la phase 0).

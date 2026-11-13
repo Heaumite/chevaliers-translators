@@ -36,7 +36,7 @@ pub fn parse_perf(payload: &[u8]) -> Option<Perf> {
 impl FpsProbe {
     #[cfg(windows)]
     pub fn start() -> Result<FpsProbe, String> {
-        use crate::decode::{decode, Image};
+        use crate::decode::decode;
         let samples: Arc<Mutex<Vec<(Instant, Perf)>>> = Arc::default();
         let stop = Arc::new(AtomicBool::new(false));
         let (s2, stop2) = (samples.clone(), stop.clone());
@@ -55,9 +55,8 @@ impl FpsProbe {
             };
             let mut last: Option<u16> = None;
             while !stop2.load(Ordering::Relaxed) {
-                let (w, h) = (cap.w, cap.h);
-                if let Ok(buf) = cap.grab() {
-                    if let Ok(d) = decode(&Image { w, h, stride: w * 4, bgra: buf }) {
+                if let Ok(img) = cap.grab() {
+                    if let Ok(d) = decode(&img) {
                         if d.frame.ftype == crate::proto::FRAME_PERF && last != Some(d.frame.seq) {
                             last = Some(d.frame.seq);
                             if let Some(f) = parse_perf(&d.frame.payload) {

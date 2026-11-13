@@ -352,6 +352,11 @@ pub struct Capturer {
     full_h: usize,
     /// Zone resserrée sur le bandeau trouvé (0.15) : (largeur, hauteur) ; `None` : zone large.
     narrow: Option<(usize, usize)>,
+    /// Image entière de la fenêtre de WoW, quand une autre fenêtre est posée sur son bandeau
+    /// (0.15.1, plusieurs jeux) : (DC, bitmap, ancien objet, pixels, largeur, hauteur).
+    hidden: Option<(HDC, HBITMAP, HGDIOBJ, *mut u8, usize, usize)>,
+    /// La dernière capture a lu la fenêtre cachée (PrintWindow) plutôt que l'écran.
+    pub via_window: bool,
 }
 
 impl Capturer {
@@ -423,6 +428,8 @@ impl Capturer {
                 fixed,
                 full_h: h as usize,
                 narrow: None,
+                hidden: None,
+                via_window: false,
             })
         }
     }
@@ -508,9 +515,19 @@ impl Capturer {
         }
     }
 
-    /// Copie la zone et renvoie les pixels BGRA (lignes de haut en bas).
-    pub fn grab(&mut self) -> Result<&[u8], String> {
+    /// Copie la zone et renvoie son image BGRA (lignes de haut en bas). La taille de l'image est
+    /// prise après le suivi de la fenêtre de WoW, qui peut changer la zone (0.15.1 : la zone
+    /// resserrée sur le bandeau rendait une image plus petite que la taille lue avant l'appel ;
+    /// le décodage lisait hors de l'image et le fil de capture s'arrêtait).
+    pub fn grab(&mut self) -> Result<crate::decode::Image<'_>, String> {
         self.follow_wow();
+        // Fenêtre de WoW imposée dont le bandeau est sous une autre fenêtre (un autre WoW devant,
+        // 0.15.1) : l'écran montre l'autre fenêtre ; on demande à Windows l'image de celle-ci.
+        self.via_window = self.fixed && self.covered() && self.grab_window();
+        if self.via_window {
+            let (w, h) = (self.w, self.h);
+            return Ok(crate::decode::Image { w, h, stride: w * 4, bgra: unsafe { std::slice::from_raw_parts(self.bits, w * h * 4) } });
+        }
         unsafe {
             if BitBlt(
                 self.mem_dc,
@@ -527,13 +544,92 @@ impl Capturer {
                 return Err("BitBlt a échoué (écran verrouillé ou session changée ?)".into());
             }
             GdiFlush();
-            Ok(std::slice::from_raw_parts(self.bits, self.w * self.h * 4))
+            let (w, h) = (self.w, self.h);
+            Ok(crate::decode::Image { w, h, stride: w * 4, bgra: std::slice::from_raw_parts(self.bits, w * h * 4) })
+        }
+    }
+}
+
+impl Capturer {
+    /// Une autre fenêtre (un autre WoW, une application) est-elle posée sur le coin du bandeau ?
+    /// Les fenêtres du miroir, traversées par la souris, ne comptent pas.
+    pub fn covered(&self) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT};
+        if self.wow.is_null() {
+            return false;
+        }
+        let pt = POINT { x: self.x + self.w as i32 - 3, y: self.y + self.h as i32 - 3 };
+        unsafe {
+            let h = WindowFromPoint(pt);
+            !h.is_null() && GetAncestor(h, GA_ROOT) != self.wow
+        }
+    }
+
+    /// Image de la zone prise dans la fenêtre de WoW elle-même (PrintWindow, contenu DirectX
+    /// compris), même cachée par une autre fenêtre. Faux si Windows ne la donne pas.
+    fn grab_window(&mut self) -> bool {
+        use windows_sys::Win32::Storage::Xps::{PrintWindow, PW_CLIENTONLY};
+        use windows_sys::Win32::UI::WindowsAndMessaging::PW_RENDERFULLCONTENT;
+        let Some((l, t, r, b)) = client_rect(self.wow) else { return false };
+        let (cw, ch) = ((r - l).max(1) as usize, (b - t).max(1) as usize);
+        if self.w > cw || self.h > ch {
+            return false;
+        }
+        unsafe {
+            if self.hidden.is_none_or(|(_, _, _, _, w, h)| (w, h) != (cw, ch)) {
+                self.free_hidden();
+                let dc = CreateCompatibleDC(self.screen_dc);
+                let mut bmi: BITMAPINFO = std::mem::zeroed();
+                bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth = cw as i32;
+                bmi.bmiHeader.biHeight = -(ch as i32);
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = BI_RGB;
+                let mut bits: *mut c_void = null_mut();
+                let bmp = CreateDIBSection(self.screen_dc, &bmi, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+                if dc.is_null() || bmp.is_null() || bits.is_null() {
+                    if !dc.is_null() {
+                        DeleteDC(dc);
+                    }
+                    if !bmp.is_null() {
+                        DeleteObject(bmp);
+                    }
+                    return false;
+                }
+                let old = SelectObject(dc, bmp);
+                self.hidden = Some((dc, bmp, old, bits as *mut u8, cw, ch));
+            }
+            let (dc, _, _, bits, cw, ch) = self.hidden.unwrap();
+            if PrintWindow(self.wow, dc, PW_CLIENTONLY | PW_RENDERFULLCONTENT) == 0 {
+                return false;
+            }
+            GdiFlush();
+            // Coin bas-droit de l'image de la fenêtre -> zone capturée habituelle.
+            let (x0, y0) = (cw - self.w, ch - self.h);
+            for row in 0..self.h {
+                let src = bits.add(((y0 + row) * cw + x0) * 4);
+                let dst = self.bits.add(row * self.w * 4);
+                std::ptr::copy_nonoverlapping(src, dst, self.w * 4);
+            }
+        }
+        true
+    }
+
+    fn free_hidden(&mut self) {
+        if let Some((dc, bmp, old, _, _, _)) = self.hidden.take() {
+            unsafe {
+                SelectObject(dc, old);
+                DeleteObject(bmp);
+                DeleteDC(dc);
+            }
         }
     }
 }
 
 impl Drop for Capturer {
     fn drop(&mut self) {
+        self.free_hidden();
         unsafe {
             SelectObject(self.mem_dc, self.old);
             DeleteObject(self.bmp);

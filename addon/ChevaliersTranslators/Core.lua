@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.15.0"
+CT.VERSION = "0.15.1"
 
 local floor = math.floor
 local format = string.format
@@ -1032,6 +1032,38 @@ local function AddTradButton(eb, cf)
   b:SetText("Trad:" .. dest)
   eb.ctTrad = b
   tradButtons[#tradButtons + 1] = b
+  -- Bouton « Envoyer » (0.15.1), à droite de Trad : traduit le texte de la boîte et l'envoie, comme
+  -- Maj+Entrée ou Maj+clic sur Trad (son infobulle le dit).
+  local s = CreateFrame("Button", nil, b:GetParent() or UIParent)
+  s:SetSize(64, 22)
+  s:SetPoint("LEFT", b, "RIGHT", 2, 0)
+  if s.SetFrameStrata then s:SetFrameStrata("MEDIUM") end
+  local sbg = s:CreateTexture(nil, "BACKGROUND")
+  sbg:SetAllPoints(s)
+  sbg:SetColorTexture(0.30, 0.22, 0.06, 0.80)
+  local sfs = s:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  sfs:SetPoint("CENTER")
+  s:SetFontString(sfs)
+  s.ctEditBox = eb
+  s:RegisterForClicks("LeftButtonUp")
+  s:SetScript("OnClick", function(self)
+    local box = self.ctEditBox or (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+    if not StartSend(box) then
+      Print("Envoyer : écris d'abord ton message dans la boîte de saisie, puis clique Envoyer (ou Maj+Entrée).")
+    end
+  end)
+  s:SetScript("OnEnter", function(self)
+    if not GameTooltip then return end
+    local vers = dest == "AUTO" and "dans la langue de ton interlocuteur" or ("en " .. (LANG_NAMES[dest] or dest))
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine("Traduire et envoyer")
+    GameTooltip:AddLine("Traduit le texte de la boîte de saisie " .. vers .. ", puis l'envoie sur son canal.", 1, 1, 1, true)
+    GameTooltip:AddLine("Même effet : Maj+clic sur le bouton Trad, ou Maj+Entrée dans la boîte de saisie.", 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  s:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+  s:SetText("Envoyer")
+  eb.ctSend = s
 end
 
 local function InstallTrad()
@@ -1401,7 +1433,7 @@ boot:SetScript("OnEvent", function(self, event)
     end
     -- Première utilisation : guide d'installation affiché une fois, peu après la connexion (pas
     -- pendant l'écran de chargement). C_Timer absent (hors jeu) : pas de guide.
-    if not ChevaliersTranslatorsDB.guideSeen and C_Timer and C_Timer.After then
+    if ChevaliersTranslatorsDB.guideSeen ~= CT.GUIDE_REV and C_Timer and C_Timer.After then
       C_Timer.After(3, function() pcall(CT.ShowGuide) end)
     end
     if ChevaliersTranslatorsDB.tradOff then

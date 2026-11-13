@@ -360,6 +360,11 @@ function GameTooltip:GetBottom() return 150 end
 function GameTooltip:GetWidth() return 200 end
 function GameTooltip:GetHeight() return 100 end
 function GameTooltip:GetEffectiveScale() return 0.64 end
+TIP = {}
+function GameTooltip:SetOwner() TIP = {} end
+function GameTooltip:AddLine(t) TIP[#TIP + 1] = t end
+function GameTooltip:Show() self.visible = true end
+function GameTooltip:Hide() self.visible = false end
 function UnitGUID() return "Player-1-0ABC" end
 -- Menus récents (MenuUtil) : le contenu du menu est relevé dans MENU.
 local function MenuRoot(list)
@@ -678,6 +683,26 @@ def mock(root, binary):
     g.SHIFT = False
     assert list(g.BLIZZ_SENT.values())[-1] == "SAY:nil:[→XX] salut tout le monde", list(g.BLIZZ_SENT.values())[-1]
     s3_frames.extend(frames_until_idle("majclicsent"))
+    # Bouton « Envoyer » à droite de Trad (0.15.1) : même effet, son infobulle le dit.
+    sb = g.ChatFrame1EditBox.ctSend
+    assert sb is not None and sb.text == "Envoyer", "bouton Envoyer absent"
+    sb.scripts["OnEnter"](sb)
+    tip = " ".join(g.TIP.values())
+    assert "Traduire et envoyer" in tip and "Maj+clic sur le bouton Trad" in tip and "Maj+Entrée" in tip, tip
+    sb.scripts["OnLeave"](sb)
+    g.GameTooltip.visible = False
+    sbox = g.EDITBOX("bonsoir tout le monde", "SAY", None)
+    sb.ctEditBox = sbox
+    sb.scripts["OnClick"](sb, "LeftButton")
+    assert sbox.text == "", "Envoyer : boîte non vidée"
+    out = app(frames_until_idle("envoyer"))
+    assert "(SAY) : bonsoir tout le monde" in out and "collage prêt" in out, out
+    sbox.text = "[→XX] bonsoir tout le monde"
+    g.ChatFrame1EditBox.hooks["OnTextChanged"](sbox, True)
+    g.SIMULATE_SEND(sbox)
+    assert list(g.BLIZZ_SENT.values())[-1] == "SAY:nil:[→XX] bonsoir tout le monde", list(g.BLIZZ_SENT.values())[-1]
+    s3_frames.extend(frames_until_idle("envoyersent"))
+    sb.ctEditBox = g.ChatFrame1EditBox
     # Clic gauche simple (sans Maj) : rien n'est envoyé, c'est le choix de langue.
     tb.ctEditBox = g.EDITBOX("ne pas envoyer", "SAY", None)
     tb.scripts["OnClick"](tb, "LeftButton")

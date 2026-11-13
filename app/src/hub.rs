@@ -2,7 +2,8 @@
 //! traduction (chat miroir, bulles, envois), et toutes leurs demandes passent dans la même file du
 //! serveur llama.cpp (un seul modèle en mémoire vidéo). Les traductions finies reviennent au jeu
 //! qui les a demandées ; les messages du moteur (modèle actif, repli) au premier jeu ; une
-//! proposition de modèle à tous.
+//! proposition de modèle à tous. Chaque demande porte le numéro de son jeu : à priorité égale,
+//! celles de la fenêtre de WoW active passent devant (0.15.1).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -73,8 +74,10 @@ struct Client {
 }
 
 impl Translator for Client {
-    fn submit(&mut self, ask: Ask) -> u64 {
+    fn submit(&mut self, mut ask: Ask) -> u64 {
         let mut h = self.hub.borrow_mut();
+        // Demande marquée de son jeu : la fenêtre de WoW active passe devant (engine::set_focus).
+        ask.game = self.game;
         let id = h.engine.submit(ask);
         h.owner.insert(id, self.game);
         id
@@ -96,10 +99,12 @@ mod tests {
     struct Fake {
         next: u64,
         ready: VecDeque<Event>,
+        games: Rc<RefCell<Vec<usize>>>,
     }
 
     impl Translator for Fake {
         fn submit(&mut self, a: Ask) -> u64 {
+            self.games.borrow_mut().push(a.game);
             self.next += 1;
             self.ready.push_back(Event::Done { id: self.next, result: Ok(format!("<{}> {}", a.tgt, a.text)), secs: 0.3, cached: false });
             self.next
@@ -112,17 +117,19 @@ mod tests {
     }
 
     fn ask(text: &str, tgt: &'static str) -> Ask {
-        Ask { text: text.into(), src: "de", tgt, priority: Priority::Received, group: None }
+        Ask { text: text.into(), src: "de", tgt, priority: Priority::Received, group: None, game: 0 }
     }
 
     #[test]
     fn two_games_share_one_engine_and_get_their_own_translations_back() {
-        let hub = Hub::new(Box::new(Fake { next: 0, ready: VecDeque::new() }));
+        let games = Rc::new(RefCell::new(Vec::new()));
+        let hub = Hub::new(Box::new(Fake { next: 0, ready: VecDeque::new(), games: games.clone() }));
         let mut a = Hub::join(&hub, 1);
         let mut b = Hub::join(&hub, 2);
         let ia = a.submit(ask("Hallo", "fr"));
         let ib = b.submit(ask("Guten Tag", "en"));
         assert_ne!(ia, ib, "une seule file : numéros uniques");
+        assert_eq!(*games.borrow(), vec![1, 2], "chaque demande porte son jeu (priorité de la fenêtre active)");
         // Le jeu 2 relève le moteur en premier : il ne reçoit que sa traduction.
         let got_b = b.poll();
         let done = |v: &[Event]| -> Vec<(u64, String)> {

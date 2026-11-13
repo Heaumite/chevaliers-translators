@@ -112,6 +112,88 @@ pub fn flavor_dirs(root: &Path) -> Vec<String> {
     v
 }
 
+/// Fichiers de l'addon écrits par l'application, avec leur contenu (0.15.1 : partagés par la pose et
+/// la vérification).
+fn addon_files() -> [(&'static str, &'static [u8]); 8] {
+    [
+        ("Encoder.lua", ENCODER.as_bytes()),
+        ("Banner.lua", BANNER.as_bytes()),
+        ("Guide.lua", GUIDE.as_bytes()),
+        ("Core.lua", CORE.as_bytes()),
+        ("Mirror.lua", MIRROR.as_bytes()),
+        ("Bubbles.lua", BUBBLES.as_bytes()),
+        ("Media/Logo.tga", LOGO),
+        ("Media/Banniere.tga", BANNIERE),
+    ]
+}
+
+/// État de l'addon posé dans une version du jeu, comparé à celui de l'application (0.15.1).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Check {
+    /// Version lue dans le .toc (None : addon absent).
+    pub version: Option<String>,
+    /// Fichiers absents ou différents de ceux de l'application.
+    pub differs: Vec<String>,
+    /// Le .toc posé ne liste pas les mêmes fichiers : un nouveau fichier ne se charge qu'au
+    /// redémarrage du jeu (/reload ne relit pas la liste).
+    pub files_changed: bool,
+}
+
+impl Check {
+    pub fn up_to_date(&self) -> bool {
+        self.version.as_deref() == Some(env!("CARGO_PKG_VERSION")) && self.differs.is_empty() && !self.files_changed
+    }
+
+    /// Pour le journal : « 0.14.8, Core.lua, Bubbles.lua différents ».
+    pub fn describe(&self) -> String {
+        let v = self.version.clone().unwrap_or_else(|| "absent".into());
+        if self.differs.is_empty() {
+            return v;
+        }
+        let shown: Vec<&str> = self.differs.iter().take(4).map(String::as_str).collect();
+        format!("{v}, {} {}", shown.join(", "), if self.differs.len() > 1 { "différents" } else { "différent" })
+    }
+}
+
+/// Compare l'addon posé dans une version du jeu, fichier par fichier, à celui de l'application :
+/// une mise à jour au même numéro de version, ou un fichier qui n'a pas été remplacé, se voit aussi.
+pub fn check(root: &Path, flavor: &str) -> Check {
+    let main = addons_dir(root, flavor).join(ADDON);
+    let version = addon_version(root, flavor);
+    if version.is_none() {
+        return Check { version, differs: addon_files().iter().map(|(n, _)| n.to_string()).collect(), files_changed: true };
+    }
+    let differs = addon_files()
+        .iter()
+        .filter(|(name, body)| fs::read(main.join(name)).ok().as_deref() != Some(*body))
+        .map(|(name, _)| name.to_string())
+        .collect();
+    let listed: Vec<String> = fs::read_to_string(main.join(format!("{ADDON}.toc")))
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(String::from)
+        .collect();
+    Check { version, differs, files_changed: listed != FILES }
+}
+
+/// Écrit un fichier de l'addon ; un fichier en lecture seule (copié depuis un CD, un zip, un
+/// gestionnaire d'addons) est d'abord rendu modifiable.
+fn write_file(path: &Path, body: &[u8]) -> Result<(), String> {
+    if let Err(e) = fs::write(path, body) {
+        let mut perm = fs::metadata(path).map_err(|_| format!("{} : {e}", path.display()))?.permissions();
+        if !perm.readonly() {
+            return Err(format!("{} : {e}", path.display()));
+        }
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        fs::set_permissions(path, perm).map_err(|e2| format!("{} : {e} ({e2})", path.display()))?;
+        fs::write(path, body).map_err(|e| format!("{} : {e}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// Version de l'addon installée dans une version du jeu (ligne « ## Version » de son .toc).
 pub fn addon_version(root: &Path, flavor: &str) -> Option<String> {
     let toc = fs::read_to_string(addons_dir(root, flavor).join(ADDON).join(format!("{ADDON}.toc"))).ok()?;
@@ -481,6 +563,7 @@ pub fn install(root: &Path, only: Option<&str>, iface_override: Option<u32>) -> 
     }
 
     let mut done = 0;
+    let mut failed: Vec<String> = Vec::new();
     for folder in &folders {
         let (iface, source) = match (iface_override, interface_for(folder, &info)) {
             (Some(i), _) => (i, "valeur imposée".to_string()),
@@ -494,22 +577,17 @@ pub fn install(root: &Path, only: Option<&str>, iface_override: Option<u32>) -> 
         let removed = remove_legacy(&addons);
         migrate_settings(&root.join(folder));
         let main = addons.join(ADDON);
-        fs::create_dir_all(&main).map_err(|e| format!("{} : {e}", main.display()))?;
-        let files = [
-            ("Encoder.lua", ENCODER),
-            ("Banner.lua", BANNER),
-            ("Guide.lua", GUIDE),
-            ("Core.lua", CORE),
-            ("Mirror.lua", MIRROR),
-            ("Bubbles.lua", BUBBLES),
-        ];
-        for (name, body) in files {
-            fs::write(main.join(name), body).map_err(|e| format!("{name} : {e}"))?;
-        }
         let media = main.join("Media");
-        fs::create_dir_all(&media).map_err(|e| format!("{} : {e}", media.display()))?;
-        fs::write(media.join("Logo.tga"), LOGO).map_err(|e| format!("Logo.tga : {e}"))?;
-        fs::write(media.join("Banniere.tga"), BANNIERE).map_err(|e| format!("Banniere.tga : {e}"))?;
+        if let Err(e) = fs::create_dir_all(&media) {
+            failed.push(format!("{} : {e}", media.display()));
+            continue;
+        }
+        // Tous les fichiers sont réécrits, même au même numéro de version (0.15.1) ; une version
+        // du jeu qui refuse n'empêche pas les autres d'être mises à jour.
+        if let Some(e) = addon_files().iter().find_map(|(name, body)| write_file(&main.join(name), body).err()) {
+            failed.push(e);
+            continue;
+        }
         // Raccourci de la phase 0, chargé d'office par le jeu s'il reste là : plus utilisé.
         let _ = fs::remove_file(main.join("Bindings.xml"));
         let main_toc = toc(
@@ -521,7 +599,13 @@ pub fn install(root: &Path, only: Option<&str>, iface_override: Option<u32>) -> 
             ),
             &FILES,
         );
-        fs::write(main.join(format!("{ADDON}.toc")), main_toc).map_err(|e| e.to_string())?;
+        write_file(&main.join(format!("{ADDON}.toc")), main_toc.as_bytes())?;
+        // Relecture : chaque fichier doit être exactement celui de l'application.
+        let after = check(root, folder);
+        if !after.up_to_date() {
+            failed.push(format!("{folder} : addon non remplacé ({})", after.describe()));
+            continue;
+        }
 
         // Présence de l'application : petit addon chargé à chaque connexion, réécrit par elle.
         let live = addons.join(LIVE_ADDON);
@@ -546,10 +630,13 @@ pub fn install(root: &Path, only: Option<&str>, iface_override: Option<u32>) -> 
         crate::plan::remember_wow(&root.join(folder));
         done += 1;
     }
+    crate::say!("{}", status_report(root));
+    if !failed.is_empty() {
+        return Err(format!("{} ; ferme WoW et relance l'application", failed.join(" ; ")));
+    }
     if done == 0 {
         return Err("rien n'a été installé".into());
     }
-    crate::say!("{}", status_report(root));
     crate::say!("Relance WoW s'il était ouvert : la liste des addons n'est lue qu'au démarrage.");
     Ok(())
 }
@@ -668,6 +755,28 @@ mod tests {
         }
         // Les fichiers de l'ancienne version sont bien les nouveaux.
         assert!(fs::read_to_string(old.join("Core.lua")).unwrap().contains("CT.VERSION"));
+        for f in ["_retail_", "_classic_era_", "_forever_"] {
+            assert!(check(&wow, f).up_to_date(), "{f} : {:?}", check(&wow, f));
+        }
+        // 0.15.1 : même numéro de version mais un fichier différent (ou absent), et un .toc qui ne
+        // liste pas les mêmes fichiers : vus, puis remplacés.
+        fs::write(old.join("Bubbles.lua"), "-- autre\n").unwrap();
+        fs::remove_file(old.join("Guide.lua")).unwrap();
+        let c = check(&wow, "_retail_");
+        assert!(!c.up_to_date() && c.differs == vec!["Guide.lua".to_string(), "Bubbles.lua".to_string()], "{c:?}");
+        assert!(!c.files_changed);
+        let toc_path = old.join(format!("{ADDON}.toc"));
+        let toc_text = fs::read_to_string(&toc_path).unwrap().replace("Bubbles.lua\n", "");
+        fs::write(&toc_path, toc_text).unwrap();
+        assert!(check(&wow, "_retail_").files_changed, "nouveau fichier : redémarrage du jeu");
+        // Fichier en lecture seule : rendu modifiable, puis remplacé.
+        let core = old.join("Core.lua");
+        let mut perm = fs::metadata(&core).unwrap().permissions();
+        perm.set_readonly(true);
+        fs::set_permissions(&core, perm).unwrap();
+        install(&wow, Some("_retail_"), Some(120105)).unwrap();
+        assert!(check(&wow, "_retail_").up_to_date());
+        assert!(check(&wow, "_retail_").describe().starts_with(env!("CARGO_PKG_VERSION")));
         fs::remove_dir_all(base).ok();
     }
 

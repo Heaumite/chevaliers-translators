@@ -944,6 +944,7 @@ impl Live {
                     tgt,
                     priority: if draft { Priority::Draft } else { Priority::Send },
                     group: draft.then_some(DRAFT_GROUP),
+                    game: 0,
                 };
                 let n = tr.engine.submit(ask);
                 tr.pending.insert(
@@ -1130,11 +1131,11 @@ impl Live {
                 // La ligne patiente le temps d'une traduction, puis s'affiche telle quelle : jamais
                 // de trou, et la traduction la remplace à son arrivée (0.14.8).
                 m.hold(msg, sender, until);
-                let job = tr.engine.submit(Ask { text: msg.to_string(), src: l, tgt: client, priority: Priority::Received, group: None });
+                let job = tr.engine.submit(Ask { text: msg.to_string(), src: l, tgt: client, priority: Priority::Received, group: None, game: 0 });
                 tr.pending.insert(job, Pending::Received { body: msg.to_string(), sender: sender.to_string(), src: l, late });
             }
             (Some(l), _) => {
-                let job = tr.engine.submit(Ask { text: msg.to_string(), src: l, tgt: client, priority: Priority::Received, group: None });
+                let job = tr.engine.submit(Ask { text: msg.to_string(), src: l, tgt: client, priority: Priority::Received, group: None, game: 0 });
                 tr.pending.insert(job, Pending::Received { body: msg.to_string(), sender: sender.to_string(), src: l, late });
             }
             (None, Some(m)) => m.settle(msg, now),
@@ -1212,7 +1213,7 @@ impl Live {
                         }
                         if e == "remplacé" {
                             // Brouillon écarté par un plus récent alors qu'un envoi l'attendait.
-                            let n = tr.engine.submit(Ask { text: text.clone(), src, tgt, priority: Priority::Send, group: None });
+                            let n = tr.engine.submit(Ask { text: text.clone(), src, tgt, priority: Priority::Send, group: None, game: 0 });
                             tr.pending.insert(n, Pending::Own { key, text, src, tgt, sends });
                         } else {
                             crate::say!("     traduction impossible ({e}) : le texte d'origine revient dans la boîte");

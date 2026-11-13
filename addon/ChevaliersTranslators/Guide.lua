@@ -1,6 +1,7 @@
 -- Chevaliers Translators
 -- Guide.lua : petit panneau « Guide d'installation » affiché une fois, à la première utilisation
--- de l'addon (et par /chevaliers guide), avec la bannière et le logo. Il dit où se trouve
+-- de l'addon et à chaque nouvelle révision de son texte (et par /chevaliers guide), avec la
+-- bannière et le logo. Il dit où se trouve
 -- l'application compagnon et comment la lancer. Fermeture par la croix ou au bout de 60 s.
 -- Le panneau n'est construit qu'au premier affichage (rien à la connexion tant qu'il n'est pas
 -- demandé). Appelé par Core.lua via CT.ShowGuide().
@@ -9,6 +10,8 @@ local _, CT = ...
 CT = CT or {}
 
 local MEDIA = "Interface\\AddOns\\ChevaliersTranslators\\Media\\"
+-- Révision du texte du guide : un guide changé s'affiche de nouveau une fois (0.15.1).
+CT.GUIDE_REV = 2
 local GUIDE_TEXT =
   "Bienvenue dans Chevaliers Translators !\n\n" ..
   "L'addon transmet le chat à l'application compagnon, qui le traduit sur ton PC (aucun serveur " ..
@@ -85,7 +88,7 @@ end
 
 -- Affiche le guide (et retient qu'il a été vu, pour ne plus l'ouvrir tout seul).
 function CT.ShowGuide()
-  if ChevaliersTranslatorsDB then ChevaliersTranslatorsDB.guideSeen = true end
+  if ChevaliersTranslatorsDB then ChevaliersTranslatorsDB.guideSeen = CT.GUIDE_REV end
   local ok, f = pcall(BuildGuide)
   if ok and f then f:Show() end
 end

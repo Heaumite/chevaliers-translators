@@ -133,7 +133,32 @@ mod app {
             use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
-        let Some(_instance) = single_instance() else {
+        let mut instance = single_instance();
+        // Une autre version tourne déjà (mise à jour lancée sans quitter l'ancienne, 0.15.1) : elle
+        // s'arrête, et celle-ci prend la suite (sinon l'ancienne continuait, addon compris).
+        if instance.is_none() {
+            if let Some(v) = tray_win::running_version().filter(|v| v != VERSION) {
+                ct::say!("version {v} déjà lancée : arrêt demandé, la {VERSION} prend la suite");
+                let wait_free = |tries: usize| -> Option<usize> {
+                    for _ in 0..tries {
+                        std::thread::sleep(Duration::from_millis(250));
+                        if let Some(h) = single_instance() {
+                            return Some(h);
+                        }
+                    }
+                    None
+                };
+                if tray_win::ask_running_to_make_way() {
+                    instance = wait_free(40);
+                }
+                // Version d'avant la 0.15.1 (demande d'arrêt inconnue) : arrêtée de force.
+                if instance.is_none() && tray_win::terminate_running() {
+                    ct::say!("ancienne version arrêtée de force");
+                    instance = wait_free(20);
+                }
+            }
+        }
+        let Some(_instance) = instance else {
             // Second lancement (raccourci du bureau, double-clic) : l'application déjà lancée
             // ouvre sa fenêtre des modèles (0.15).
             if tray_win::ask_running_to_open_models() {
@@ -418,46 +443,54 @@ mod app {
             ct::say!("World of Warcraft introuvable dans les dossiers habituels : l'addon sera posé à l'ouverture du jeu.");
             return roots;
         }
-        let open = capture_win::wow_game();
+        // Jeux ouverts (plusieurs possibles, 0.15) : une version du jeu ouverte qui reçoit une
+        // mise à jour est annoncée sur l'écran.
+        let open: Vec<(PathBuf, String)> = capture_win::wow_windows().into_iter().filter_map(capture_win::game_of).collect();
         for root in &roots {
             ct::say!("World of Warcraft : {}", root.display());
-            let before = install::status(root);
-            if before.iter().all(|(_, v)| v.as_deref() == Some(VERSION)) {
-                ct::say!("  addon {VERSION} déjà en place dans toutes les versions");
+            // 0.15.1 : comparaison fichier par fichier, pas seulement du numéro de version.
+            let before: Vec<(String, install::Check)> = install::flavor_dirs(root).into_iter().map(|f| {
+                let c = install::check(root, &f);
+                (f, c)
+            }).collect();
+            if before.iter().all(|(_, c)| c.up_to_date()) {
+                ct::say!("  addon {VERSION} déjà en place, fichier par fichier, dans toutes les versions");
                 continue;
+            }
+            for (f, c) in before.iter().filter(|(_, c)| !c.up_to_date()) {
+                ct::say!("  {f} : {} -> à remplacer", c.describe());
             }
             if let Err(e) = install::install(root, None, None) {
                 ct::say!("  installation : {e}");
                 tray.notify("Addon non mis à jour", &format!("{} : {e}", root.display()), true);
-                continue;
             }
-            // Vérification : chaque version du jeu doit désormais porter la nouvelle version de
-            // l'addon, pour qu'une ancienne ne se charge pas à sa place.
-            for (f, v) in install::status(root) {
-                let was = before.iter().find(|(x, _)| *x == f).and_then(|(_, v)| v.clone());
-                if v.as_deref() == Some(VERSION) {
-                    if was.as_deref() != Some(VERSION) {
-                        ct::say!("  {f} : {} -> {VERSION}", was.as_deref().unwrap_or("absent"));
+            // Vérification : chaque version du jeu doit porter exactement les fichiers de cette
+            // version de l'addon, pour qu'une ancienne ne se charge pas à sa place.
+            for (f, was) in &before {
+                let now = install::check(root, f);
+                if now.up_to_date() {
+                    if !was.up_to_date() {
+                        ct::say!("  {f} : {} -> {VERSION}, vérifié", was.describe());
                     }
                 } else {
-                    ct::say!("  {f} : ATTENTION, encore {} après la mise à jour", v.as_deref().unwrap_or("absent"));
+                    ct::say!("  {f} : ATTENTION, encore {} après la mise à jour", now.describe());
                     tray.notify(
                         "Addon à vérifier",
-                        &format!("WoW {} : l'addon est resté en {}. Ferme le jeu, puis relance l'application.", flavor_label(&f), v.as_deref().unwrap_or("absent")),
+                        &format!("WoW {} : l'addon n'a pas pu être remplacé ({}). Ferme le jeu, puis relance l'application.", flavor_label(f), now.describe()),
                         true,
                     );
                 }
             }
-            // Jeu déjà ouvert : sa version du jeu vient-elle d'être mise à jour (ou installée) ?
-            // Un seul message, une fois la mise à jour faite : tant que le joueur ne recharge pas,
-            // c'est l'ancien addon qui tourne.
-            if let Some((r, f)) = &open {
-                if same_path(r, root) {
-                    let was = before.iter().find(|(x, _)| x == f).and_then(|(_, v)| v.clone());
-                    let now_ok = install::addon_version(root, f).as_deref() == Some(VERSION);
-                    if was.as_deref() != Some(VERSION) && now_ok {
-                        announce(tray, f, was.is_some());
-                    }
+            // Jeu déjà ouvert dans une version qui vient d'être mise à jour : un seul message, une
+            // fois la mise à jour vérifiée. /reload suffit si la liste des fichiers n'a pas changé ;
+            // sinon il faut redémarrer le jeu (il ne relit la liste qu'à son démarrage).
+            for (r, f) in &open {
+                if !same_path(r, root) {
+                    continue;
+                }
+                let Some((_, was)) = before.iter().find(|(x, _)| x == f) else { continue };
+                if !was.up_to_date() && install::check(root, f).up_to_date() {
+                    announce(tray, f, was.version.is_some(), was.files_changed);
                 }
             }
         }
@@ -465,17 +498,18 @@ mod app {
     }
 
     /// Jeu ouvert : addon présent et à jour dans sa version (dossier de WoW inhabituel, version du
-    /// jeu ajoutée depuis le démarrage).
+    /// jeu ajoutée depuis le démarrage), vérifié fichier par fichier.
     fn ensure_addon(tray: &Tray, root: &Path, flavor: &str) {
-        let before = install::addon_version(root, flavor);
-        if before.as_deref() == Some(VERSION) {
+        let before = install::check(root, flavor);
+        if before.up_to_date() {
             return;
         }
+        ct::say!("  {flavor} : {} -> à remplacer", before.describe());
         match install::install(root, Some(flavor), None) {
             Ok(()) => {
                 // Vérification : la nouvelle version doit bien être en place avant d'inviter au /reload.
-                if install::addon_version(root, flavor).as_deref() == Some(VERSION) {
-                    announce(tray, flavor, before.is_some());
+                if install::check(root, flavor).up_to_date() {
+                    announce(tray, flavor, before.version.is_some(), before.files_changed);
                 } else {
                     tray.notify(
                         "Addon à vérifier",
@@ -492,12 +526,20 @@ mod app {
         }
     }
 
-    fn announce(tray: &Tray, flavor: &str, update: bool) {
+    /// `files_changed` : de nouveaux fichiers d'addon (ou une liste changée) ; WoW ne les charge
+    /// qu'à son redémarrage, /reload ne suffit pas (0.15.1).
+    fn announce(tray: &Tray, flavor: &str, update: bool, files_changed: bool) {
         let label = flavor_label(flavor);
-        if update {
+        if update && !files_changed {
             // Fichiers Lua relus à chaque connexion : /reload seulement si un personnage est
             // déjà connecté. Sans /reload, l'ancienne version de l'addon reste chargée.
             tray.notify("Addon mis à jour", &format!("WoW {label} : addon en version {VERSION}. Si tu es déjà en jeu, tape /reload pour charger la nouvelle version ; sinon rien à faire."), false);
+        } else if update {
+            tray.notify(
+                "Addon mis à jour : redémarre WoW",
+                &format!("WoW {label} : addon en version {VERSION}, avec de nouveaux fichiers. Quitte complètement le jeu et relance-le : /reload ne charge pas les nouveaux fichiers."),
+                true,
+            );
         } else {
             tray.notify("Addon installé", &format!("WoW {label} : redémarre le jeu pour charger l'addon Chevaliers Translators."), false);
         }

@@ -52,6 +52,9 @@ pub struct Ask {
     pub priority: Priority,
     /// Brouillons d'une même saisie : un brouillon plus récent remplace les anciens en attente.
     pub group: Option<u64>,
+    /// Jeu qui la demande (0.15.1, plusieurs fenêtres de WoW ; 0 : un seul jeu). À priorité
+    /// égale, les demandes de la fenêtre de WoW active passent devant (`set_focus`).
+    pub game: usize,
 }
 
 /// Une traduction à faire.
@@ -140,6 +143,23 @@ pub fn set_context_of(game: usize, c: u8) {
         }
     }
     IN_WORLD.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Fenêtre de WoW active (0.15.1) : ses demandes passent devant celles des autres jeux, à
+/// priorité égale (envoi, brouillon, message reçu). 0 : aucune (WoW pas au premier plan).
+static FOCUS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn set_focus(game: usize) {
+    FOCUS.store(game, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn focus() -> usize {
+    FOCUS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Rang d'une demande dans la file : priorité, puis fenêtre active d'abord, puis ancienneté.
+fn rank(j: &Job, focus: usize) -> (Priority, bool, Instant) {
+    (j.ask.priority, focus != 0 && j.ask.game != focus, j.queued)
 }
 
 /// Jeu fermé : son contexte ne compte plus.
@@ -362,8 +382,13 @@ pub fn sentences(text: &str) -> Vec<String> {
 /// les messages reçus par vague (tous les emplacements libres d'un coup), une vague au plus toutes
 /// les `gap` secondes.
 pub fn pick(queue: &VecDeque<Job>, free: usize, wave_ok: bool) -> Vec<usize> {
+    pick_for(queue, free, wave_ok, focus())
+}
+
+/// Comme `pick`, la fenêtre active donnée.
+pub fn pick_for(queue: &VecDeque<Job>, free: usize, wave_ok: bool, focus: usize) -> Vec<usize> {
     let mut idx: Vec<usize> = (0..queue.len()).collect();
-    idx.sort_by_key(|&i| (queue[i].ask.priority, queue[i].queued));
+    idx.sort_by_key(|&i| rank(&queue[i], focus));
     let mut out = Vec::new();
     for i in idx {
         if out.len() >= free {
@@ -401,7 +426,8 @@ pub fn overdue(
         base = base.max(now + expected / 2);
     }
     let mut order: Vec<usize> = (0..queue.len()).filter(|&i| queue[i].ask.priority == Priority::Received).collect();
-    order.sort_by_key(|&i| queue[i].queued);
+    let f = focus();
+    order.sort_by_key(|&i| rank(&queue[i], f));
     let mut ahead = 0usize;
     let mut out = Vec::new();
     for i in order {
@@ -999,7 +1025,8 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
         for k in sorted {
             chosen.push(queue.remove(k).unwrap());
         }
-        chosen.sort_by_key(|j| (j.ask.priority, j.queued));
+        let f = focus();
+        chosen.sort_by_key(|j| rank(j, f));
         if chosen.iter().any(|j| j.ask.priority == Priority::Received) {
             next_wave = now + Duration::from_secs_f64(r.gap);
         }
@@ -1038,7 +1065,7 @@ mod tests {
     fn job(id: u64, priority: Priority, age_ms: u64) -> Job {
         Job {
             id,
-            ask: Ask { text: format!("m{id}"), src: "de", tgt: "fr", priority, group: None },
+            ask: Ask { text: format!("m{id}"), src: "de", tgt: "fr", priority, group: None, game: 0 },
             queued: Instant::now() - Duration::from_millis(age_ms),
         }
     }
@@ -1079,11 +1106,26 @@ mod tests {
         .into_iter()
         .collect();
         // Vague permise, 4 emplacements libres : envoi, brouillon, puis les deux plus anciens reçus.
-        assert_eq!(pick(&q, 4, true), vec![3, 2, 0, 1]);
+        assert_eq!(pick_for(&q, 4, true, 0), vec![3, 2, 0, 1]);
         // Hors vague : seulement les demandes du joueur.
-        assert_eq!(pick(&q, 4, false), vec![3, 2]);
-        assert_eq!(pick(&q, 1, true), vec![3]);
-        assert!(pick(&q, 0, true).is_empty());
+        assert_eq!(pick_for(&q, 4, false, 0), vec![3, 2]);
+        assert_eq!(pick_for(&q, 1, true, 0), vec![3]);
+        assert!(pick_for(&q, 0, true, 0).is_empty());
+        // Plusieurs WoW (0.15.1) : à priorité égale, la fenêtre active passe devant, même avec des
+        // messages plus récents ; sans fenêtre active, l'ancienneté seule compte.
+        let in_game = |id, p, age, game| Job { ask: Ask { game, ..job(id, p, age).ask }, ..job(id, p, age) };
+        let q: VecDeque<Job> = [
+            in_game(1, Priority::Received, 900, 1),
+            in_game(2, Priority::Received, 800, 1),
+            in_game(3, Priority::Received, 100, 2),
+            in_game(4, Priority::Send, 50, 1),
+            in_game(5, Priority::Send, 20, 2),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(pick_for(&q, 5, true, 2), vec![4, 3, 2, 0, 1]);
+        assert_eq!(pick_for(&q, 3, true, 1), vec![3, 4, 0]);
+        assert_eq!(pick_for(&q, 5, true, 0), vec![3, 4, 0, 1, 2]);
         // Un message reçu qui ne serait pas prêt avant 60 s n'est pas lancé.
         let expected = Duration::from_millis(1500);
         assert!(!too_late(&q[0], Instant::now(), expected));
@@ -1135,6 +1177,7 @@ mod tests {
                     tgt: "fr",
                     priority: Priority::Received,
                     group: None,
+                    game: 0,
                 },
                 queued: Instant::now(),
             },

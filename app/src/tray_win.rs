@@ -36,6 +36,9 @@ const WM_TRAY: u32 = WM_APP + 1;
 /// Envoyé par un second lancement de l'application (raccourci du bureau, double-clic) : la
 /// fenêtre des modèles s'ouvre (0.15).
 const WM_OPEN_MODELS: u32 = WM_APP + 2;
+/// Envoyé par une autre version de l'application lancée par le joueur (mise à jour, 0.15.1) :
+/// celle-ci s'arrête pour lui laisser la place.
+const WM_MAKE_WAY: u32 = WM_APP + 3;
 /// Classe de la fenêtre cachée de l'icône (retrouvée par un second lancement).
 const CLASS: &str = "ChevaliersTranslatorsIcone";
 /// Numéro du groupe d'icônes de l'exécutable (build.rs).
@@ -107,7 +110,8 @@ impl Tray {
             if RegisterClassExW(&wc) == 0 && GetLastError() != 1410 {
                 return Err("RegisterClassExW a échoué (icône)".into());
             }
-            let title = wide(TITLE);
+            // Titre avec la version : une autre version lancée ensuite la lit (mise à jour).
+            let title = wide(&format!("{TITLE} {}", env!("CARGO_PKG_VERSION")));
             // Fenêtre jamais montrée (pas de fenêtre « message seulement » : le menu de l'icône
             // ne se refermerait pas d'un clic ailleurs).
             let hwnd = CreateWindowExW(
@@ -305,6 +309,61 @@ pub fn ask_running_to_open_models() -> bool {
     }
 }
 
+/// Version de l'application déjà lancée (titre de sa fenêtre cachée), s'il y en a une.
+pub fn running_version() -> Option<String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowTextW};
+    let class = wide(CLASS);
+    unsafe {
+        let h = FindWindowW(class.as_ptr(), null());
+        if h.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 128];
+        let n = GetWindowTextW(h, buf.as_mut_ptr(), buf.len() as i32);
+        let t = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+        // Avant la 0.15.1, le titre ne portait pas la version : « inconnue ».
+        Some(t.strip_prefix(TITLE).map(str::trim).filter(|v| !v.is_empty()).unwrap_or("inconnue").to_string())
+    }
+}
+
+/// Arrête de force l'application déjà lancée (une version d'avant la 0.15.1, qui ne connaît pas la
+/// demande d'arrêt) ; son serveur de traduction s'arrête avec elle (objet de tâche).
+pub fn terminate_running() -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
+    let class = wide(CLASS);
+    unsafe {
+        let h = FindWindowW(class.as_ptr(), null());
+        if h.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, &mut pid);
+        if pid == 0 || pid == std::process::id() {
+            return false;
+        }
+        let p = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if p.is_null() {
+            return false;
+        }
+        let ok = TerminateProcess(p, 0) != 0;
+        CloseHandle(p);
+        ok
+    }
+}
+
+/// Demande à l'application déjà lancée (une autre version) de s'arrêter. Faux si elle n'a pas été
+/// trouvée.
+pub fn ask_running_to_make_way() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
+    let class = wide(CLASS);
+    unsafe {
+        let h = FindWindowW(class.as_ptr(), null());
+        !h.is_null() && PostMessageW(h, WM_MAKE_WAY, 0, 0) != 0
+    }
+}
+
 /// Fenêtre visible d'un processus, mise au premier plan (restaurée si réduite).
 fn bring_process_to_front(pid: u32) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -449,6 +508,12 @@ fn show_menu(hwnd: HWND) {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_OPEN_MODELS {
         open_interface();
+        return 0;
+    }
+    if msg == WM_MAKE_WAY {
+        // Une autre version a été lancée : on s'arrête sans confirmation, elle prend la suite.
+        crate::say!("[icône] une autre version de l'application a été lancée : arrêt pour lui laisser la place");
+        QUIT.store(true, Ordering::Relaxed);
         return 0;
     }
     if msg == WM_TRAY {

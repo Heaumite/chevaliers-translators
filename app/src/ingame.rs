@@ -210,9 +210,7 @@ pub fn run(dir: std::path::PathBuf, out: std::path::PathBuf) -> Result<bool, Str
         };
         let mut last_seq: Option<u16> = None;
         loop {
-            let (w, h) = (cap.w, cap.h);
-            if let Ok(buf) = cap.grab() {
-                let img = crate::decode::Image { w, h, stride: w * 4, bgra: buf };
+            if let Ok(img) = cap.grab() {
                 if let Ok(d) = crate::decode::decode(&img) {
                     if d.frame.ftype == crate::proto::FRAME_CMD && last_seq != Some(d.frame.seq) {
                         last_seq = Some(d.frame.seq);

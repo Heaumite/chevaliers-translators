@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.15.0)
+# Chevaliers Translators (v0.15.1)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -103,6 +103,30 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.15.1 (13/11/2026)
+
+- **Correctif majeur** : en 0.15.0, la capture du bandeau s'arrêtait dès qu'elle se resserrait
+  sur lui (image plus petite que la taille lue avant la capture : lecture hors de l'image). Plus
+  rien n'était lu : chat caché mais pas redessiné, bulles non traduites, bandeau de nouveau
+  visible. La taille de l'image est maintenant prise avec l'image elle-même, et une erreur
+  interne de la capture ne la laisse plus mourir en silence : elle est relancée 5 s plus tard.
+- **Bouton « Envoyer »** à droite du bouton Trad : traduit le texte de la boîte de saisie et
+  l'envoie. Son infobulle rappelle que Maj+clic sur Trad et Maj+Entrée font la même chose.
+- **Une fenêtre de WoW = une traduction liée** : trois WoW ouverts sont les jeux 1, 2 et 3 (le
+  plus petit numéro libre, repris par un WoW rouvert) ; chacun a sa capture, son chat, ses bulles
+  et ses envois. Toutes les demandes passent par le même modèle, **la fenêtre active d'abord** (à
+  priorité égale : envoi, brouillon, message reçu). Un WoW caché derrière un autre est lu dans sa
+  propre fenêtre (image demandée à Windows), sa traduction continue ; si Windows ne donne pas
+  cette image, le journal le dit et elle reprend dès que la fenêtre est visible.
+- **Mises à jour vérifiées fichier par fichier** : l'application compare chaque fichier de
+  l'addon posé à ceux qu'elle contient (pas seulement le numéro de version), les réécrit tous (un
+  fichier en lecture seule est rendu modifiable), relit le résultat et dit dans le journal quels
+  fichiers ont été remplacés. Si la mise à jour ajoute des fichiers à l'addon, la bulle demande de
+  **redémarrer WoW** (/reload ne charge pas un nouveau fichier). Une version de l'application déjà
+  lancée est arrêtée par la nouvelle, qui prend la suite (avant : l'ancienne continuait).
+- **Guide d'installation** : réaffiché une fois quand son texte change (il avait déjà été vu, il ne
+  se rouvrait pas) ; toujours `/chevaliers guide`.
 
 ## 0.15.0 (13/11/2026)
 
@@ -377,15 +401,17 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.15.0.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.15.1.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.15.0)
+## Vérifié avant livraison (0.15.1)
 
-- 123 tests Rust sous Linux : dont, en 0.15, la trame des bulles (aller-retour), la bulle traduite
+- 123 tests Rust sous Linux : dont, en 0.15.1, l'ordre de la file avec la fenêtre active d'abord,
+  chaque demande marquée de son jeu, la mise à jour vue et refaite fichier par fichier (même numéro
+  de version, fichier absent, .toc changé) ; en 0.15, la trame des bulles (aller-retour), la bulle traduite
   qui recouvre le texte d'origine, suit son déplacement, s'efface sous une autre fenêtre et
   disparaît sans nouvelles de l'addon ; le moteur partagé entre deux jeux (chacun reçoit ses
   traductions, un jeu fermé n'en reçoit plus) ; la zone de capture resserrée qui lit le même
@@ -413,7 +439,8 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   attente ajustée au temps de traduction, et mise à jour vérifiée dans chaque version (0.14.8) ;
   bulle de dialogue retrouvée par son message (couleurs, repères de raid ignorés), trame des
   bulles décodée par l'application, bulle protégée ignorée, bulle sous une fenêtre du jeu non
-  traduite, `/chevaliers bulles off` qui envoie une liste vide (0.15) ;
+  traduite, `/chevaliers bulles off` qui envoie une liste vide (0.15) ; bouton Envoyer, son infobulle
+  et l'envoi traduit qu'il déclenche (0.15.1) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
@@ -423,7 +450,7 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
 
-## Test de la 0.15.0 (PowerShell)
+## Test de la 0.15.1 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
@@ -433,9 +460,11 @@ Voir la réponse de livraison pour les commandes à copier-coller. Points à vé
 | Second lancement | double-clic sur le raccourci : la fenêtre des modèles revient devant, pas de second médaillon |
 | Bandeau caché | en jeu, plus de blocs colorés en bas à droite ; journal : `[bandeau] caché aux yeux du joueur` ; la traduction continue |
 | Bulles | en ville, un joueur qui `/dit` dans une autre langue : la bulle porte `[XX] traduction` et la suit ; `/chevaliers bulles off` : bulles d'origine |
-| Deux WoW | deux fenêtres visibles côte à côte : journal `[WoW 1 …]` et `[WoW 2 …]`, chat traduit dans chacune, un seul `llama-server` |
+| Plusieurs WoW | trois WoW : journal `[WoW 1 …]`, `[WoW 2 …]`, `[WoW 3 …]`, un seul `llama-server` ; « fenêtre active : ses traductions passent en premier » ; WoW caché derrière un autre : « son bandeau est lu dans la fenêtre elle-même » |
+| Bouton Envoyer | à droite de Trad ; infobulle « Traduire et envoyer » ; écrire un message puis clic : envoyé traduit |
+| Mise à jour | journal : `_forever_ : 0.15.0 … -> à remplacer`, puis `-> 0.15.1, vérifié` |
 | Cache 8 bits | `traduction-serveur.log` : `-ctk q8_0` accepté ; sinon, journal « cache 8 bits refusé … relance » et traduction normale |
-| Installation | journal : addon 0.15.0 posé et vérifié dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
+| Installation | journal : addon 0.15.1 posé et vérifié dans chaque version ; `[écran]` : écrans branchés, télévision reconnue |
 | Téléchargements | infobulle de l'icône : pourcentage ; WoW ouvert : « débit bridé » ; à la fin : bulle « Modèles de traduction prêts » |
 | Télévision | WoW sur la télé : « Écran de télévision » à la connexion ; chat traduit sur plaque sombre ; `/chevaliers tele off` le cache comme sur un écran de PC |
 | Combat | rien de dessiné pendant le combat ; à la fin, chat traduit et bilan |

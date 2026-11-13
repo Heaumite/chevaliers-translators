@@ -29,7 +29,7 @@ use windows_sys::Win32::Foundation::HWND;
 
 use crate::bandeau::{cover_canvas, cover_strip, CoverStrip};
 use crate::capture_win::{self, Capturer};
-use crate::decode::{Decoded, Image};
+use crate::decode::Decoded;
 use crate::hub::Hub;
 use crate::live::{FontSource, Live, ALIVE_TIMEOUT};
 use crate::mirror;
@@ -64,11 +64,34 @@ enum Cap {
     Dims(i32, i32, usize, usize),
     Frame(Result<Decoded, DecodeError>),
     Cover(CoverStrip),
+    /// Ligne pour le journal (préfixée du numéro du jeu).
+    Note(String),
     Fail(String),
 }
 
+/// Capture rapide d'une fenêtre cachée par une autre (image demandée à Windows, plus coûteuse) :
+/// le bandeau garde chaque trame au moins 50 ms.
+const HIDDEN_POLL_MS: u64 = 25;
+
 fn spawn_capture(game: usize, hwnd: isize, width: usize, height: usize, poll_ms: u64, tx: Sender<(usize, Cap)>, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+        // Une erreur interne du fil de capture ne le laisse plus mourir en silence (0.15.1 : le
+        // jeu restait sans traduction) : elle remonte comme un échec, et la capture est relancée.
+        let tx2 = tx.clone();
+        let run = std::panic::AssertUnwindSafe(move || capture_loop(game, hwnd, width, height, poll_ms, tx, stop));
+        if let Err(p) = std::panic::catch_unwind(run) {
+            let why = p
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "erreur inconnue".into());
+            let _ = tx2.send((game, Cap::Fail(format!("erreur interne de la capture : {why}"))));
+        }
+    });
+}
+
+fn capture_loop(game: usize, hwnd: isize, width: usize, height: usize, poll_ms: u64, tx: Sender<(usize, Cap)>, stop: Arc<AtomicBool>) {
+    {
         let target = hwnd as HWND;
         let mut cap = match Capturer::new_for(width, height, target) {
             Ok(c) => {
@@ -88,19 +111,25 @@ fn spawn_capture(game: usize, hwnd: isize, width: usize, height: usize, poll_ms:
         let mut cover_at = Instant::now() - Duration::from_secs(1);
         let mut last_cover: Vec<[u8; 3]> = Vec::new();
         let mut cover_sent = Instant::now() - Duration::from_secs(1);
+        // Fenêtre cachée par une autre (plusieurs WoW, 0.15.1) : bandeau lu dans la fenêtre même.
+        let mut hidden_since: Option<Instant> = None;
+        let (mut said_ok, mut said_ko) = (false, false);
         while !stop.load(Ordering::Relaxed) {
             let fast = changed.elapsed() < FAST_FOR;
-            std::thread::sleep(Duration::from_millis(if fast { poll_ms.max(1) } else { IDLE_POLL_MS.max(poll_ms) }));
+            let wait = match (fast, cap.via_window) {
+                (true, true) => HIDDEN_POLL_MS.max(poll_ms),
+                (true, false) => poll_ms.max(1),
+                (false, _) => IDLE_POLL_MS.max(poll_ms),
+            };
+            std::thread::sleep(Duration::from_millis(wait));
             if hwnd != 0 && !cap.target_alive() {
                 let _ = tx.send((game, Cap::Fail("fenêtre de WoW fermée".into())));
                 return;
             }
             let now = Instant::now();
             let want_cover = now.saturating_duration_since(cover_at) >= COVER_EVERY;
-            let (w, h) = (cap.w, cap.h);
             let (r, strip) = match cap.grab() {
-                Ok(buf) => {
-                    let img = Image { w, h, stride: w * 4, bgra: buf };
+                Ok(img) => {
                     let r = crate::decode::decode(&img);
                     let strip = match (&r, want_cover) {
                         (Ok(d), true) => cover_strip(&img, &d.geometry),
@@ -113,6 +142,18 @@ fn spawn_capture(game: usize, hwnd: isize, width: usize, height: usize, poll_ms:
                     return;
                 }
             };
+            if cap.via_window {
+                let since = *hidden_since.get_or_insert(now);
+                if r.is_ok() && !said_ok {
+                    said_ok = true;
+                    let _ = tx.send((game, Cap::Note("fenêtre cachée par une autre : son bandeau est lu dans la fenêtre elle-même, la traduction continue".into())));
+                } else if r.is_err() && !said_ok && !said_ko && now.saturating_duration_since(since) > Duration::from_secs(3) {
+                    said_ko = true;
+                    let _ = tx.send((game, Cap::Note("fenêtre cachée par une autre : Windows ne donne pas l'image de son bandeau ; sa traduction reprend dès qu'elle est visible".into())));
+                }
+            } else {
+                hidden_since = None;
+            }
             match &r {
                 Ok(d) => {
                     ok_at = Some(now);
@@ -151,7 +192,7 @@ fn spawn_capture(game: usize, hwnd: isize, width: usize, height: usize, poll_ms:
                 }
             }
         }
-    });
+    }
 }
 
 /// Panneaux posés sur le jeu.
@@ -162,7 +203,10 @@ const DOWNLOADS: u8 = 248;
 const COVER: u8 = 252;
 
 struct Session {
+    /// Numéro du jeu (1, 2, 3... : le plus petit libre ; le journal et la file de traduction).
     game: usize,
+    /// Numéro de sa capture (jamais réutilisé : une capture arrêtée ne parle pas pour la suivante).
+    token: usize,
     spec: GameSpec,
     stop: Arc<AtomicBool>,
     live: Live,
@@ -571,7 +615,8 @@ pub fn run_games(
     }
     let hub: Option<Rc<RefCell<Hub>>> = hub;
     let mut sessions: Vec<Session> = Vec::new();
-    let mut next_game = 1usize;
+    let mut next_token = 1usize;
+    let mut focus_seen = 0usize;
     let mut retry: HashMap<isize, Instant> = HashMap::new();
     let mut looked = Instant::now() - Duration::from_secs(10);
     let mut fonts: Option<crate::panel::Fonts> = None;
@@ -584,27 +629,35 @@ pub fn run_games(
         if now.saturating_duration_since(looked) >= Duration::from_secs(1) {
             looked = now;
             let wanted = games();
-            // Fermés : session finie (fenêtres du miroir retirées, capture arrêtée).
-            let before = sessions.len();
-            sessions.retain(|s| wanted.iter().any(|w| w.hwnd == s.spec.hwnd));
-            if sessions.len() != before {
-                if let Some(h) = &hub {
-                    let alive: Vec<usize> = sessions.iter().map(|s| s.game).collect();
-                    let gone: Vec<usize> = (1..next_game).filter(|g| !alive.contains(g)).collect();
-                    for g in gone {
-                        h.borrow_mut().leave(g);
-                    }
+            // Fermés : session finie (fenêtres du miroir retirées, capture arrêtée, traductions en
+            // cours oubliées). Une fenêtre de WoW = une session de traduction liée à elle.
+            let mut closed: Vec<usize> = Vec::new();
+            sessions.retain(|s| {
+                let keep = wanted.iter().any(|w| w.hwnd == s.spec.hwnd);
+                if !keep {
+                    closed.push(s.game);
                 }
+                keep
+            });
+            for g in &closed {
+                crate::say!("[WoW {g}] fenêtre fermée : sa traduction s'arrête");
+                if let Some(h) = &hub {
+                    h.borrow_mut().leave(*g);
+                }
+            }
+            if !closed.is_empty() {
                 crate::say!("{} jeu(x) traduit(s)", sessions.len());
             }
             for spec in wanted {
                 if sessions.iter().any(|s| s.spec.hwnd == spec.hwnd) || retry.get(&spec.hwnd).is_some_and(|t| now < *t) {
                     continue;
                 }
-                let game = next_game;
-                next_game += 1;
+                // Numéro du jeu : le plus petit libre (trois WoW ouverts : 1, 2 et 3).
+                let game = (1..).find(|g| !sessions.iter().any(|s| s.game == *g)).unwrap_or(1);
+                let token = next_token;
+                next_token += 1;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_capture(game, spec.hwnd, width, height, poll_ms, tx.clone(), stop.clone());
+                spawn_capture(token, spec.hwnd, width, height, poll_ms, tx.clone(), stop.clone());
                 let mut live = Live::new(spec.addons.clone());
                 live.game = game;
                 live.enable_mirror(spec.fonts.clone(), demo, opts);
@@ -630,6 +683,7 @@ pub fn run_games(
                 );
                 sessions.push(Session {
                     game,
+                    token,
                     spec,
                     stop,
                     live,
@@ -669,8 +723,9 @@ pub fn run_games(
         let many = sessions.len() > 1;
         let mut failed: Vec<(usize, String)> = Vec::new();
         let mut fresh: Vec<usize> = Vec::new();
-        for (game, msg) in got {
-            let Some(s) = sessions.iter_mut().find(|s| s.game == game) else { continue };
+        for (token, msg) in got {
+            let Some(s) = sessions.iter_mut().find(|s| s.token == token) else { continue };
+            let game = s.game;
             crate::set_journal_prefix(&tag(s, many));
             match msg {
                 Cap::Dims(sw, sh, cw, ch) => {
@@ -686,16 +741,18 @@ pub fn run_games(
                     fresh.push(game);
                 }
                 Cap::Cover(strip) => s.cover.strip = Some((strip, now)),
-                Cap::Fail(e) => failed.push((game, e)),
+                Cap::Note(t) => crate::say!("{t}"),
+                Cap::Fail(e) => failed.push((token, e)),
             }
         }
         crate::set_journal_prefix("");
-        for (game, e) in failed {
-            if let Some(i) = sessions.iter().position(|s| s.game == game) {
+        for (token, e) in failed {
+            if let Some(i) = sessions.iter().position(|s| s.token == token) {
                 if strict {
                     return Err(e);
                 }
                 let s = sessions.remove(i);
+                let game = s.game;
                 crate::say!("[WoW {game}] capture arrêtée : {e} ; nouvel essai dans 5 s");
                 retry.insert(s.spec.hwnd, now + Duration::from_secs(5));
                 if let Some(h) = &hub {
@@ -712,6 +769,9 @@ pub fn run_games(
             let s = sessions.remove(i);
             crate::say!("[WoW {}] capture du bandeau bloquée au démarrage ; nouvel essai dans 5 s", s.game);
             retry.insert(s.spec.hwnd, now + Duration::from_secs(5));
+            if let Some(h) = &hub {
+                h.borrow_mut().leave(s.game);
+            }
         }
         for s in sessions.iter_mut() {
             if !fresh.contains(&s.game) {
@@ -737,6 +797,15 @@ pub fn run_games(
                         presence_error = true;
                     }
                 }
+            }
+        }
+        // Fenêtre de WoW active : ses traductions passent devant celles des autres jeux.
+        let focus = sessions.iter().find(|s| s.in_front()).map_or(0, |s| s.game);
+        crate::engine::set_focus(focus);
+        if focus != focus_seen {
+            focus_seen = focus;
+            if focus != 0 && sessions.len() > 1 {
+                crate::say!("[WoW {focus}] fenêtre active : ses traductions passent en premier");
             }
         }
         let many = sessions.len() > 1;
