@@ -5,6 +5,8 @@
 -- lien du dépôt GitHub d'où viennent les mises à jour automatiques. WoW ne peut ni lire une vidéo
 -- ni ouvrir un lien : chaque lien est dans un cadre où il se sélectionne d'un clic, Ctrl+C le
 -- copie, il se colle dans le navigateur. Addons incompatibles chargés : signalés en rouge.
+-- 0.16.4 : bouton « Regarder la vidéo » : l'application ouvre sa fenêtre sur le lecteur de la
+-- vidéo (lancée seulement au clic sur Lire).
 -- Fermeture par la croix, ou au bout de 60 s si aucun lien n'a été touché.
 -- Le panneau n'est construit qu'au premier affichage. Appelé par Core.lua via CT.ShowGuide().
 
@@ -20,11 +22,11 @@ CT.GUIDE_REPO = "https://github.com/Heaumite/chevaliers-translators"
 local GOLD = { 0.902, 0.78, 0.494 }
 
 -- Cadre d'un lien : texte sélectionné d'un clic, prêt pour Ctrl+C ; le lien ne se modifie pas.
-local function LinkBox(f, url, y)
+local function LinkBox(f, url, y, width)
   local ok, eb = pcall(CreateFrame, "EditBox", nil, f, "InputBoxTemplate")
   if not ok or not eb then eb = CreateFrame("EditBox", nil, f) end
   pcall(eb.SetAutoFocus, eb, false)
-  eb:SetSize(446, 24)
+  eb:SetSize(width or 446, 24)
   eb:SetPoint("TOPLEFT", f, "TOPLEFT", 30, y)
   pcall(eb.SetFontObject, eb, ChatFontNormal or GameFontHighlight)
   eb:SetText(url)
@@ -105,9 +107,25 @@ local function BuildGuide()
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
   -- Guide d'installation en vidéo.
   Label(f, "GameFontNormalLarge", "Guide d'installation :", -140, GOLD)
-  f.video = LinkBox(f, CT.GUIDE_VIDEO, -164)
+  f.video = LinkBox(f, CT.GUIDE_VIDEO, -164, 290)
+  -- WoW ne lit pas de vidéo : l'application l'ouvre dans sa fenêtre (lecteur lancé au clic).
+  local okB, watch = pcall(CreateFrame, "Button", nil, f, "UIPanelButtonTemplate")
+  if not okB or not watch then watch = CreateFrame("Button", nil, f) end
+  watch:SetSize(150, 24)
+  watch:SetPoint("TOPLEFT", f, "TOPLEFT", 330, -164)
+  watch:SetText("Regarder la vidéo")
+  watch:SetScript("OnClick", function()
+    f.hideAt = nil
+    if CT.SendCommand and (CT.liveSeen or (CT.Mirror and CT.Mirror.mode ~= "off")) then
+      CT.SendCommand("video")
+      CT.Print("Vidéo du guide : elle s'ouvre dans la fenêtre de l'application (clique sur Lire la vidéo).")
+    else
+      CT.Print("Vidéo du guide : lance l'application Chevaliers Translators pour la regarder dans sa fenêtre, ou copie le lien (clic dans le cadre, Ctrl+C) dans ton navigateur.")
+    end
+  end)
+  f.watch = watch
   Label(f, "GameFontDisableSmall",
-    "Vidéo YouTube : clique dans le cadre, Ctrl+C pour copier le lien, puis colle-le dans ton navigateur.", -192)
+    "Le bouton ouvre la vidéo dans la fenêtre de l'application. Ou : clic dans le cadre, Ctrl+C, puis colle le lien dans ton navigateur.", -192)
   -- Mises à jour.
   Label(f, "GameFontHighlight", "Les mises à jour se font automatiquement depuis :", -222)
   f.repo = LinkBox(f, CT.GUIDE_REPO, -244)

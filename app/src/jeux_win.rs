@@ -204,6 +204,8 @@ const DIGEST: u8 = 250;
 const PROPOSAL: u8 = 249;
 const DOWNLOADS: u8 = 248;
 const COVER: u8 = 252;
+/// Panneau « langue de l'envoi traduit » après un clic sur un acronyme (0.16.4).
+const LANG_TOAST: u8 = 247;
 
 struct Session {
     /// Numéro du jeu (1, 2, 3... : le plus petit libre ; le journal et la file de traduction).
@@ -225,6 +227,7 @@ struct Session {
     digest_until: Option<Instant>,
     hint_until: Option<Instant>,
     hint_last: Option<Instant>,
+    lang_toast_until: Option<Instant>,
     last_raise: Instant,
     last_tick: Instant,
     overlay_error: bool,
@@ -353,10 +356,32 @@ impl Session {
         }
     }
 
+    /// Langue de l'envoi traduit choisie d'un clic sur un acronyme : confirmée 3 s sur le jeu, à
+    /// gauche, au-dessus du chat.
+    fn show_lang_toast(&mut self, l: &'static str, now: Instant, fonts: &mut Option<crate::panel::Fonts>) {
+        let Some((left, top, right, bottom)) = self.rect() else { return };
+        let f = fonts.get_or_insert_with(crate::panel::Fonts::load);
+        let px = ((right - left) as f32 / 140.0).clamp(13.0, 26.0);
+        let rows = vec![
+            crate::panel::Row { text: format!("Envoi traduit en {}", crate::bench::french_name(l)), color: crate::panel::TITLE, title: true },
+            crate::panel::Row {
+                text: format!("Trad:AUTO écrit en {} (Maj+Entrée), jusqu'à 60 s après ton dernier envoi.", l.to_uppercase()),
+                color: crate::panel::TEXT,
+                title: false,
+            },
+        ];
+        let cv = crate::panel::render(f, &rows, ((right - left) as f32 * 0.26) as usize, px);
+        let x = left + (px * 2.0) as i32;
+        let y = (top + (bottom - top) * 45 / 100).min(bottom - cv.h as i32);
+        if self.overlay.show_screen(LANG_TOAST, x, y, &cv).is_ok() {
+            self.lang_toast_until = Some(now + Duration::from_secs(3));
+        }
+    }
+
     /// Une passe de la boucle pour ce jeu (frames décodées déjà données à `live`).
     fn step(&mut self, now: Instant, fonts: &mut Option<crate::panel::Fonts>, primary: bool) {
         // Envoi traduit : collage puis Entrée, seulement si ce WoW est devant (boîte de saisie prête).
-        for (id, text) in self.live.sends_due(now, crate::keys_win::shift_held()) {
+        for (id, text) in self.live.sends_due(now, crate::keys_win::keys_held()) {
             if !self.in_front() {
                 crate::say!("[S3] envoi {id} : WoW n'est plus au premier plan, rien n'est collé");
                 continue;
@@ -381,14 +406,25 @@ impl Session {
                 self.restore = None;
             }
         }
-        // Clic sur une icône de copie.
+        // Clic sur une icône de copie, ou sur l'acronyme d'une langue (langue de l'envoi traduit).
         for (frame, x, y) in self.overlay.take_clicks() {
-            if let Some(text) = self.live.copy_at(frame, x, y, now) {
+            if let Some(l) = self.live.lang_at(frame, x, y, now) {
+                self.show_lang_toast(l, now, fonts);
+            } else if let Some(text) = self.live.copy_at(frame, x, y, now) {
                 match crate::clipboard::set(&text) {
                     Ok(()) => crate::say!("[copie] {text}"),
                     Err(e) => crate::say!("[copie] impossible : {e}"),
                 }
             }
+        }
+        // Vidéo du guide demandée depuis le jeu : fenêtre de l'application (lecteur lancé au clic).
+        if std::mem::take(&mut self.live.video_wanted) {
+            crate::say!("[guide] vidéo demandée depuis le jeu : fenêtre de l'application ouverte");
+            crate::tray_win::ask_running_to_open_models();
+        }
+        if self.lang_toast_until.is_some_and(|t| now >= t) {
+            self.overlay.hide(LANG_TOAST);
+            self.lang_toast_until = None;
         }
         if now.duration_since(self.last_tick) < Duration::from_millis(33) {
             return;
@@ -718,6 +754,7 @@ pub fn run_games(
                     digest_until: None,
                     hint_until: None,
                     hint_last: None,
+                    lang_toast_until: None,
                     last_raise: now,
                     last_tick: now,
                     overlay_error: false,

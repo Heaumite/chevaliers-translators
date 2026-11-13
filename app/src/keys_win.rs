@@ -35,6 +35,12 @@ pub fn shift_held() -> bool {
     unsafe { (GetAsyncKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0 }
 }
 
+/// Le joueur tient-il encore Maj ou Entrée (0.16.4) ? Entrée tenue se répète dans le jeu et
+/// refermait la boîte rouverte avant le collage : la traduction partait dans le vide.
+pub fn keys_held() -> bool {
+    shift_held() || unsafe { (GetAsyncKeyState(VK_RETURN as i32) as u16 & 0x8000) != 0 }
+}
+
 /// Ctrl+V puis Entrée dans la fenêtre active (WoW). Maj encore tenue : relâchée d'abord, sinon
 /// le jeu verrait Maj+Entrée.
 pub fn paste_and_enter() -> Result<(), String> {

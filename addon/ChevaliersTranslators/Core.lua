@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.16.3"
+CT.VERSION = "0.16.4"
 
 local floor = math.floor
 local format = string.format
@@ -111,6 +111,14 @@ local function IsLoadedCompat(name)
   if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name) end
   if IsAddOnLoaded then return IsAddOnLoaded(name) end
   return false
+end
+
+-- Demande à l'application (réponse à une proposition, vidéo du guide...) : elle part trois fois
+-- (une trame ne reste que 50 ms à l'écran), avec un numéro pour n'être comptée qu'une fois.
+function CT.SendCommand(cmd)
+  local text = cmd .. "\t" .. floor(GetTime() * 1000) % 100000000
+  local p = { string.byte(text, 1, math.min(#text, CT.MaxPayload())) }
+  for _ = 1, 3 do CT.Enqueue(CT.FRAME_CMD, p, #p) end
 end
 
 -- Addons incompatibles avec Chevaliers Translators (0.16.3), signalés à la connexion et dans le
@@ -593,7 +601,10 @@ Relay = function(event, late, text, sender, ...)
   end
   -- Bulle de dialogue qui affichera ce message : retrouvée par son texte (0.15).
   -- Ses propres messages aussi (0.16.1) : traduits dans le chat, ils le sont dans sa bulle.
-  if CT.Bubbles then CT.Bubbles:Note(msgId, event, text, INFORM[event]) end
+  if CT.Bubbles then
+    local who = (type(guid) == "string" and not (issecretvalue and issecretvalue(guid))) and guid or nil
+    CT.Bubbles:Note(msgId, event, text, INFORM[event], who)
+  end
   if shown then
     CT.ChatFragments(msgId, code, sender, text, MaxPayload(),
       function(p, len) Enqueue(CT.FRAME_CHAT, p, len) end)
@@ -854,11 +865,29 @@ local function OnDraftChanged(editBox, userInput)
   end
 end
 
+-- Boîte rouverte refermée avant le collage (0.16.4) : Maj+Entrée tenue un peu longtemps, Entrée
+-- se répète et referme la boîte vide ; la traduction partait alors dans le vide. Sauf Échap, la
+-- boîte est rouverte (trois fois au plus, pendant l'attente du collage).
+local MAX_REOPEN = 3
 local function OnBoxClosed(editBox)
   local s = awaiting
-  if s and s.reopened and s.box == editBox then
-    Cancel()
+  if not (s and s.reopened and s.box == editBox) then return end
+  local empty = editBox.GetText and editBox:GetText() == ""
+  if not s.escaped and not s.pasted and empty and (s.reopens or 0) < MAX_REOPEN and GetTime() - s.at < PASTE_TIMEOUT then
+    s.reopens = (s.reopens or 0) + 1
+    s.reopened = false
+    s.reopenAt = GetTime()
+    return
   end
+  Cancel(s.escaped and "Envoi traduit annulé (Échap)." or nil)
+end
+
+-- Échap : le jeu ferme la boîte avant ce crochet ; la réouverture prévue est annulée.
+local function OnBoxEscape(editBox)
+  local s = awaiting
+  if not (s and s.box == editBox) then return end
+  s.escaped = true
+  if s.reopenAt or not s.reopened then Cancel("Envoi traduit annulé (Échap).") end
 end
 
 local function InstallS3()
@@ -890,6 +919,7 @@ local function InstallS3()
     local eb = _G["ChatFrame" .. i .. "EditBox"]
     if eb and eb.HookScript then
       pcall(eb.HookScript, eb, "OnTextChanged", OnDraftChanged)
+      pcall(eb.HookScript, eb, "OnEscapePressed", OnBoxEscape)
       pcall(eb.HookScript, eb, "OnEditFocusLost", OnBoxClosed)
       pcall(eb.HookScript, eb, "OnHide", OnBoxClosed)
     end
@@ -1045,6 +1075,7 @@ local function AddTradButton(eb, cf)
     GameTooltip:AddLine("Chevaliers Translators")
     GameTooltip:AddLine("Traduire et envoyer " .. vers .. " : Maj+Entrée ou Maj+clic ici.", 1, 1, 1, true)
     GameTooltip:AddLine("Clic : choisir la langue. Clic droit : automatique.", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("En automatique, un clic sur l'acronyme d'un message du chat ([DE], [ES]...) fixe la langue de l'envoi.", 0.8, 0.8, 0.8, true)
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -1310,11 +1341,8 @@ SlashCmdList.CHEVALIERS = function(msg)
   elseif cmd == "dev" then
     DevHelp()
   elseif cmd == "monter" or cmd == "non" then
-    -- Réponse à une proposition de l'application ; elle part trois fois (une trame ne reste que
-    -- 50 ms à l'écran), avec un numéro pour n'être comptée qu'une fois.
-    local text = cmd .. "\t" .. floor(GetTime() * 1000) % 100000000
-    local p = { string.byte(text, 1, math.min(#text, MaxPayload())) }
-    for _ = 1, 3 do Enqueue(CT.FRAME_CMD, p, #p) end
+    -- Réponse à une proposition de l'application.
+    CT.SendCommand(cmd)
     if cmd == "monter" then
       Print("Demande transmise : le modèle proposé sera essayé hors combat ; en cas de souci, la traduction revient seule au modèle actuel.")
     else

@@ -40,6 +40,33 @@ pub struct Seen {
     pub height: i32,
     pub color: Rgb,
     pub px: f32,
+    /// Classe et spécialisation de celui qui parle (addon 0.16.4).
+    pub style: Option<Style>,
+}
+
+/// Couleur de la classe (bord et teinte de la bulle) et icône de la spécialisation (numéro de
+/// fichier du jeu, 0 : inconnue).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Style {
+    pub class: Rgb,
+    pub icon: u32,
+}
+
+/// Styles des bulles placés après la police (addon 0.16.4) : [64 + rang] [7] [r g b] [icône u32].
+pub fn styles(p: &[u8], n: usize) -> Vec<Option<Style>> {
+    let mut out = vec![None; n];
+    let need = 1 + 15 * n;
+    let Some(&len) = p.get(need) else { return out };
+    let mut i = need + 1 + len as usize;
+    while i + 2 <= p.len() {
+        let (k, l) = (p[i] as usize, p[i + 1] as usize);
+        let Some(b) = p.get(i + 2..i + 2 + l) else { break };
+        if (64..64 + n).contains(&k) && l >= 7 {
+            out[k - 64] = Some(Style { class: [b[0], b[1], b[2]], icon: u32::from_be_bytes([b[3], b[4], b[5], b[6]]) });
+        }
+        i += 2 + l;
+    }
+    out
 }
 
 /// Trame des bulles : [nombre] puis, par bulle, numéro, gauche, bas, largeur, hauteur (u16),
@@ -63,6 +90,7 @@ pub fn parse(p: &[u8]) -> Result<(Vec<Seen>, String), String> {
                 height: u(o + 8) as i32,
                 color: [p[o + 10], p[o + 11], p[o + 12]],
                 px: u(o + 13) as f32 / 10.0,
+                style: None,
             }
         })
         .collect();
@@ -140,7 +168,9 @@ impl Bubbles {
                         (0.0, 0.0)
                     };
                     // Taille du texte d'origine changée (bulle recomposée) : image refaite.
-                    if (o.seen.width, o.seen.height, o.seen.color, (o.seen.px * 10.0) as i32) != (s.width, s.height, s.color, (s.px * 10.0) as i32) {
+                    if (o.seen.width, o.seen.height, o.seen.color, (o.seen.px * 10.0) as i32, o.seen.style)
+                        != (s.width, s.height, s.color, (s.px * 10.0) as i32, s.style)
+                    {
                         o.drawn = None;
                     }
                     o.seen = s;
@@ -165,6 +195,14 @@ impl Bubbles {
         }
         self.to_hide.retain(|f| !next.iter().any(|s| FIRST_FRAME + s.slot == *f && s.posted.is_some()));
         self.states = next;
+    }
+
+    /// Icône arrivée des archives du jeu : les bulles qui l'attendaient sont redessinées.
+    pub fn icons_changed(&mut self) {
+        for s in &mut self.states {
+            s.drawn = None;
+            s.posted = None;
+        }
     }
 
     /// Tout est à reposer (fenêtres cachées le temps d'un combat, WoW repassé devant).
@@ -250,7 +288,16 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
     let (ascent, natural) = book.line_metrics(base, px);
     let line_h = natural.max(px);
     let layout = Layout::new(book, base, px, line_h, None);
-    let items = parse_markup(text, s.color);
+    // Icône de la spécialisation en tête du texte (0.16.4).
+    let marked;
+    let text_in = match s.style {
+        Some(st) if st.icon > 0 => {
+            marked = format!("|T{}:0|t {text}", st.icon);
+            marked.as_str()
+        }
+        _ => text,
+    };
+    let items = parse_markup(text_in, s.color);
     let advs = advances(book, base, px, &items, None, &layout);
     // Largeur de coupe : celle du texte d'origine, au moins 8 caractères.
     let wrap_w = (s.width as f32).max(px * 8.0);
@@ -270,9 +317,17 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
     let tail_h = (px * 0.6).round().max(5.0) as usize;
     let h = plate_h + tail_h;
     let mut cv = Canvas::new(w, h);
-    // Plaque aux coins arrondis, bord clair discret.
+    // Plaque aux coins arrondis ; bord et légère teinte aux couleurs de la classe (0.16.4), sinon
+    // bord clair discret.
     let r = (px * 0.5).max(4.0);
     let ph = plate_h;
+    let (edge_c, plate_c, edge_w) = match s.style {
+        Some(st) => {
+            let tint = |a: u8, b: u8| (a as f32 * 0.84 + b as f32 * 0.16).round() as u8;
+            (st.class, [tint(PLATE[0], st.class[0]), tint(PLATE[1], st.class[1]), tint(PLATE[2], st.class[2])], 2.5)
+        }
+        None => (BUBBLE_EDGE, PLATE, 1.5),
+    };
     for y in 0..ph {
         for x in 0..w {
             let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
@@ -281,8 +336,10 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
             let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
             let inside = (r - d + 0.5).clamp(0.0, 1.0);
             if inside > 0.0 {
-                let edge = (d - (r - 1.5)).clamp(0.0, 1.0).max(if x == 0 || y == 0 || x == w - 1 || y == ph - 1 { 1.0 } else { 0.0 });
-                let c = if edge > 0.0 { BUBBLE_EDGE } else { PLATE };
+                let wide = edge_w > 2.0;
+                let near = x == 0 || y == 0 || x == w - 1 || y == ph - 1 || (wide && (x == 1 || y == 1 || x == w - 2 || y == ph - 2));
+                let edge = (d - (r - edge_w)).clamp(0.0, 1.0).max(if near { 1.0 } else { 0.0 });
+                let c = if edge > 0.0 { edge_c } else { plate_c };
                 cv.blend(x as i32, y as i32, c, 0.93 * inside);
             }
         }
@@ -301,8 +358,8 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
             let fx = x as f32 + 0.5;
             let cov = ((fx - xl + 0.5).min(xr - fx + 0.5)).clamp(0.0, 1.0);
             if cov > 0.0 {
-                let border = fx - xl < 1.5 || xr - fx < 1.5 || fy > tip.1 - 1.5;
-                cv.blend(x as i32, y as i32, if border { BUBBLE_EDGE } else { PLATE }, 0.93 * cov);
+                let border = fx - xl < edge_w || xr - fx < edge_w || fy > tip.1 - edge_w;
+                cv.blend(x as i32, y as i32, if border { edge_c } else { plate_c }, 0.93 * cov);
             }
         }
     }
@@ -313,6 +370,23 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
         let x_off = (w as f32 - widths[j]) / 2.0 - row.first().map_or(0.0, |(x, _)| *x);
         let baseline = (top + j as f32 * line_h + asc).round() as i32;
         for (x, it) in row {
+            if let Item::Icon(ic) = it {
+                // Icône (spécialisation) : centrée sur la ligne.
+                let (iw, ih) = crate::icons::size_px(ic, px, 1.0);
+                let (iw, ih) = (iw.round().max(1.0) as usize, ih.round().max(1.0) as usize);
+                let x0 = (x + x_off).round() as i32;
+                let y0 = (top + j as f32 * line_h + (line_h - ih as f32) / 2.0).round() as i32;
+                let img = crate::icons::image_or_shape(ic.id, iw, ih);
+                for yy in 0..ih {
+                    for xx in 0..iw {
+                        let p = img.px[yy * iw + xx];
+                        if p[3] > 0 {
+                            cv.blend(x0 + xx as i32, y0 + yy as i32, [p[0], p[1], p[2]], p[3] as f32 / 255.0);
+                        }
+                    }
+                }
+                continue;
+            }
             let Item::Char(c, col) = it else { continue };
             let Some(f) = book.pick(base, *c) else { continue };
             let (m, bmp) = book.glyph(f, *c, px).clone();
@@ -347,7 +421,7 @@ mod tests {
     use super::*;
 
     fn seen(id: u16, left: i32, bottom: i32) -> Seen {
-        Seen { id, left, bottom, width: 180, height: 30, color: [255, 255, 255], px: 16.0 }
+        Seen { id, left, bottom, width: 180, height: 30, color: [255, 255, 255], px: 16.0, style: None }
     }
 
     pub fn payload(list: &[Seen], font: &str) -> Vec<u8> {
@@ -379,6 +453,29 @@ mod tests {
         // Texte tronqué en fin de trame : ignoré.
         p.extend_from_slice(&[0, 50, b'x']);
         assert_eq!(texts(&p, 2)[0].as_deref(), Some("Hi!"));
+    }
+
+    #[test]
+    fn bubble_styles_after_the_font() {
+        let list = vec![seen(1, 800, 500), seen(2, 300, 400)];
+        let mut p = payload(&list, "Fonts\\FRIZQT__.TTF");
+        // Style de la seconde bulle (chasseur, icône 461112), texte de la première.
+        p.extend_from_slice(&[65, 7, 0xAA, 0xD3, 0x72]);
+        p.extend_from_slice(&461112u32.to_be_bytes());
+        p.extend_from_slice(&[0, 3]);
+        p.extend_from_slice(b"Hi!");
+        assert_eq!(styles(&p, 2), vec![None, Some(Style { class: [0xAA, 0xD3, 0x72], icon: 461112 })]);
+        assert_eq!(texts(&p, 2), vec![Some("Hi!".to_string()), None], "les styles ne gênent pas les textes");
+        // Bulle aux couleurs de la classe : bord de cette couleur.
+        let mut book = FontBook::new();
+        for (name, data) in crate::fonts::fallback_fonts() {
+            let _ = book.add_fallback(&name, data);
+        }
+        let s = Seen { style: Some(Style { class: [0xAA, 0xD3, 0x72], icon: 0 }), ..seen(1, 0, 0) };
+        let d = draw(&mut book, "x", &s, "Hello");
+        let mid = d.canvas.px[d.canvas.w / 2];
+        let (r, g, b) = ((mid >> 16) & 0xFF, (mid >> 8) & 0xFF, mid & 0xFF);
+        assert!(g > r && g > b && g > 120, "bord du haut aux couleurs de la classe : {r} {g} {b}");
     }
 
     #[test]

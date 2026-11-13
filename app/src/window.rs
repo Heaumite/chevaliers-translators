@@ -28,7 +28,14 @@ pub fn show(url: String, busy: impl Fn() -> bool + 'static) -> Result<(), String
     let builder = WebViewBuilder::new_with_web_context(&mut context)
         .with_url(url)
         .with_background_color((14, 13, 10, 255))
-        .with_devtools(false);
+        .with_devtools(false)
+        // Liens vers l'extérieur (dépôt GitHub, YouTube) : dans le navigateur du joueur (0.16.4).
+        .with_new_window_req_handler(|url, _| {
+            if url.starts_with("https://") {
+                let _ = std::process::Command::new("explorer").arg(&url).spawn();
+            }
+            wry::NewWindowResponse::Deny
+        });
     #[cfg(windows)]
     let webview = builder.build(&window).map_err(|e| format!("WebView2 : {e}"))?;
     #[cfg(not(windows))]

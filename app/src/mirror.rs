@@ -747,6 +747,37 @@ pub struct Hit {
     pub y: i32,
     pub w: i32,
     pub h: i32,
+    /// Acronyme de langue « [DE] » (0.16.4) : un clic fixe la langue de l'envoi traduit ; sinon
+    /// icône de copie.
+    pub lang: Option<&'static str>,
+}
+
+/// Acronyme de langue en tête d'une rangée ou après l'en-tête (« [DE] ») : code de la langue et
+/// abscisses de « [ » et de la fin de « ] ». Les noms entre crochets (« [Hans] ») ne comptent pas :
+/// 2 ou 3 majuscules, code d'une langue connue.
+pub fn acronym_span(row: &[(f32, Item)], px: f32) -> Option<(&'static str, f32, f32)> {
+    for (i, (x0, it)) in row.iter().enumerate() {
+        if !matches!(it, Item::Char('[', _)) {
+            continue;
+        }
+        let mut code = String::new();
+        let mut j = i + 1;
+        while let Some((_, Item::Char(c, _))) = row.get(j) {
+            if c.is_ascii_uppercase() && code.len() < 3 {
+                code.push(c.to_ascii_lowercase());
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if code.len() < 2 || !matches!(row.get(j), Some((_, Item::Char(']', _)))) {
+            continue;
+        }
+        let Some(l) = crate::lang::LANGS.iter().find(|l| **l == code).copied() else { continue };
+        let end = row.get(j + 1).map_or(row[j].0 + px * 0.35, |(x, _)| *x);
+        return Some((l, *x0, end));
+    }
+    None
 }
 
 impl Hit {
@@ -1012,6 +1043,20 @@ pub fn render(
                 if (baseline as f32) < -line_h || baseline as f32 > h as f32 + line_h {
                     continue;
                 }
+                // Acronyme de la langue d'origine : cliquable (langue de l'envoi traduit, 0.16.4).
+                if j == 0 && alpha > 0.05 && !calage {
+                    if let Some((l, xa, xb)) = acronym_span(row, lpx) {
+                        let y0 = baseline - (lpx * 0.9).round() as i32;
+                        hits.push(Hit {
+                            line: *id,
+                            x: (xa + opts.dx).floor() as i32 - 2,
+                            y: y0,
+                            w: (xb - xa).ceil() as i32 + 4,
+                            h: (lpx * 1.2).round() as i32,
+                            lang: Some(l),
+                        });
+                    }
+                }
                 for (x, it) in row {
                     let x = x + opts.dx;
                     match it {
@@ -1073,7 +1118,7 @@ pub fn render(
                             let y0 = baseline - (lpx * 0.78).round() as i32;
                             draw_copy(&mut cv, x0, y0, s, copied == Some(*id), calage, alpha);
                             if alpha > 0.05 {
-                                hits.push(Hit { line: *id, x: x0 - 3, y: y0 - 3, w: s + 6, h: s + 6 });
+                                hits.push(Hit { line: *id, x: x0 - 3, y: y0 - 3, w: s + 6, h: s + 6, lang: None });
                             }
                         }
                         Item::Break => {}
@@ -1418,8 +1463,13 @@ impl Mirror {
     /// Clic dans la fenêtre des icônes de `frame` (pixels de l'image) : ligne et texte à copier.
     pub fn hit(&self, frame: u8, x: i32, y: i32) -> Option<(u16, String)> {
         let f = self.frames.get(&frame)?;
-        let h = f.hits.iter().find(|h| h.contains(x, y))?;
+        let h = f.hits.iter().find(|h| h.lang.is_none() && h.contains(x, y))?;
         Some((h.line, self.copy_text(h.line)?))
+    }
+
+    /// Acronyme de langue cliqué (0.16.4).
+    pub fn hit_lang(&self, frame: u8, x: i32, y: i32) -> Option<&'static str> {
+        self.frames.get(&frame)?.hits.iter().find(|h| h.lang.is_some() && h.contains(x, y))?.lang
     }
 
     /// Ligne copiée : coche verte pendant 1,5 s.
@@ -1564,6 +1614,7 @@ impl Mirror {
         // Image d'icône arrivée des archives du jeu : elle remplace sa forme provisoire.
         if crate::icons::take_changed() {
             self.dirty_all();
+            self.bubbles.icons_changed();
         }
         self.recent
             .retain(|(_, t)| now.saturating_duration_since(*t) < Duration::from_secs(120));
@@ -1996,15 +2047,33 @@ pub mod tests {
         assert!((0..cv.h).all(|y| (150..cv.w).all(|x| cv.px[y * cv.w + x] == 0)));
         assert!(cv.px.iter().any(|p| *p != 0));
         assert!(m.set_window_occluder(None));
-        // Menu fermé : l'icône revient.
+        // Menu fermé : l'icône revient, et l'acronyme de la ligne traduite est cliquable (0.16.4) :
+        // il donne la langue de l'envoi traduit ; le nom entre crochets ne compte pas.
         m.set_occluders(&occ);
         assert!(m.set_occluders(&[0]));
-        assert_eq!(m.tick(now)[0].hits.len(), 1);
+        let ups = m.tick(now);
+        assert_eq!(ups[0].hits.len(), 2);
+        let a = ups[0].hits.iter().find(|h| h.lang.is_some()).copied().unwrap();
+        let c = ups[0].hits.iter().find(|h| h.lang.is_none()).copied().unwrap();
+        assert!(a.x + a.w <= c.x, "acronyme avant l'icône de copie");
+        assert_eq!(m.hit_lang(1, a.x + a.w / 2, a.y + a.h / 2), Some("de"));
+        assert_eq!(m.hit(1, a.x + a.w / 2, a.y + a.h / 2), None, "l'acronyme ne copie pas");
+        assert_eq!(m.hit_lang(1, c.x + c.w / 2, c.y + c.h / 2), None);
         // Clic : coche verte un instant, puis l'icône.
         m.mark_copied(1, now);
         assert_eq!(m.tick(now).len(), 1);
         assert!(m.tick(now).is_empty());
         assert_eq!(m.tick(now + Duration::from_millis(1600)).len(), 1);
+    }
+
+    #[test]
+    fn language_acronyms_are_found_not_names() {
+        let row = |t: &str| -> Vec<(f32, Item)> { t.chars().enumerate().map(|(i, c)| (i as f32 * 10.0, Item::Char(c, [255, 255, 255]))).collect() };
+        assert_eq!(acronym_span(&row("[Hans] : [DE] Bonsoir"), 16.0), Some(("de", 90.0, 130.0)));
+        assert_eq!(acronym_span(&row("[SR] Zdravo"), 16.0).map(|a| a.0), Some("sr"));
+        assert_eq!(acronym_span(&row("[Bo] : salut [ok]"), 16.0), None);
+        assert_eq!(acronym_span(&row("[LFM] [XX] tank"), 16.0), None, "pas une langue");
+        assert_eq!(acronym_span(&row("fin [EN]"), 16.0).map(|a| (a.1, a.2)), Some((40.0, 40.0 + 16.0 * 0.35 + 30.0)));
     }
 
     #[test]

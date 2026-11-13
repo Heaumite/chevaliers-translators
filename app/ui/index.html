@@ -204,6 +204,21 @@ footer .path { overflow-wrap: anywhere; }
 .md b { color: var(--or-clair); font-weight: 600; }
 .md code { font: 12.5px Consolas, "Cascadia Mono", monospace; background: rgba(0, 0, 0, 0.35); padding: 0 4px; border-radius: 2px; overflow-wrap: anywhere; }
 
+/* Guide d'installation en vidéo (0.16.4) : lecteur chargé au clic seulement (rien n'est demandé à
+   YouTube avant), jamais lancé tout seul. */
+.guide { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px 22px; align-items: center;
+  margin: 14px 0 4px; padding: 14px; background: var(--fer); border: 1px solid var(--filet); box-shadow: 0 0 0 1px #000; }
+.guide h2 { font-size: 20px; margin: 0 0 6px; }
+.guide p { margin: 4px 0; font-size: 14px; color: var(--terne); }
+.guide a { color: var(--or-clair); overflow-wrap: anywhere; }
+.player { position: relative; aspect-ratio: 16 / 9; width: 100%; background: #000; border: 1px solid var(--or-sombre); overflow: hidden; }
+.player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.facade { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; cursor: pointer; color: var(--or-clair);
+  background: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.7)), url("/banniere.jpg") left center / cover; font: 600 14px var(--body); }
+.facade svg { display: block; margin: 0 auto 8px; filter: drop-shadow(0 2px 4px #000); transition: transform 150ms ease; }
+.facade:hover svg, .facade:focus-visible svg { transform: scale(1.08); }
+@media (max-width: 760px) { .guide { grid-template-columns: 1fr; } }
+
 @media (max-width: 760px) {
   .wrap { padding: 16px; }
   .row { grid-template-columns: 54px minmax(0, 1fr); }
@@ -236,6 +251,21 @@ footer .path { overflow-wrap: anywhere; }
   </header>
 
   <section class="update" id="update" aria-live="polite" hidden></section>
+
+  <section class="guide" aria-labelledby="gh">
+    <div class="player" id="player">
+      <button class="facade" id="facade" type="button">
+        <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="rgba(0,0,0,0.55)" stroke="#e6c77e" stroke-width="2.5"/><path d="M26 20 46 32 26 44z" fill="#e6c77e"/></svg>
+        <span data-t="guide_play">Lire la vidéo</span>
+      </button>
+    </div>
+    <div>
+      <h2 id="gh" data-t="guide_title">Guide d'installation</h2>
+      <p data-t="guide_note">La vidéo n'est chargée depuis YouTube qu'au clic.</p>
+      <p><span data-t="guide_updates">Les mises à jour se font automatiquement depuis</span><br>
+        <a href="https://github.com/Heaumite/chevaliers-translators" target="_blank" rel="noopener">github.com/Heaumite/chevaliers-translators</a></p>
+    </div>
+  </section>
 
   <section class="card" aria-labelledby="gpu">
     <h1 id="gpu">Analyse de votre PC…</h1>
@@ -274,6 +304,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const LANGS = ["fr", "en", "de", "es", "it", "ru"];
 const I18N = {
   fr: {
+    guide_title: "Guide d'installation", guide_play: "Lire la vidéo", guide_note: "La vidéo n'est chargée depuis YouTube qu'au clic.", guide_updates: "Les mises à jour se font automatiquement depuis",
     locale: "fr-FR", gb: "Go", mbs: "Mo/s", lang_label: "Langue de la page",
     brand_sub: "Modèles de traduction", demo: "Démonstration", analyzing: "Analyse de votre PC…",
     models_title: "Modèles de traduction",
@@ -309,6 +340,7 @@ const I18N = {
     new_title: "Version {v} installée", new_lead: "Voici ses nouveautés.", new_close: "Masquer",
   },
   en: {
+    guide_title: "Installation guide", guide_play: "Play the video", guide_note: "The video is only loaded from YouTube when you click it.", guide_updates: "Updates are installed automatically from",
     locale: "en-US", gb: "GB", mbs: "MB/s", lang_label: "Page language",
     brand_sub: "Translation models", demo: "Demo", analyzing: "Analyzing your PC…",
     models_title: "Translation models",
@@ -344,6 +376,7 @@ const I18N = {
     new_title: "Version {v} installed", new_lead: "Here is what's new.", new_close: "Hide",
   },
   de: {
+    guide_title: "Installationsanleitung", guide_play: "Video abspielen", guide_note: "Das Video wird erst beim Klick von YouTube geladen.", guide_updates: "Updates kommen automatisch von",
     locale: "de-DE", gb: "GB", mbs: "MB/s", lang_label: "Sprache der Seite",
     brand_sub: "Übersetzungsmodelle", demo: "Demo", analyzing: "Ihr PC wird analysiert…",
     models_title: "Übersetzungsmodelle",
@@ -379,6 +412,7 @@ const I18N = {
     new_title: "Version {v} installiert", new_lead: "Das ist neu.", new_close: "Ausblenden",
   },
   es: {
+    guide_title: "Guía de instalación", guide_play: "Reproducir el vídeo", guide_note: "El vídeo solo se carga desde YouTube al hacer clic.", guide_updates: "Las actualizaciones llegan automáticamente desde",
     locale: "es-ES", gb: "GB", mbs: "MB/s", lang_label: "Idioma de la página",
     brand_sub: "Modelos de traducción", demo: "Demostración", analyzing: "Analizando su PC…",
     models_title: "Modelos de traducción",
@@ -414,6 +448,7 @@ const I18N = {
     new_title: "Versión {v} instalada", new_lead: "Estas son sus novedades.", new_close: "Ocultar",
   },
   it: {
+    guide_title: "Guida all'installazione", guide_play: "Riproduci il video", guide_note: "Il video viene caricato da YouTube solo al clic.", guide_updates: "Gli aggiornamenti arrivano automaticamente da",
     locale: "it-IT", gb: "GB", mbs: "MB/s", lang_label: "Lingua della pagina",
     brand_sub: "Modelli di traduzione", demo: "Dimostrazione", analyzing: "Analisi del PC in corso…",
     models_title: "Modelli di traduzione",
@@ -449,6 +484,7 @@ const I18N = {
     new_title: "Versione {v} installata", new_lead: "Ecco le novità.", new_close: "Nascondi",
   },
   ru: {
+    guide_title: "Руководство по установке", guide_play: "Смотреть видео", guide_note: "Видео загружается с YouTube только по щелчку.", guide_updates: "Обновления устанавливаются автоматически из",
     locale: "ru-RU", gb: "ГБ", mbs: "МБ/с", lang_label: "Язык страницы",
     brand_sub: "Модели перевода", demo: "Демонстрация", analyzing: "Анализ вашего ПК…",
     models_title: "Модели перевода",
@@ -919,6 +955,16 @@ document.addEventListener("click", (ev) => {
     t0.disabled = true;
     act(t0.dataset.act, t0.dataset.id);
   }
+});
+// Vidéo du guide : le lecteur YouTube (sans cookies) remplace l'affiche au clic du joueur.
+$("facade").addEventListener("click", () => {
+  const f = document.createElement("iframe");
+  f.src = "https://www.youtube-nocookie.com/embed/VoAq1cGtAFY?autoplay=1&rel=0";
+  f.title = t("guide_title");
+  f.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+  f.referrerPolicy = "strict-origin-when-cross-origin";
+  f.allowFullscreen = true;
+  $("player").replaceChildren(f);
 });
 $("lang").addEventListener("change", (ev) => {
   const l = ev.target.value;

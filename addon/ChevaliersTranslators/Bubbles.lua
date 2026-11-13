@@ -13,6 +13,10 @@
 -- telle quelle en combat, chat verrouillé, miroir coupé ou /chevaliers bulles off. Le texte de
 -- chaque bulle part aussi avec sa place, tant qu'il y a de la place dans la trame : l'application
 -- dessine la bulle même si elle a manqué le message.
+-- 0.16.4 : bulle aux couleurs de la classe de celui qui parle (bord et teinte), avec l'icône de sa
+-- spécialisation quand elle est connue : la sienne, et celle des joueurs proches ou du groupe,
+-- demandée au jeu par une inspection discrète (hors combat, une à la fois, jamais pendant que la
+-- fenêtre d'inspection est ouverte), gardée pour la session.
 -- /chevaliers bulles on | off
 
 local _, CT = ...
@@ -36,8 +40,14 @@ local BUBBLE_EVENTS = {
 
 local TEXT_MAX = 120    -- octets de texte au plus par bulle dans la trame
 
+local INSPECT_EVERY = 2     -- secondes entre deux inspections
+local INSPECT_WAIT = 4      -- réponse attendue ce temps
+
 local B = {
-  recent = {},              -- texte normalisé -> { id, at }
+  recent = {},              -- texte normalisé -> { id, at, guid }
+  specs = {},               -- GUID -> numéro de spécialisation (inspection)
+  asked = {},               -- GUID -> moment de la dernière inspection demandée
+  inspectAt = -100,
   sentSig = "", sentAt = -100,
   stats = { frames = 0, matched = 0, unknown = 0, hidden = 0, errors = 0, replaced = 0 },
   -- Cadres de bulles de Blizzard effacés (0.16.3) : rendus visibles dès qu'ils ne sont plus à nous.
@@ -67,12 +77,12 @@ end
 -- Message relayé (Core.lua) : retenu pour retrouver sa bulle (les siens compris, 0.16.1 : un
 -- message du joueur traduit dans le chat l'est aussi dans sa bulle). `skip` : message à ne pas
 -- chercher dans une bulle (chuchotement envoyé).
-function B:Note(id, event, text, skip)
+function B:Note(id, event, text, skip, guid)
   if skip or not BUBBLE_EVENTS[event] then return end
   local key = Norm(text)
   if not key then return end
   local now = GetTime()
-  self.recent[key] = { id = id, at = now }
+  self.recent[key] = { id = id, at = now, guid = guid }
   -- Ménage de temps en temps.
   if (self.pruneAt or 0) < now - 10 then
     self.pruneAt = now
@@ -82,20 +92,104 @@ function B:Note(id, event, text, skip)
   end
 end
 
--- Message d'une bulle : son numéro de relais (texte identique, ou même début s'il est long).
+-- Message d'une bulle : son numéro de relais (texte identique, ou même début s'il est long), et
+-- l'identifiant de celui qui parle.
 function B:Lookup(text)
   local key = Norm(text)
   if not key then return nil end
   local e = self.recent[key]
-  if e then return e.id end
+  if e then return e.id, e.guid end
   if #key >= 24 then
     local head = key:sub(1, 24)
     local best
     for k, v in pairs(self.recent) do
       if k:sub(1, 24) == head and (not best or v.at > best.at) then best = v end
     end
-    return best and best.id
+    if best then return best.id, best.guid end
   end
+end
+
+-- Couleur de la classe d'un joueur (0 à 1), d'après son identifiant.
+local function ClassColor(guid)
+  if not (guid and GetPlayerInfoByGUID) then return nil end
+  local ok, _, class = pcall(GetPlayerInfoByGUID, guid)
+  if not ok or type(class) ~= "string" or IsSecret(class) then return nil end
+  local c
+  if C_ClassColor and C_ClassColor.GetClassColor then
+    local okC, col = pcall(C_ClassColor.GetClassColor, class)
+    if okC then c = col end
+  end
+  c = c or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[class])
+  if type(c) ~= "table" or type(c.r) ~= "number" then return nil end
+  return c.r, c.g, c.b
+end
+B.ClassColor = ClassColor
+
+-- Unité du jeu qui désigne ce joueur maintenant (cible, groupe, plaques des joueurs proches).
+local function UnitOf(guid)
+  local function same(u)
+    local g = UnitGUID and UnitGUID(u)
+    return type(g) == "string" and not IsSecret(g) and g == guid
+  end
+  for _, u in ipairs({ "target", "mouseover", "focus" }) do
+    if same(u) then return u end
+  end
+  local raid = IsInRaid and IsInRaid()
+  for i = 1, raid and 40 or 4 do
+    local u = (raid and "raid" or "party") .. i
+    if same(u) then return u end
+  end
+  for i = 1, 40 do
+    local u = "nameplate" .. i
+    if same(u) then return u end
+  end
+end
+
+-- Icône (numéro de fichier) d'une spécialisation.
+local function SpecIconOf(specID)
+  if not (specID and GetSpecializationInfoByID) then return nil end
+  local ok, _, _, _, icon = pcall(GetSpecializationInfoByID, specID)
+  if not ok or IsSecret(icon) then return nil end
+  if type(icon) == "string" and GetFileIDFromPath then icon = GetFileIDFromPath(icon) end
+  return type(icon) == "number" and icon > 0 and icon or nil
+end
+
+-- Spécialisation de celui qui parle : la sienne tout de suite ; celle d'un autre après une
+-- inspection (demandée ici, au plus une toutes les 2 s, hors combat).
+local function SpecIcon(guid, now)
+  if not guid then return nil end
+  local me = UnitGUID and UnitGUID("player")
+  if type(me) == "string" and not IsSecret(me) and me == guid then
+    local idx = GetSpecialization and GetSpecialization()
+    if type(idx) == "number" and GetSpecializationInfo then
+      local ok, id = pcall(GetSpecializationInfo, idx)
+      if ok and type(id) == "number" then return SpecIconOf(id) end
+    end
+    return nil
+  end
+  if B.specs[guid] then return SpecIconOf(B.specs[guid]) end
+  if now - B.inspectAt < INSPECT_EVERY or (B.asked[guid] and now - B.asked[guid] < 60) then return nil end
+  if not (NotifyInspect and CanInspect and GetInspectSpecialization) then return nil end
+  if (InCombatLockdown and InCombatLockdown()) or (InspectFrame and InspectFrame.IsShown and InspectFrame:IsShown()) then return nil end
+  local unit = UnitOf(guid)
+  if not unit then return nil end
+  local okC, can = pcall(CanInspect, unit)
+  if not okC or IsSecret(can) or not can then return nil end
+  B.inspectAt, B.asked[guid] = now, now
+  B.pending = { guid = guid, unit = unit, at = now }
+  pcall(NotifyInspect, unit)
+  return nil
+end
+B.SpecIcon = SpecIcon
+
+-- Réponse d'une inspection : la spécialisation est gardée pour la session.
+function B:OnInspectReady(guid)
+  local p = self.pending
+  if not (p and type(guid) == "string") or IsSecret(guid) then return end
+  if guid ~= p.guid then return end
+  self.pending = nil
+  local ok, spec = pcall(GetInspectSpecialization, p.unit)
+  if ok and type(spec) == "number" and not IsSecret(spec) and spec > 0 then self.specs[guid] = spec end
 end
 
 -- Texte d'une bulle (selon les versions du jeu : champ String du cadre enfant, ou première
@@ -184,7 +278,7 @@ local function Scan()
       if not fs then return nil end
       local text = fs:GetText()
       if IsSecret(text) then return nil end
-      local id = B:Lookup(text)
+      local id, guid = B:Lookup(text)
       if not id then
         B.stats.unknown = B.stats.unknown + 1
         return nil
@@ -203,9 +297,11 @@ local function Scan()
       local path, size = fs:GetFont()
       local r, g, bl = fs:GetTextColor()
       if IsSecret(path) or IsSecret(size) or IsSecret(r) then return nil end
+      local cr, cg, cb = ClassColor(guid)
       return { id = id, l = rect[1], b = rect[2], w = rect[3], h = rect[4],
         r = r or 1, g = g or 1, bl = bl or 1, px = (size or 12) * k, font = type(path) == "string" and path or "",
-        text = Norm(text), visual = VisualOf(bubble) }
+        text = Norm(text), visual = VisualOf(bubble),
+        cr = cr, cg = cg, cb = cb, icon = SpecIcon(guid, GetTime()) }
     end)
     if not okB then
       B.stats.errors = B.stats.errors + 1
@@ -233,9 +329,21 @@ local function Payload(list)
   local path = (list[1] and list[1].font or ""):sub(1, 80)
   U8(p, #path)
   for c = 1, #path do p[#p + 1] = path:byte(c) end
+  local room = (CT.MaxPayload and CT.MaxPayload() or 255) - #p
+  -- Style de chaque bulle (0.16.4) : [64 + rang] [7] [couleur de classe : 3 octets] [icône de la
+  -- spécialisation : numéro de fichier, 4 octets, 0 si inconnue]. Ignoré des versions d'avant.
+  for i, e in ipairs(list) do
+    if e.cr and room >= 9 then
+      U8(p, 64 + i - 1)
+      U8(p, 7)
+      U8(p, min(255, e.cr * 255 + 0.5)); U8(p, min(255, e.cg * 255 + 0.5)); U8(p, min(255, e.cb * 255 + 0.5))
+      local icon = e.icon or 0
+      U16(p, floor(icon / 65536)); U16(p, icon % 65536)
+      room = room - 9
+    end
+  end
   -- Textes des bulles (0.16.3), tant qu'il reste de la place : [rang] [longueur] [texte UTF-8].
   -- L'application s'en sert si elle a manqué le message (les anciennes versions l'ignorent).
-  local room = (CT.MaxPayload and CT.MaxPayload() or 255) - #p
   for i, e in ipairs(list) do
     local t = e.text or ""
     if #t > TEXT_MAX then
@@ -275,7 +383,8 @@ function B:Poll(now)
   Restore(keep)
   local parts = {}
   for _, e in ipairs(list) do
-    parts[#parts + 1] = format("%d:%d:%d:%d:%d", e.id, floor(e.l / MOVE), floor(e.b / MOVE), floor(e.w / MOVE), floor(e.h / MOVE))
+    parts[#parts + 1] = format("%d:%d:%d:%d:%d:%s:%s", e.id, floor(e.l / MOVE), floor(e.b / MOVE), floor(e.w / MOVE), floor(e.h / MOVE),
+      tostring(e.cr), tostring(e.icon))
   end
   local sig = table.concat(parts, ";")
   local due = sig ~= self.sentSig or (#list > 0 and now - self.sentAt >= REFRESH)
@@ -312,6 +421,10 @@ function B:Command(arg)
 end
 
 local driver = CreateFrame("Frame")
+pcall(driver.RegisterEvent, driver, "INSPECT_READY")
+driver:SetScript("OnEvent", function(_, event, guid)
+  if event == "INSPECT_READY" then pcall(B.OnInspectReady, B, guid) end
+end)
 local acc = 0
 driver:SetScript("OnUpdate", function(_, elapsed)
   acc = acc + (elapsed or 0)

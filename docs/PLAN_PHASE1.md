@@ -145,6 +145,12 @@ effacée sous celle de l'application (une seule bulle, avec pointe, texte d'orig
 traduire) ; guide avec bannière titrée, vidéo et dépôt GitHub ; addon incompatible (WoW Translator)
 signalé.
 
+**0.16.4 (13/11)** : Trad:AUTO fiable (attente de Maj et Entrée relâchées, boîte rouverte si Entrée
+répétée la referme) et plus réactif (demi-vie d'une minute) ; clic sur l'acronyme d'un message du
+chat pour fixer la langue d'envoi ; bulles aux couleurs de classe avec icône de spécialisation
+(inspection discrète) ; vidéo du guide intégrée à la fenêtre de l'application (chargée au clic),
+ouverte depuis le guide en jeu par le bouton « Regarder la vidéo ».
+
 **J2 - Installation et démarrage**
 - Premier lancement guidé : WoW trouvé, addon posé dans toutes les versions, moteur llama.cpp et
   pack low téléchargés, matériel détecté, modèles proposés (interface de la phase 0).

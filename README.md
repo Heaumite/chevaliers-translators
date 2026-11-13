@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.16.3)
+# Chevaliers Translators (v0.16.4)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -25,8 +25,8 @@ Phase 1, jalon J1 (fondation) : `docs/PLAN_PHASE1.md`. Phase 0 (kit de test, ré
 
 ## Pour le joueur
 
-Guide d'installation en vidéo : <https://youtu.be/VoAq1cGtAFY>. Les mises à jour se font
-automatiquement depuis ce dépôt.
+Guide d'installation en vidéo : <https://youtu.be/VoAq1cGtAFY> (aussi intégrée dans la fenêtre de
+l'application, lancée seulement au clic). Les mises à jour se font automatiquement depuis ce dépôt.
 
 **Addon incompatible** : *WoW Translator* (il ajoute ses traductions dans le texte des messages du
 chat ; Chevaliers Translators ne retrouve plus ces messages). L'addon le signale à la connexion et
@@ -113,7 +113,7 @@ proprement : `/chevaliers off`.
 | --- | --- |
 | `/chevaliers` | aide |
 | `/chevaliers on` / `off` | traduction du chat active / coupée (gardé aux connexions suivantes) |
-| `/chevaliers langue auto` / `xx` | langue de l'envoi traduit (aussi le bouton Trad, à droite de la saisie) |
+| `/chevaliers langue auto` / `xx` | langue de l'envoi traduit (aussi le bouton Trad, à droite de la saisie ; en automatique, un clic sur l'acronyme `[DE]` d'un message du chat fixe la langue, 0.16.4) |
 | `/chevaliers info` | état de l'addon |
 | `/chevaliers diag` | rapport (fenêtres de chat, messages reçus), recopié dans le journal de l'application |
 | `/chevaliers monter` / `non` | accepter / écarter le modèle supérieur proposé sur l'écran (0.14) |
@@ -141,6 +141,27 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.16.4 (13/11/2026)
+
+- **Trad:AUTO fiable** : Maj+Entrée tenue un peu longtemps, Entrée se répétait dans le jeu et
+  refermait la boîte rouverte avant le collage ; la traduction partait dans le vide (journal :
+  « collé et envoyé » sans « parti »). L'application attend maintenant que Maj **et** Entrée soient
+  relâchées, et l'addon rouvre la boîte si elle se referme avant le collage (Échap annule).
+- **Trad:AUTO plus réactif** : la langue d'un nouvel interlocuteur l'emporte en une minute au lieu
+  de cinq (les messages récents comptent bien plus).
+- **Clic sur l'acronyme d'un message** (« [DE] » dans le chat traduit, n'importe quelle fenêtre de
+  chat) : la langue de l'envoi traduit devient celle-là en Trad:AUTO, jusqu'à 60 s après le dernier
+  envoi ; un panneau le confirme sur le jeu. L'infobulle du bouton Trad le rappelle.
+- **Bulles aux couleurs de la classe** de celui qui parle (bord et teinte), avec l'icône de sa
+  spécialisation quand elle est connue : la sienne, et celle des joueurs proches ou du groupe,
+  demandée au jeu par une inspection discrète (hors combat, une toutes les 2 s, jamais quand la
+  fenêtre d'inspection est ouverte), gardée pour la session.
+- **Vidéo du guide intégrée** à la fenêtre de l'application (lecteur YouTube sans cookies, chargé et
+  lancé seulement au clic : rien n'est demandé à YouTube avant), avec le lien du dépôt GitHub des
+  mises à jour. WoW ne peut pas afficher de vidéo dans un panneau d'addon : le guide en jeu a un
+  bouton **Regarder la vidéo** qui ouvre la fenêtre de l'application sur ce lecteur, et garde le
+  lien à copier.
 
 ## 0.16.3 (13/11/2026)
 
@@ -493,15 +514,18 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.3.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.4.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.16.3)
+## Vérifié avant livraison (0.16.4)
 
-- 133 tests Rust sous Linux : dont, en 0.16.3, la garde du cache du bandeau (changements de
+- 135 tests Rust sous Linux : dont, en 0.16.4, l'acronyme de langue trouvé (et pas les noms entre
+  crochets) et cliquable avant l'icône de copie, les styles des bulles lus après la police sans
+  gêner les textes, le bord de la bulle aux couleurs de la classe, l'attente de Maj et d'Entrée
+  relâchées ; en 0.16.3, la garde du cache du bandeau (changements de
   fenêtre jamais comptés, retraits lents ignorés, pauses courtes et jamais d'abandon une fois le
   cache prouvé, abandon seulement s'il n'a jamais fonctionné), le cache découpé sous une autre
   fenêtre, les textes des bulles lus après la police (trame d'avant toujours lue), chaque bulle
@@ -549,7 +573,9 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   retrouvée, chuchotement envoyé jamais cherché dans une bulle (0.16.1) ; bulle de Blizzard effacée sous
   la nôtre et rendue en combat et après `/chevaliers bulles off`, texte de la bulle dans la trame,
   guide avec ses deux liens non modifiables, addon incompatible signalé à la connexion et dans le
-  guide (0.16.3) ;
+  guide (0.16.3) ; boîte rouverte quand Entrée répétée la referme avant le collage, Échap qui annule,
+  couleur de classe et icône de spécialisation (inspection d'un joueur proche) dans la trame des
+  bulles, bouton « Regarder la vidéo » du guide transmis à l'application (0.16.4) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
@@ -564,12 +590,16 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
   erreur JavaScript.
 
-## Test de la 0.16.3 (PowerShell)
+## Test de la 0.16.4 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
+| Trad:AUTO | `/dire hello`, puis écrire en français et Maj+Entrée en tenant les touches une seconde : le message part traduit ; journal : « collé et envoyé » puis « parti » |
+| Acronyme cliquable | clic sur `[DE]` d'un message traduit : panneau « Envoi traduit en allemand » ; Maj+Entrée en Trad:AUTO : journal « FR → DE (Trad:AUTO, langue choisie d'un clic…) » |
+| Bulles de classe | en ville, un joueur qui parle : bulle bordée de la couleur de sa classe ; icône de spécialisation (la tienne tout de suite, celle d'un joueur proche après quelques secondes) |
+| Vidéo du guide | `/chevaliers guide`, bouton « Regarder la vidéo » : la fenêtre de l'application s'ouvre sur l'encadré « Guide d'installation » ; clic sur l'affiche : la vidéo se lance (jamais toute seule) ; lien GitHub : ouvert dans le navigateur |
 | Cache du bandeau | passer plusieurs fois sur une autre fenêtre (Alt+Tab, clic sur le second écran) puis revenir : le bandeau reste caché ; journal : plus de « la capture ne lit plus le bandeau sous son cache » ; « bandeau lu à travers son cache : le cache tient » |
 | Une seule bulle | en ville, `/dire hello` puis un joueur qui parle une autre langue : une seule bulle (celle de l'application, avec sa pointe), traduite `[EN] …` ; un message en français : bulle de l'application avec le texte d'origine ; en combat : bulles de Blizzard |
 | Guide | `/chevaliers guide` : bannière titrée « Chevaliers Translators », lien de la vidéo et lien GitHub ; clic dans un cadre puis Ctrl+C : lien copié |

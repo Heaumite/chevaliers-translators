@@ -88,8 +88,13 @@ struct Sent {
 /// Un envoi dont la traduction n'est pas collée dans ce délai est abandonné (l'addon remet le
 /// texte d'origine dans la boîte un peu après).
 pub const SEND_DEADLINE: Duration = Duration::from_secs(5);
-/// Le joueur tient encore Maj après Maj+Entrée : on lui laisse ce temps pour la relâcher.
-const SHIFT_GRACE: Duration = Duration::from_millis(600);
+/// Le joueur tient encore Maj ou Entrée après Maj+Entrée : on lui laisse ce temps pour les
+/// relâcher (0.16.4 : 1,5 s, Entrée comprise ; avant 0,6 s, Maj seulement).
+const SHIFT_GRACE: Duration = Duration::from_millis(1500);
+/// Langue d'envoi choisie d'un clic sur un acronyme du chat (0.16.4) : gardée ce temps après le
+/// clic tant qu'aucun envoi ne l'a utilisée, puis ce temps-là après chaque envoi.
+const CLICKED_LANG_FOR: Duration = Duration::from_secs(600);
+const CLICKED_LANG_AFTER_SEND: Duration = Duration::from_secs(60);
 /// Les brouillons d'une même boîte se remplacent dans la file du traducteur.
 const DRAFT_GROUP: u64 = 1;
 
@@ -125,6 +130,9 @@ pub struct Tr {
     pub own_too: bool,
     /// Durées des dernières traductions de messages reçus (secondes).
     lat: VecDeque<f64>,
+    /// Langue d'envoi choisie d'un clic sur un acronyme « [XX] » du chat, et fin de validité
+    /// (0.16.4) : elle remplace Trad:AUTO.
+    clicked: Option<(&'static str, Instant)>,
 }
 
 impl Tr {
@@ -208,7 +216,19 @@ impl Tr {
             stats: TrStats::default(),
             lat: VecDeque::new(),
             own_too: true,
+            clicked: None,
         }
+    }
+
+    /// Clic sur l'acronyme d'une langue dans le chat : elle devient la langue de l'envoi en
+    /// Trad:AUTO (0.16.4).
+    pub fn click_lang(&mut self, l: &'static str, now: Instant) {
+        self.clicked = Some((l, now + CLICKED_LANG_FOR));
+    }
+
+    /// Langue choisie d'un clic, encore valable.
+    pub fn clicked_lang(&self, now: Instant) -> Option<&'static str> {
+        self.clicked.filter(|(_, until)| now < *until).map(|(l, _)| l)
     }
 
     /// Langue cible d'un message du joueur. `dest` : « AUTO » ou un code (Trad:XX). Renvoie la
@@ -217,6 +237,9 @@ impl Tr {
         let d = dest.to_lowercase();
         if d != "auto" && !d.is_empty() {
             return lang::LANGS.iter().find(|l| **l == d).copied();
+        }
+        if let Some(l) = self.clicked_lang(now) {
+            return Some(l);
         }
         if chat_type == "WHISPER" || chat_type == "BN_WHISPER" {
             if let Some(l) = self.speakers.language_of(&player_key(target)) {
@@ -227,14 +250,15 @@ impl Tr {
     }
 
     /// Langue majoritaire des messages vus ces 15 dernières minutes sur ces canaux ; les plus
-    /// récents comptent davantage (poids divisé par deux toutes les 5 min).
+    /// récents comptent davantage (poids divisé par deux chaque minute, 0.16.4 ; avant toutes les
+    /// 5 min : la langue d'un nouvel interlocuteur mettait longtemps à l'emporter).
     fn majority(&self, codes: &[u8], now: Instant) -> Option<&'static str> {
         let mut w: HashMap<&'static str, f64> = HashMap::new();
         for c in codes {
             for (l, t) in self.seen.get(&self.scope(*c)).into_iter().flatten() {
                 let age = now.saturating_duration_since(*t).as_secs_f64();
                 if age < 900.0 {
-                    *w.entry(l).or_default() += 0.5f64.powf(age / 300.0);
+                    *w.entry(l).or_default() += 0.5f64.powf(age / 60.0);
                 }
             }
         }
@@ -326,6 +350,8 @@ pub struct Live {
     pub proposal: Option<crate::conseil::Proposal>,
     pub proposal_shown: bool,
     pub proposal_answered: bool,
+    /// Vidéo du guide demandée depuis le jeu : fenêtre de l'application à ouvrir.
+    pub video_wanted: bool,
     cmd_nonces: VecDeque<String>,
     test: TestStats,
     band: BandStats,
@@ -406,6 +432,7 @@ impl Live {
             proposal: None,
             proposal_shown: false,
             proposal_answered: false,
+            video_wanted: false,
             cmd_nonces: VecDeque::new(),
             waiting_at: None,
             bodies: HashMap::new(),
@@ -484,6 +511,16 @@ impl Live {
         let (line, text) = m.hit(frame, x, y)?;
         m.mark_copied(line, now);
         Some(text)
+    }
+
+    /// Clic sur l'acronyme d'une langue (« [DE] ») d'une ligne du chat (0.16.4) : langue de
+    /// l'envoi traduit en Trad:AUTO. Renvoie la langue choisie.
+    pub fn lang_at(&mut self, frame: u8, x: i32, y: i32, now: Instant) -> Option<&'static str> {
+        let l = self.mirror.as_ref()?.hit_lang(frame, x, y)?;
+        let tr = self.tr.as_mut()?;
+        tr.click_lang(l, now);
+        crate::say!("[S3] langue de l'envoi traduit : {} (clic sur son acronyme dans le chat ; Trad:AUTO la prend jusqu'à 60 s après ton dernier envoi)", l.to_uppercase());
+        Some(l)
     }
 
     /// Images à poser ou cacher (à appeler une trentaine de fois par seconde).
@@ -638,11 +675,14 @@ impl Live {
                         // Texte du message relayé ; sinon (message manqué) celui envoyé avec la
                         // bulle (addon 0.16.3).
                         let texts = mirror::bulles::texts(&f.payload, n);
+                        let styles = mirror::bulles::styles(&f.payload, n);
                         let list: Vec<_> = list
                             .into_iter()
                             .zip(texts)
-                            .map(|(s, text)| {
+                            .zip(styles)
+                            .map(|((mut s, text), style)| {
                                 let body = self.bodies.get(&s.id).map(|(b, _)| b.clone()).or(text);
+                                s.style = style;
                                 (s, body)
                             })
                             .collect();
@@ -730,6 +770,9 @@ impl Live {
                             crate::engine::post(crate::engine::Control::Refuse);
                             self.proposal_answered = true;
                         }
+                        // Bouton « Regarder la vidéo » du guide en jeu (0.16.4) : fenêtre de
+                        // l'application, sur le lecteur de la vidéo.
+                        "video" => self.video_wanted = true,
                         _ => {}
                     }
                 }
@@ -914,10 +957,24 @@ impl Live {
             Detected::Lang(l, c) if c >= 0.3 => l,
             _ => tr.client,
         };
-        let how = if dest.eq_ignore_ascii_case("auto") { "Trad:AUTO" } else { "Trad choisi" };
-        match tr.target(dest, chan, target, now) {
+        let auto = dest.eq_ignore_ascii_case("auto");
+        let how = match (auto, tr.clicked_lang(now)) {
+            (true, Some(_)) => "Trad:AUTO, langue choisie d'un clic sur son acronyme",
+            (true, None) => "Trad:AUTO",
+            (false, _) => "Trad choisi",
+        };
+        let chosen = tr.target(dest, chan, target, now);
+        // Envoi avec la langue choisie d'un clic : elle reste une minute de plus.
+        if let (true, false, Some((l, until))) = (auto, draft, tr.clicked) {
+            if Some(l) == chosen && now < until {
+                tr.clicked = Some((l, now + CLICKED_LANG_AFTER_SEND));
+            }
+        }
+        match chosen {
             Some(tgt) if tgt != src => {
-                let key = format!("{dest}\u{1F}{chan}\u{1F}{target}\u{1F}{text}");
+                // Clé du brouillon : la langue visée elle-même (un clic sur un acronyme la change
+                // sans changer Trad:AUTO).
+                let key = format!("{tgt}\u{1F}{chan}\u{1F}{target}\u{1F}{text}");
                 let job = sends.get_mut(&id);
                 // Brouillon déjà traduit : rien à refaire.
                 if let Some(t) = tr.drafts.iter().find(|(k, _, _)| *k == key).map(|(_, t, _)| t.clone()) {
@@ -1494,7 +1551,7 @@ mod tests {
         // Rendu une seule fois.
         assert!(l.sends_due(Instant::now(), false).is_empty());
         ready(&mut l, 11);
-        assert_eq!(l.sends_due(Instant::now() + Duration::from_millis(700), true).len(), 1, "Maj tenue trop longtemps : collé quand même");
+        assert_eq!(l.sends_due(Instant::now() + Duration::from_millis(1600), true).len(), 1, "Maj tenue trop longtemps : collé quand même");
         // Annulé dans le jeu (le joueur reprend la frappe) : jamais collé.
         l.on_state(&[STATE_CANCEL, 0, 12], Instant::now());
         ready(&mut l, 12);

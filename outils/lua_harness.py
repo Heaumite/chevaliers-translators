@@ -623,6 +623,25 @@ def mock(root, binary):
     assert len(g.LOG) == n_log, "annulation : pas de message dans le chat"
     out = app(frames_until_idle("s3cancel"))
     assert "[S3] envoi 2 annulé dans le jeu" in out, "annulation non transmise"
+    # 0.16.4 : Entrée encore tenue se répète et referme la boîte rouverte avant le collage : elle
+    # est rouverte ; Échap annule (le jeu ferme la boîte avant le crochet d'Échap).
+    eb = g.EDITBOX("Qui vient en donjon", "SAY", None)
+    g.SHIFT = True
+    g.SIMULATE_SEND(eb)
+    g.SHIFT = False
+    s3_frames.extend(frames_until_idle("s3tick", 1))
+    assert eb.shown, "boîte non rouverte"
+    eb.text, eb.shown = "", False
+    g.ChatFrame1EditBox.hooks["OnHide"](eb)
+    s3_frames.extend(frames_until_idle("s3tick", 1))
+    assert eb.shown, "boîte refermée par Entrée répétée : non rouverte"
+    eb.shown = False
+    g.ChatFrame1EditBox.hooks["OnHide"](eb)
+    g.ChatFrame1EditBox.hooks["OnEscapePressed"](eb)
+    assert "annulé (Échap)" in list(g.LOG.values())[-1], list(g.LOG.values())[-1]
+    s3_frames.extend(frames_until_idle("s3tick", 1))
+    assert not eb.shown, "boîte rouverte après Échap"
+    s3_frames.extend(frames_until_idle("s3escape"))
     # Traduction jamais arrivée : le texte d'origine revient dans la boîte au bout de 6 s.
     eb = g.EDITBOX("Personne ne répond", "SAY", None)
     g.SHIFT = True
@@ -641,7 +660,7 @@ def mock(root, binary):
     g.SHIFT = False
     out = app(frames_until_idle("s3link"))
     # (Ids : la lettre tapée pendant l'annulation est partie en brouillon, n°3.)
-    assert "[S3] collage prêt pour l'envoi 5 : [→DE] Je vends {1} pas cher" in out, "lien non remplacé par un repère"
+    assert "[S3] collage prêt pour l'envoi 6 : [→DE] Je vends {1} pas cher" in out, "lien non remplacé par un repère"
     eb.text = "[→DE] Je vends {1} pas cher"
     g.ChatFrame1EditBox.hooks["OnTextChanged"](eb, True)  # collage : tout d'un coup, pas une frappe
     g.SIMULATE_SEND(eb)
@@ -662,7 +681,7 @@ def mock(root, binary):
     assert list(g.BLIZZ_SENT.values())[-1] == "WHISPER:Hans Ysondre:[→DE] Merci pour le groupe"
     assert eb.text == "", "le texte d'origine est parti"
     out = app(frames_until_idle("draftsent"))
-    assert "[S3] envoi 7 parti" in out, out
+    assert "[S3] envoi 8 parti" in out, out
     # Langue choisie à la main puis envoi : retour en automatique 60 s plus tard.
     assert g.ChatFrame1EditBox.ctTrad.text == "Trad:DE"
     g.TICK(30)
@@ -838,6 +857,26 @@ def mock(root, binary):
     p = ct.Bubbles.Payload(ct.Bubbles.Scan())
     raw = bytes(p[i] for i in range(1, len(p) + 1))
     assert b"Guten Abend, wer kommt mit nach Schwarzfels?" in raw, raw
+    # 0.16.4 : couleur de la classe de celui qui parle et icône de sa spécialisation, inspectée.
+    lua.execute('''
+      GetPlayerInfoByGUID = function(guid) if guid == "Player-9" then return "Chasseur", "HUNTER" end end
+      RAID_CLASS_COLORS = { HUNTER = { r = 0.67, g = 0.83, b = 0.45 } }
+      UnitGUID = function(u) if u == "player" then return "Player-1-0ABC" elseif u == "nameplate3" then return "Player-9" end end
+      CanInspect = function(u) return u == "nameplate3" end
+      INSPECTED = nil
+      NotifyInspect = function(u) INSPECTED = u end
+      GetInspectSpecialization = function(u) return u == "nameplate3" and 254 or 0 end
+      GetSpecializationInfoByID = function(id) if id == 254 then return 254, "Précision", "", 461112 end end
+    ''')
+    sc = ct.Bubbles.Scan()
+    assert g.INSPECTED == "nameplate3", "inspection non demandée"
+    g.FIRE("INSPECT_READY", "Player-9")
+    sc = ct.Bubbles.Scan()
+    p = ct.Bubbles.Payload(sc)
+    raw = bytes(p[i] for i in range(1, len(p) + 1))
+    style = bytes([64, 7, 171, 212, 115]) + (461112).to_bytes(4, "big")
+    assert style in raw, raw
+    lua.execute("UnitGUID = function() return 'Player-1-0ABC' end")
     # En combat : la bulle de Blizzard revient (l'application ne dessine rien en combat).
     lua.execute("IN_COMBAT = true")
     for _ in range(12):
@@ -1151,6 +1190,11 @@ def mock(root, binary):
     gf.video.text = "abc"
     gf.video.scripts["OnTextChanged"](gf.video, True)
     assert gf.video.text == gf.video.url
+    # 0.16.4 : bouton « Regarder la vidéo » : demande transmise à l'application.
+    gf.watch.scripts["OnClick"](gf.watch)
+    assert any("Vidéo du guide" in m for m in list(g.LOG.values())[-2:]), list(g.LOG.values())[-2:]
+    out = feed(collect("video"), os.path.join(work, "video"))
+    assert "[demande] video" in out, out
     lua.execute("C_AddOns.IsAddOnLoaded = function() return false end")
     print(f"Harnais OK : {decoded} trames peintes par l'addon décodées par ct-outils")
 

@@ -55,6 +55,11 @@ pub fn english_name(code: &str) -> &'static str {
     LANGS.iter().find(|(c, _, _)| *c == code).map_or("English", |l| l.1)
 }
 
+/// Nom français d'une langue (« allemand »), sinon son code.
+pub fn french_name(code: &str) -> String {
+    LANGS.iter().find(|(c, _, _)| *c == code).map_or(code.to_uppercase(), |l| l.2.to_string())
+}
+
 const CORPUS: &str = include_str!("../bench/corpus.tsv");
 
 #[derive(Clone, Debug)]
