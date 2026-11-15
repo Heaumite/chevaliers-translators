@@ -1228,7 +1228,7 @@ def mock(root, binary):
     gf = g.ChevaliersTranslatorsGuide
     assert gf is not None and gf.shown, "guide non affiché"
     assert "toutes les versions de World of Warcraft" in gf.about.text, "texte du guide"
-    assert gf.music.url == "https://www.youtube.com/watch?v=yvU-hxWE3VA" and gf.music.text == gf.music.url, "lien de la musique"
+    assert gf.music.url == "https://www.youtube.com/watch?v=KzwXwlVVSvE" and gf.music.text == gf.music.url, "lien de la musique"
     assert gf.repo.url == "https://github.com/Heaumite/chevaliers-translators", "lien du dépôt"
     assert gf.warnings == 1, "addon incompatible absent du guide"
     assert g.ChevaliersTranslatorsDB.guideSeen == 4
