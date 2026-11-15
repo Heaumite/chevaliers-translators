@@ -45,6 +45,14 @@ pub struct Status {
     pub active: bool,
     /// Ce qui se télécharge maintenant.
     pub current: Option<String>,
+    /// Son identifiant (« moteur » ou celui du modèle), sa progression à lui (0.16.6) et son rang
+    /// dans la série (1 sur 3...).
+    pub current_id: Option<String>,
+    pub item_got: u64,
+    pub item_total: u64,
+    pub rank: usize,
+    /// En attente, dans l'ordre (identifiants).
+    pub waiting: Vec<String>,
     /// Octets reçus et attendus pour l'ensemble de la série en cours.
     pub got: u64,
     pub total: u64,
@@ -66,16 +74,70 @@ impl Status {
         }
     }
 
-    /// « TranslateGemma 4B : 37 % (2,1 Go sur 5,8 Go) ».
+    /// « 2 sur 3 : TranslateGemma 4B, 37 % (0,86 Go sur 2,32 Go) » : le fichier en cours, avec sa
+    /// taille à lui (0.16.6 ; avant, le total de la série à côté de son nom prêtait à confusion).
     pub fn line(&self) -> String {
+        let name = self.current.as_deref().unwrap_or("modèles");
+        let count = self.rank + self.waiting.len();
+        let head = if count > 1 { format!("{} sur {count} : {name}", self.rank) } else { name.to_string() };
+        let (got, total) = if self.item_total > 0 { (self.item_got, self.item_total) } else { (self.got, self.total) };
+        let pct = if total == 0 { 0 } else { (got as f64 * 100.0 / total as f64).round().min(100.0) as u32 };
         format!(
-            "{} : {} % ({} sur {}){}",
-            self.current.as_deref().unwrap_or("modèles"),
-            self.percent(),
-            catalog::go(self.got),
-            catalog::go(self.total),
-            if self.limit > 0 { ", débit bridé pendant le jeu" } else { "" }
+            "{head}, {pct} % ({} sur {}){}",
+            catalog::go(got),
+            catalog::go(total),
+            if self.limit > 0 { ", bridé pendant le jeu" } else { "" }
         )
+    }
+
+    /// État pour la fenêtre des modèles (autre processus) : `telechargements.json`.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "pid": std::process::id(),
+            "maj": catalog::now_secs(),
+            "actif": self.active,
+            "courant": self.current_id,
+            "recu": self.item_got,
+            "taille": self.item_total,
+            "debit": self.speed,
+            "bride": self.limit > 0,
+            "attente": self.waiting,
+            "serie_recu": self.got,
+            "serie_total": self.total,
+            "probleme": self.problem,
+        })
+    }
+}
+
+/// Fichier d'état des téléchargements de fond, lu par la fenêtre des modèles (0.16.6).
+pub fn status_file() -> PathBuf {
+    crate::fonts::cache_root().join("telechargements.json")
+}
+
+/// État écrit d'un coup (fichier temporaire puis renommé) : jamais lu à moitié.
+fn publish(st: &Status) {
+    let path = status_file();
+    let tmp = path.with_extension("json.tmp");
+    if let Some(d) = path.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    if std::fs::write(&tmp, st.to_json().to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Téléchargements de fond vus par la fenêtre des modèles : l'état publié par l'application, s'il
+/// est récent (moins de 15 s) et encore actif.
+pub fn read_published() -> Option<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(status_file()).ok()?).ok()?;
+    let fresh = catalog::now_secs().saturating_sub(v["maj"].as_u64()?) <= 15;
+    (fresh && v["actif"].as_bool() == Some(true)).then_some(v)
+}
+
+fn id_of(w: &What) -> String {
+    match w {
+        What::Runtime(_) => "moteur".to_string(),
+        What::Model(m) => m.id.to_string(),
     }
 }
 
@@ -92,6 +154,11 @@ static STATE: Mutex<State> = Mutex::new(State {
     status: Status {
         active: false,
         current: None,
+        current_id: None,
+        item_got: 0,
+        item_total: 0,
+        rank: 0,
+        waiting: Vec::new(),
         got: 0,
         total: 0,
         speed: 0.0,
@@ -168,6 +235,7 @@ fn enqueue(jobs: Vec<Job>, bytes: u64) {
             s.finished = 0;
             s.status.got = 0;
             s.status.total = 0;
+            s.status.rank = 0;
         }
         for j in jobs {
             let dup = s.queue.iter().any(|q| same(&q.what, &j.what));
@@ -177,6 +245,8 @@ fn enqueue(jobs: Vec<Job>, bytes: u64) {
         }
         s.status.total += bytes;
         s.status.active = true;
+        s.status.waiting = s.queue.iter().map(|j| id_of(&j.what)).collect();
+        publish(&s.status);
         let start = !s.running;
         s.running = true;
         start
@@ -208,12 +278,24 @@ fn worker() {
             match s.queue.pop_front() {
                 Some(j) => {
                     s.status.current = Some(label(&j.what));
+                    s.status.current_id = Some(id_of(&j.what));
+                    s.status.rank += 1;
+                    s.status.item_got = 0;
+                    s.status.item_total = match &j.what {
+                        What::Runtime(_) => 60 * MB,
+                        What::Model(m) => crate::modeles_maj::known_size(m.file).unwrap_or(m.size),
+                    };
+                    s.status.waiting = s.queue.iter().map(|q| id_of(&q.what)).collect();
+                    publish(&s.status);
                     j
                 }
                 None => {
                     s.running = false;
                     s.status.active = false;
                     s.status.current = None;
+                    s.status.current_id = None;
+                    s.status.waiting.clear();
+                    publish(&s.status);
                     catalog::RATE_LIMIT.store(0, Ordering::Relaxed);
                     return;
                 }
@@ -226,8 +308,10 @@ fn worker() {
             Ok(size) => {
                 s.finished += size;
                 s.status.got = s.finished;
+                s.status.item_got = s.status.item_total;
                 s.status.done.push(label(&job.what));
                 s.status.problem = None;
+                publish(&s.status);
                 drop(s);
                 crate::say!("[téléchargement] {} : terminé", label(&job.what));
                 match (job.after, &job.what) {
@@ -238,6 +322,7 @@ fn worker() {
             Err(e) => {
                 crate::say!("[téléchargement] {} : abandonné ({e})", label(&job.what));
                 s.status.problem = Some(format!("{} : {e}", label(&job.what)));
+                publish(&s.status);
             }
         }
     }
@@ -255,10 +340,20 @@ fn run(job: &Job) -> Result<u64, String> {
         }
         cancel.store(false, Ordering::Relaxed);
         let mut checked = Instant::now();
+        let mut published = Instant::now();
         let mut report = |p: &catalog::Progress| {
             if let Ok(mut s) = STATE.lock() {
                 s.status.got = s.finished + p.got;
                 s.status.speed = p.speed;
+                s.status.item_got = p.got;
+                if p.total > 0 {
+                    s.status.item_total = p.total;
+                }
+                // La fenêtre des modèles suit la progression réelle (0.16.6).
+                if published.elapsed().as_millis() >= 1000 {
+                    published = Instant::now();
+                    publish(&s.status);
+                }
             }
             if !wow && p.speed > 0.0 {
                 FULL_SPEED.store(p.speed as u64, Ordering::Relaxed);
@@ -295,7 +390,23 @@ mod tests {
         assert_eq!(limit_for(true, 2 * MB), MB);
         let s = Status { current: Some("TranslateGemma 4B".into()), got: 2 << 30, total: 6 << 30, limit: MB, ..Default::default() };
         assert_eq!(s.percent(), 33);
-        assert!(s.line().starts_with("TranslateGemma 4B : 33 % ("), "{}", s.line());
-        assert!(s.line().ends_with("débit bridé pendant le jeu"));
+        assert!(s.line().starts_with("TranslateGemma 4B, 33 % ("), "{}", s.line());
+        assert!(s.line().ends_with("bridé pendant le jeu"));
+        // 0.16.6 : le fichier en cours avec sa taille à lui et son rang, pas le total de la série
+        // (l'icône annonçait « SalamandraTA 7B v3 … sur 7,87 Go », la fenêtre 4,52 Go).
+        let s = Status {
+            current: Some("SalamandraTA 7B v3".into()),
+            current_id: Some("salamandrata-7b".into()),
+            rank: 2,
+            waiting: vec!["translategemma-4b".into()],
+            item_got: 4_850_334_784 / 4,
+            item_total: 4_850_334_784,
+            got: 1_000_000_000 + 4_850_334_784 / 4,
+            total: 8_445_000_000,
+            ..Default::default()
+        };
+        assert_eq!(s.line(), "2 sur 3 : SalamandraTA 7B v3, 25 % (1,13 Go sur 4,52 Go)");
+        let j = s.to_json();
+        assert_eq!((j["courant"].as_str(), j["taille"].as_u64(), j["attente"][0].as_str()), (Some("salamandrata-7b"), Some(4_850_334_784), Some("translategemma-4b")));
     }
 }

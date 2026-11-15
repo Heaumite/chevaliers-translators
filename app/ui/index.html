@@ -211,10 +211,24 @@ footer .path { overflow-wrap: anywhere; }
 .md code { font: 12.5px Consolas, "Cascadia Mono", monospace; background: rgba(0, 0, 0, 0.35); padding: 0 4px; border-radius: 2px; overflow-wrap: anywhere; }
 
 /* Ce que fait l'addon une fois installé, et d'où viennent ses mises à jour (0.16.5). */
-.guide { margin: 14px 0 4px; padding: 14px 18px; background: var(--fer); border: 1px solid var(--filet); box-shadow: 0 0 0 1px #000; }
+/* Lecteur vidéo intégré (0.16.6) : chargé au clic seulement (rien n'est demandé à YouTube avant),
+   jamais lancé tout seul. */
+.guide { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px 22px; align-items: center;
+  margin: 14px 0 4px; padding: 14px; background: var(--fer); border: 1px solid var(--filet); box-shadow: 0 0 0 1px #000; }
 .guide h2 { font-size: 20px; margin: 0 0 6px; }
 .guide p { margin: 4px 0; font-size: 14px; color: var(--terne); max-width: 80ch; }
+.guide p.small { font-size: 12.5px; }
 .guide a { color: var(--or-clair); overflow-wrap: anywhere; }
+.player { position: relative; aspect-ratio: 16 / 9; width: 100%; background: #000; border: 1px solid var(--or-sombre); overflow: hidden; }
+.player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.facade { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; cursor: pointer; color: var(--or-clair);
+  background: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.7)), url("/banniere.jpg") left center / cover; font: 600 14px var(--body); }
+.facade svg { display: block; margin: 0 auto 8px; filter: drop-shadow(0 2px 4px #000); transition: transform 150ms ease; }
+.facade:hover svg, .facade:focus-visible svg { transform: scale(1.08); }
+@media (max-width: 760px) { .guide { grid-template-columns: 1fr; } }
+/* Téléchargements de fond de l'application (0.16.6). */
+.bgdl { margin: 0 auto 12px; max-width: 72ch; text-align: center; font-size: 13.5px; color: var(--parchemin); }
+.estim.bg { color: var(--terne); }
 
 @media (max-width: 760px) {
   .wrap { padding: 16px; }
@@ -250,12 +264,21 @@ footer .path { overflow-wrap: anywhere; }
   <section class="update" id="update" aria-live="polite" hidden></section>
 
   <section class="guide" aria-labelledby="gh">
-    <h2 id="gh" data-t="guide_title">L'addon une fois installé</h2>
-    <p data-t="guide_text">Il fonctionne pour toutes les versions de World of Warcraft, dans toutes les langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, peu importe de quel pays il vient.</p>
-    <p><span data-t="guide_music">Musique de l'auteur de l'addon :</span>
-      <a href="https://www.youtube.com/watch?v=yvU-hxWE3VA" target="_blank" rel="noopener">youtube.com/watch?v=yvU-hxWE3VA</a></p>
-    <p><span data-t="guide_updates">L'addon se met à jour automatiquement depuis</span>
-      <a href="https://github.com/Heaumite/chevaliers-translators" target="_blank" rel="noopener">github.com/Heaumite/chevaliers-translators</a></p>
+    <div class="player" id="player">
+      <button class="facade" id="facade" type="button">
+        <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="rgba(0,0,0,0.55)" stroke="#e6c77e" stroke-width="2.5"/><path d="M26 20 46 32 26 44z" fill="#e6c77e"/></svg>
+        <span data-t="guide_play">Lire la vidéo</span>
+      </button>
+    </div>
+    <div>
+      <h2 id="gh" data-t="guide_title">L'addon une fois installé</h2>
+      <p data-t="guide_text">Il fonctionne pour toutes les versions de World of Warcraft, dans toutes les langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, peu importe de quel pays il vient.</p>
+      <p><span data-t="guide_music">Musique de l'auteur de l'addon :</span>
+        <a href="https://www.youtube.com/watch?v=yvU-hxWE3VA" target="_blank" rel="noopener">youtube.com/watch?v=yvU-hxWE3VA</a></p>
+      <p class="small" data-t="guide_note">La vidéo n'est chargée depuis YouTube qu'au clic.</p>
+      <p><span data-t="guide_updates">L'addon se met à jour automatiquement depuis</span>
+        <a href="https://github.com/Heaumite/chevaliers-translators" target="_blank" rel="noopener">github.com/Heaumite/chevaliers-translators</a></p>
+    </div>
   </section>
 
   <section class="card" aria-labelledby="gpu">
@@ -271,6 +294,7 @@ footer .path { overflow-wrap: anywhere; }
   <section class="models" aria-labelledby="mh">
     <h2 id="mh" data-t="models_title">Modèles de traduction</h2>
     <p data-t="models_intro">Du plus léger au plus lourd en mémoire vidéo. Un seul modèle est actif à la fois ; si le modèle actif ne peut pas tourner, le pack low prend le relais.</p>
+    <p class="bgdl" id="bgdl" aria-live="polite" hidden></p>
     <div id="list"></div>
   </section>
 
@@ -295,7 +319,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const LANGS = ["fr", "en", "de", "es", "it", "ru"];
 const I18N = {
   fr: {
-    guide_title: "L'addon une fois installé", guide_text: "Il fonctionne pour toutes les versions de World of Warcraft, dans toutes les langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, peu importe de quel pays il vient.", guide_updates: "L'addon se met à jour automatiquement depuis", guide_music: "Musique de l'auteur de l'addon :", maj_new: "Nouvelle version publiée par l'éditeur.", maj_btn: "Mettre à jour ({x})", maj_ready: "Nouvelle version téléchargée : elle remplace l'ancienne à la fermeture de WoW ou au prochain lancement.",
+    guide_title: "L'addon une fois installé", guide_text: "Il fonctionne pour toutes les versions de World of Warcraft, dans toutes les langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, peu importe de quel pays il vient.", guide_updates: "L'addon se met à jour automatiquement depuis", guide_music: "Musique de l'auteur de l'addon :", guide_play: "Lire la vidéo", guide_note: "La vidéo n'est chargée depuis YouTube qu'au clic.", bg_dl: "Téléchargé en fond par l'application.", bg_wait: "En attente : téléchargé en fond après le fichier en cours.", bg_all: "Téléchargement en fond : {got} sur {total} en tout (moteur et modèles manquants, un fichier à la fois).", maj_new: "Nouvelle version publiée par l'éditeur.", maj_btn: "Mettre à jour ({x})", maj_ready: "Nouvelle version téléchargée : elle remplace l'ancienne à la fermeture de WoW ou au prochain lancement.",
     locale: "fr-FR", gb: "Go", mbs: "Mo/s", lang_label: "Langue de la page",
     brand_sub: "Modèles de traduction", demo: "Démonstration", analyzing: "Analyse de votre PC…",
     models_title: "Modèles de traduction",
@@ -332,7 +356,7 @@ const I18N = {
     new_title: "Version {v} installée", new_lead: "Voici ses nouveautés.", new_close: "Masquer",
   },
   en: {
-    guide_title: "Once installed", guide_text: "It works with every version of World of Warcraft, in all European languages: it translates foreign languages into the player's own language, whatever country they come from.", guide_updates: "The addon updates itself automatically from", guide_music: "Music by the addon's author:", maj_new: "New version published by its maker.", maj_btn: "Update ({x})", maj_ready: "New version downloaded: it replaces the old one when WoW closes or at the next launch.",
+    guide_title: "Once installed", guide_text: "It works with every version of World of Warcraft, in all European languages: it translates foreign languages into the player's own language, whatever country they come from.", guide_updates: "The addon updates itself automatically from", guide_music: "Music by the addon's author:", guide_play: "Play the video", guide_note: "The video is only loaded from YouTube when you click it.", bg_dl: "Downloading in the background (application).", bg_wait: "Waiting: downloaded in the background after the current file.", bg_all: "Background download: {got} of {total} in total (engine and missing models, one file at a time).", maj_new: "New version published by its maker.", maj_btn: "Update ({x})", maj_ready: "New version downloaded: it replaces the old one when WoW closes or at the next launch.",
     locale: "en-US", gb: "GB", mbs: "MB/s", lang_label: "Page language",
     brand_sub: "Translation models", demo: "Demo", analyzing: "Analyzing your PC…",
     models_title: "Translation models",
@@ -369,7 +393,7 @@ const I18N = {
     new_title: "Version {v} installed", new_lead: "Here is what's new.", new_close: "Hide",
   },
   de: {
-    guide_title: "Nach der Installation", guide_text: "Es funktioniert mit allen Versionen von World of Warcraft, in allen europäischen Sprachen: Es übersetzt Fremdsprachen in die Muttersprache des Spielers, egal aus welchem Land er kommt.", guide_updates: "Das Addon aktualisiert sich automatisch von", guide_music: "Musik des Addon-Autors:", maj_new: "Neue Version vom Herausgeber veröffentlicht.", maj_btn: "Aktualisieren ({x})", maj_ready: "Neue Version heruntergeladen: Sie ersetzt die alte, wenn WoW geschlossen wird oder beim nächsten Start.",
+    guide_title: "Nach der Installation", guide_text: "Es funktioniert mit allen Versionen von World of Warcraft, in allen europäischen Sprachen: Es übersetzt Fremdsprachen in die Muttersprache des Spielers, egal aus welchem Land er kommt.", guide_updates: "Das Addon aktualisiert sich automatisch von", guide_music: "Musik des Addon-Autors:", guide_play: "Video abspielen", guide_note: "Das Video wird erst beim Klick von YouTube geladen.", bg_dl: "Wird im Hintergrund heruntergeladen (Anwendung).", bg_wait: "Wartet: wird nach der aktuellen Datei im Hintergrund heruntergeladen.", bg_all: "Download im Hintergrund: {got} von {total} insgesamt (Engine und fehlende Modelle, eine Datei nach der anderen).", maj_new: "Neue Version vom Herausgeber veröffentlicht.", maj_btn: "Aktualisieren ({x})", maj_ready: "Neue Version heruntergeladen: Sie ersetzt die alte, wenn WoW geschlossen wird oder beim nächsten Start.",
     locale: "de-DE", gb: "GB", mbs: "MB/s", lang_label: "Sprache der Seite",
     brand_sub: "Übersetzungsmodelle", demo: "Demo", analyzing: "Ihr PC wird analysiert…",
     models_title: "Übersetzungsmodelle",
@@ -406,7 +430,7 @@ const I18N = {
     new_title: "Version {v} installiert", new_lead: "Das ist neu.", new_close: "Ausblenden",
   },
   es: {
-    guide_title: "Una vez instalado", guide_text: "Funciona con todas las versiones de World of Warcraft, en todos los idiomas europeos: traduce los idiomas extranjeros al idioma del jugador, sea cual sea su país.", guide_updates: "El addon se actualiza automáticamente desde", guide_music: "Música del autor del addon:", maj_new: "Nueva versión publicada por su editor.", maj_btn: "Actualizar ({x})", maj_ready: "Nueva versión descargada: sustituye a la anterior al cerrar WoW o en el próximo inicio.",
+    guide_title: "Una vez instalado", guide_text: "Funciona con todas las versiones de World of Warcraft, en todos los idiomas europeos: traduce los idiomas extranjeros al idioma del jugador, sea cual sea su país.", guide_updates: "El addon se actualiza automáticamente desde", guide_music: "Música del autor del addon:", guide_play: "Reproducir el vídeo", guide_note: "El vídeo solo se carga desde YouTube al hacer clic.", bg_dl: "Descargando en segundo plano (aplicación).", bg_wait: "En espera: se descarga en segundo plano después del archivo actual.", bg_all: "Descarga en segundo plano: {got} de {total} en total (motor y modelos que faltan, un archivo cada vez).", maj_new: "Nueva versión publicada por su editor.", maj_btn: "Actualizar ({x})", maj_ready: "Nueva versión descargada: sustituye a la anterior al cerrar WoW o en el próximo inicio.",
     locale: "es-ES", gb: "GB", mbs: "MB/s", lang_label: "Idioma de la página",
     brand_sub: "Modelos de traducción", demo: "Demostración", analyzing: "Analizando su PC…",
     models_title: "Modelos de traducción",
@@ -443,7 +467,7 @@ const I18N = {
     new_title: "Versión {v} instalada", new_lead: "Estas son sus novedades.", new_close: "Ocultar",
   },
   it: {
-    guide_title: "Una volta installato", guide_text: "Funziona con tutte le versioni di World of Warcraft, in tutte le lingue europee: traduce le lingue straniere nella lingua del giocatore, da qualunque paese provenga.", guide_updates: "L'addon si aggiorna automaticamente da", guide_music: "Musica dell'autore dell'addon:", maj_new: "Nuova versione pubblicata dall'editore.", maj_btn: "Aggiorna ({x})", maj_ready: "Nuova versione scaricata: sostituisce la precedente alla chiusura di WoW o al prossimo avvio.",
+    guide_title: "Una volta installato", guide_text: "Funziona con tutte le versioni di World of Warcraft, in tutte le lingue europee: traduce le lingue straniere nella lingua del giocatore, da qualunque paese provenga.", guide_updates: "L'addon si aggiorna automaticamente da", guide_music: "Musica dell'autore dell'addon:", guide_play: "Riproduci il video", guide_note: "Il video viene caricato da YouTube solo al clic.", bg_dl: "Download in background (applicazione).", bg_wait: "In attesa: scaricato in background dopo il file in corso.", bg_all: "Download in background: {got} su {total} in totale (motore e modelli mancanti, un file alla volta).", maj_new: "Nuova versione pubblicata dall'editore.", maj_btn: "Aggiorna ({x})", maj_ready: "Nuova versione scaricata: sostituisce la precedente alla chiusura di WoW o al prossimo avvio.",
     locale: "it-IT", gb: "GB", mbs: "MB/s", lang_label: "Lingua della pagina",
     brand_sub: "Modelli di traduzione", demo: "Dimostrazione", analyzing: "Analisi del PC in corso…",
     models_title: "Modelli di traduzione",
@@ -480,7 +504,7 @@ const I18N = {
     new_title: "Versione {v} installata", new_lead: "Ecco le novità.", new_close: "Nascondi",
   },
   ru: {
-    guide_title: "После установки", guide_text: "Работает во всех версиях World of Warcraft, со всеми европейскими языками: переводит иностранные языки на родной язык игрока, из какой бы страны он ни был.", guide_updates: "Аддон обновляется автоматически из", guide_music: "Музыка автора аддона:", maj_new: "Издатель выпустил новую версию.", maj_btn: "Обновить ({x})", maj_ready: "Новая версия загружена: она заменит старую после закрытия WoW или при следующем запуске.",
+    guide_title: "После установки", guide_text: "Работает во всех версиях World of Warcraft, со всеми европейскими языками: переводит иностранные языки на родной язык игрока, из какой бы страны он ни был.", guide_updates: "Аддон обновляется автоматически из", guide_music: "Музыка автора аддона:", guide_play: "Смотреть видео", guide_note: "Видео загружается с YouTube только по щелчку.", bg_dl: "Загружается в фоне (приложение).", bg_wait: "В очереди: загрузится в фоне после текущего файла.", bg_all: "Фоновая загрузка: {got} из {total} всего (движок и недостающие модели, по одному файлу).", maj_new: "Издатель выпустил новую версию.", maj_btn: "Обновить ({x})", maj_ready: "Новая версия загружена: она заменит старую после закрытия WoW или при следующем запуске.",
     locale: "ru-RU", gb: "ГБ", mbs: "МБ/с", lang_label: "Язык страницы",
     brand_sub: "Модели перевода", demo: "Демонстрация", analyzing: "Анализ вашего ПК…",
     models_title: "Модели перевода",
@@ -681,7 +705,10 @@ function actionHtml(m) {
   if (d && d.etat === "en_cours") {
     return `<div class="progress" data-progress="${m.id}">
       <div class="bar"><i class="${tintOf(m)}"></i></div><span></span></div>
-      <button class="link" data-act="annuler" data-id="${m.id}">${esc(t("cancel"))}</button>`;
+      ${d.fond ? `<p class="estim bg">${esc(t("bg_dl"))}</p>` : `<button class="link" data-act="annuler" data-id="${m.id}">${esc(t("cancel"))}</button>`}`;
+  }
+  if (d && d.etat === "attente") {
+    return `<p class="estim bg">${esc(t("bg_wait"))}</p>`;
   }
   let html = "";
   if (m.installe) {
@@ -870,6 +897,9 @@ function render() {
     const more = est.a_telecharger > 0 ? t("more", { x: go2(est.a_telecharger) }) : "";
     ch.innerHTML = t("chain", { chain: est.chaine.map(esc).join(" → "), more: esc(more), cond: esc(est.conditions) });
   }
+  const bg = $("bgdl");
+  bg.hidden = !(state.fond && state.fond.total > 0);
+  if (!bg.hidden) bg.textContent = t("bg_all", { got: go2(state.fond.recu), total: go2(state.fond.total) });
   const fb = $("fallback");
   fb.hidden = !state.repli;
   if (state.repli) fb.textContent = t("fallback", { why: state.repli });
@@ -907,7 +937,8 @@ function render() {
     eng.textContent = t("engine_ready", { name: e.nom === "vulkan" ? t("vulkan_all") : e.nom });
   } else {
     eng.className = "engine wait";
-    eng.textContent = e.dl && e.dl.etat === "erreur" ? t("engine_err", { m: e.dl.message }) : t("engine_missing");
+    eng.textContent = e.dl && e.dl.etat === "erreur" ? t("engine_err", { m: e.dl.message })
+      : e.dl && e.dl.etat === "attente" ? t("bg_wait") : t("engine_missing");
   }
   $("folder").textContent = t("folder", { p: state.dossier });
   $("disk").textContent = state.disque_libre != null ? t("disk", { x: go(state.disque_libre) }) : "";
@@ -992,6 +1023,16 @@ document.addEventListener("click", (ev) => {
     t0.disabled = true;
     act(t0.dataset.act, t0.dataset.id);
   }
+});
+// Vidéo (0.16.6) : le lecteur YouTube sans cookies remplace l'affiche au clic du joueur.
+$("facade").addEventListener("click", () => {
+  const f = document.createElement("iframe");
+  f.src = "https://www.youtube-nocookie.com/embed/yvU-hxWE3VA?autoplay=1&rel=0";
+  f.title = t("guide_music");
+  f.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+  f.referrerPolicy = "strict-origin-when-cross-origin";
+  f.allowFullscreen = true;
+  $("player").replaceChildren(f);
 });
 $("lang").addEventListener("change", (ev) => {
   const l = ev.target.value;

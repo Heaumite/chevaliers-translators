@@ -313,6 +313,14 @@ pub fn interface_from_version(v: &str) -> Option<u32> {
     Some(a * 10000 + b * 100 + c)
 }
 
+/// Versions du jeu où l'addon peut être posé : celles dont `.build.info` donne la version
+/// (0.16.6 : `_ptr_` ou `_xptr_` sans version, ignorés à la pose, ne sont plus signalés comme
+/// « addon pas remplacé » après la mise à jour).
+pub fn installable_flavors(root: &Path) -> Vec<String> {
+    let info = read_build_info(root);
+    flavor_dirs(root).into_iter().filter(|f| interface_for(f, &info).is_some()).collect()
+}
+
 fn interface_for(folder: &str, info: &[(String, String)]) -> Option<(u32, String)> {
     let stem = folder.trim_matches('_');
     let found = match FLAVORS.iter().find(|(f, _)| *f == folder) {
@@ -672,6 +680,11 @@ mod tests {
         assert_eq!(interface_for("_forever_", &info).unwrap().0, 16001);
         assert_eq!(interface_for("_classic_era_", &info).unwrap().0, 11509);
         assert!(interface_for("_anniversary_", &info).is_none());
+        // Dossier d'une version sans ligne dans .build.info (_ptr_ ici) : pas installable.
+        fs::create_dir_all(dir.join("_ptr_")).unwrap();
+        fs::create_dir_all(dir.join("_retail_")).unwrap();
+        let flavors = installable_flavors(&dir);
+        assert!(flavors.contains(&"_retail_".to_string()) && !flavors.contains(&"_ptr_".to_string()), "{flavors:?}");
         fs::remove_dir_all(dir).ok();
     }
 

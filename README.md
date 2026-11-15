@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.16.6)
+# Chevaliers Translators (v0.16.7)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -145,6 +145,22 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.16.7 (15/11/2026)
+
+- **Téléchargements : l'information réelle partout** : l'infobulle de l'icône annonçait
+  « SalamandraTA 7B v3 … sur 7,87 Go » (le total de toute la série : moteur, EuroLLM, SalamandraTA,
+  TranslateGemma) quand la fenêtre montrait 4,52 Go (le modèle seul). L'infobulle montre maintenant
+  le fichier en cours avec sa taille à lui et son rang (« 2 sur 3 : SalamandraTA 7B v3, 25 % (1,13
+  Go sur 4,52 Go) ») ; la bulle de départ détaille chaque fichier avec sa taille. La fenêtre des
+  modèles suit les téléchargements de fond de l'application : le modèle en cours avec sa
+  progression et son débit réels, les suivants « En attente », et le total de la série au-dessus
+  de la liste.
+- **Lecteur vidéo intégré à la fenêtre de l'application** (musique de l'auteur de l'addon) : lecteur
+  YouTube sans cookies, chargé et lancé seulement au clic (rien n'est demandé à YouTube avant) ; le
+  lien reste dessous.
+- **Fausse alerte supprimée** : « Addon à vérifier : WoW Ptr / Xptr » au lancement, pour des
+  versions du jeu sans numéro dans `.build.info` (ignorées à la pose de l'addon, donc jamais à jour).
 
 ## 0.16.6 (15/11/2026)
 
@@ -571,15 +587,17 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.6.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.7.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.16.6)
+## Vérifié avant livraison (0.16.7)
 
-- 140 tests Rust sous Linux : dont, en 0.16.6, le téléchargement partagé entre deux processus
+- 140 tests Rust sous Linux : dont, en 0.16.7, la ligne de l'infobulle (fichier en cours, sa
+  taille, son rang) et l'état publié pour la fenêtre, les versions du jeu sans numéro écartées de
+  la vérification de l'addon ; en 0.16.6, le téléchargement partagé entre deux processus
   (le second suit le premier, aucun fichier reçu deux fois), le fichier plus grand que prévu
   arrêté et repris, la taille et l'empreinte publiées lues dans la liste des fichiers de Hugging
   Face, SHA-256 en flux (fichier lu par morceaux), la commande de lancement au démarrage, les
@@ -650,6 +668,10 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   téléchargements, serveur arrêté avec l'application) compilé contre `windows-sys` avec la
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
+- Fenêtre des modèles (0.16.7) ouverte dans Chromium avec un téléchargement de fond simulé :
+  SalamandraTA 7B v3 en cours (25 %, 1,13 Go sur 4,52 Go, débit), TranslateGemma 4B « En attente »,
+  total de la série au-dessus de la liste ; lecteur vidéo chargé au clic (youtube-nocookie) ;
+  aucune erreur JavaScript.
 - Fenêtre des modèles (0.16.6) ouverte dans Chromium (démonstration) en français et en anglais :
   couleurs des trois modèles dans la jauge et la liste, « WoW (en ce moment) », modèle chargé avec
   sa mémoire réelle, phrase « d'après les mesures sur ce PC », aucune erreur JavaScript.
@@ -659,13 +681,16 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
   erreur JavaScript.
 
-## Test de la 0.16.6 (PowerShell)
+## Test de la 0.16.7 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
-| Version | fenêtre de l'application et `/chevaliers` : 0.16.6 ; GitHub : la compilation de `v0.16.6` passe |
+| Version | fenêtre de l'application et `/chevaliers` : 0.16.7 ; GitHub : la compilation de `v0.16.7` passe |
+| Téléchargements réels | supprimer un modèle dans la fenêtre puis relancer l'application : bulle « X Go à télécharger en tout : moteur …, <modèle> 4,52 Go… » ; infobulle de l'icône « 1 sur 1 : <modèle>, N % (… sur 4,52 Go) » ; fenêtre des modèles : même pourcentage et même taille sur la ligne du modèle, « Téléchargé en fond par l'application », total de la série au-dessus de la liste |
+| Lecteur vidéo | fenêtre de l'application : affiche « Lire la vidéo » ; clic : la vidéo se lance dans la fenêtre ; rien ne se lance tout seul à l'ouverture |
+| Ptr / Xptr | au lancement, plus de bulle « Addon à vérifier : WoW Ptr » ni « Xptr » |
 | Téléchargement d'un modèle | fenêtre des modèles, télécharger un modèle pendant que la file de fond tourne : la jauge ne dépasse pas 100 % ; journal « déjà en cours de téléchargement » au lieu d'un second téléchargement ; modèle installé |
 | Modèle déchargé | quitter l'application (ou fermer WoW et attendre 20 s) : plus de `llama-server` dans le Gestionnaire des tâches, mémoire vidéo rendue ; journal « modèle déchargé » |
 | Bulles 30 s | un joueur qui parle : la bulle traduite reste 30 s (même après celle du jeu), s'efface en fondu à la fin ; tourner la caméra : une bulle figée disparaît |

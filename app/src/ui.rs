@@ -161,6 +161,27 @@ fn dl_json(d: Option<&Dl>) -> Value {
     }
 }
 
+/// Téléchargement vu par la fenêtre (0.16.6) : le sien s'il tourne, sinon celui que l'application
+/// fait en fond (autre processus, `telechargements.json`) : en cours avec sa progression réelle,
+/// ou en attente dans la file.
+fn dl_merged(own: Option<&Dl>, bg: Option<&Value>, id: &str) -> Value {
+    if own.is_some_and(|d| d.state == "en_cours") {
+        return dl_json(own);
+    }
+    if let Some(b) = bg {
+        if b["courant"].as_str() == Some(id) {
+            return json!({
+                "recu": b["recu"], "total": b["taille"], "debit": b["debit"], "etat": "en_cours",
+                "message": b["probleme"].as_str().unwrap_or(""), "fond": true, "bride": b["bride"],
+            });
+        }
+        if b["attente"].as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some(id))) {
+            return json!({ "recu": 0, "total": 0, "debit": 0, "etat": "attente", "message": "", "fond": true });
+        }
+    }
+    dl_json(own)
+}
+
 fn trial_json(t: &Trial, lang: &str) -> Value {
     json!({
         "verdict": t.verdict.code(),
@@ -182,6 +203,8 @@ fn state_json(s: &Shared, lang: &str) -> Value {
     let (eff, why) = catalog::effective_active(active.as_deref(), &o);
     // Nouvelles versions publiées par les éditeurs (0.16.6, dernière vérification, sans réseau).
     let updates = if s.demo { Vec::new() } else { crate::modeles_maj::available(&s.dir) };
+    // Téléchargements de fond de l'application, tels qu'ils avancent vraiment (0.16.6).
+    let bg = if s.demo { None } else { crate::telechargements::read_published() };
     let models: Vec<Value> = o
         .entries
         .iter()
@@ -221,7 +244,7 @@ fn state_json(s: &Shared, lang: &str) -> Value {
                     "source": tr(lang, &c.source),
                 })),
                 "actif": eff.model.id == m.id,
-                "dl": dl_json(s.dls.get(m.id)),
+                "dl": dl_merged(s.dls.get(m.id), bg.as_ref(), m.id),
                 "maj": updates.iter().find(|u| u.model.id == m.id).map(|u| json!({
                     "taille": u.size,
                     "prete": u.ready || s.dls.get(&format!("maj:{}", m.id)).is_some_and(|d| d.state == "fini"),
@@ -258,8 +281,13 @@ fn state_json(s: &Shared, lang: &str) -> Value {
             "nom": o.runtime,
             "pret": s.runtime_ready(o.runtime),
             "taille": catalog::runtime_size(o.runtime),
-            "dl": dl_json(s.dls.get(ENGINE)),
+            "dl": dl_merged(s.dls.get(ENGINE), bg.as_ref(), ENGINE),
         },
+        // Série en cours de l'application : reçu et total de tous les fichiers (0.16.6).
+        "fond": bg.as_ref().map(|b| json!({
+            "recu": b["serie_recu"], "total": b["serie_total"], "courant": b["courant"],
+            "attente": b["attente"].as_array().map_or(0, |a| a.len()),
+        })),
         "dossier": s.dir.display().to_string(),
         "disque_libre": catalog::free_disk(&s.dir),
         "notes": o.notes.iter().map(|n| tr(lang, n)).collect::<Vec<_>>(),

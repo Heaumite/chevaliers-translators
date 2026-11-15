@@ -205,3 +205,8 @@ au démarrage de Windows (à cocher), vérification quotidienne des nouvelles ve
 Hugging Face, délai d'affichage propre au modèle actif ; fenêtre des modèles aux couleurs des
 modèles (bleu, jaune, violet) avec les ressources réellement utilisées, règle des 7 Go limitée à
 l'installation.
+
+**0.16.7 (15/11)** : téléchargements affichés tels qu'ils sont (infobulle : fichier en cours avec sa
+taille ; fenêtre des modèles : téléchargements de fond de l'application en cours et en attente,
+total de la série), lecteur vidéo intégré à la fenêtre (chargé au clic), fausse alerte Ptr/Xptr
+supprimée.

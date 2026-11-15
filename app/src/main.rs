@@ -619,7 +619,7 @@ mod app {
         for root in &roots {
             ct::say!("World of Warcraft : {}", root.display());
             // 0.15.1 : comparaison fichier par fichier, pas seulement du numéro de version.
-            let before: Vec<(String, install::Check)> = install::flavor_dirs(root).into_iter().map(|f| {
+            let before: Vec<(String, install::Check)> = install::installable_flavors(root).into_iter().map(|f| {
                 let c = install::check(root, &f);
                 (f, c)
             }).collect();
@@ -761,6 +761,15 @@ mod app {
         let plan = ct::plan::for_this_pc(&hw, None);
         let dir = catalog::models_dir();
         let runtime = catalog::offer(&hw, &dir).runtime;
+        // Ce qui manque, fichier par fichier avec sa taille (0.16.6 : le total seul, à côté du nom
+        // d'un modèle dans l'infobulle, ne correspondait pas à la taille montrée par la fenêtre).
+        let mut parts: Vec<String> = Vec::new();
+        if !catalog::runtime_present(&catalog::runtime_dir(), runtime) {
+            parts.push(format!("moteur {}", catalog::go(60 << 20)));
+        }
+        for m in plan.downloads.iter().filter(|m| !catalog::installed_in(&dir, m)) {
+            parts.push(format!("{} {}", m.name, catalog::go(m.size)));
+        }
         let bytes = ct::telechargements::want(dir, Some(runtime), &plan.downloads);
         let names: Vec<&str> = plan.downloads.iter().map(|m| m.name).collect();
         ct::say!("{} modèles prévus pour ce PC : {} ; à télécharger : {}", journal::clock(), names.join(", "), catalog::go(bytes));
@@ -768,9 +777,9 @@ mod app {
             tray.notify(
                 "Téléchargement des modèles de traduction",
                 &format!(
-                    "{} à télécharger ({}). La traduction démarre dès que le pack low est prêt ; le meilleur modèle pour ton PC sera activé à la fin.",
+                    "{} à télécharger en tout : {}. La traduction démarre dès que le pack low est prêt ; le meilleur modèle pour ton PC sera activé à la fin.",
                     catalog::go(bytes),
-                    names.join(", ")
+                    parts.join(", ")
                 ),
                 false,
             );
