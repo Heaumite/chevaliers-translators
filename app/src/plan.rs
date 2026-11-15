@@ -1018,6 +1018,7 @@ pub mod tests_support {
             gpus: vec![Gpu { name: name.into(), vendor_id: vendor, dedicated: vram_gb * GIB, used: Some(13 * GIB / 10), ..Default::default() }],
             runtimes: Runtimes { vulkan: true, ..Default::default() },
             wow: vec![],
+            wow_peak: None,
         }
     }
 }
@@ -1046,6 +1047,7 @@ mod tests {
             }],
             runtimes: Runtimes { vulkan: true, ..Default::default() },
             wow: vec![],
+            wow_peak: None,
         }
     }
 

@@ -31,6 +31,8 @@ pub struct Gpu {
     pub used: Option<u64>,
     /// Dont WoW.
     pub used_by_wow: Option<u64>,
+    /// Dont nos serveurs de traduction (modèle chargé, 0.16.6).
+    pub used_by_translation: Option<u64>,
 }
 
 impl Gpu {
@@ -64,6 +66,9 @@ pub struct Hw {
     pub runtimes: Runtimes,
     /// Exécutables de WoW en cours (Wow.exe, WowClassic.exe...).
     pub wow: Vec<String>,
+    /// Mémoire vidéo de WoW mesurée en jeu sur ce PC, au plus haut (`mesures.tsv`, 0.16.6).
+    /// `None` : rien de mesuré encore (installation) ; WoW est alors compté 7 Go (règle).
+    pub wow_peak: Option<u64>,
 }
 
 pub const GIB: u64 = 1 << 30;
@@ -229,6 +234,7 @@ mod win {
                         luid: (d.luid_high, d.luid_low),
                         used: None,
                         used_by_wow: None,
+                        used_by_translation: None,
                     };
                     let qi: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32 =
                         std::mem::transmute(vmethod(adapter, 0));
@@ -304,8 +310,9 @@ mod win {
         Some(v.iter().filter(|(n, _)| n.starts_with(&prefix)).map(|(_, x)| (*x).max(0) as u64).sum())
     }
 
-    /// Complète chaque carte avec la mémoire vidéo utilisée en ce moment, et la part de WoW.
-    pub fn gpu_usage(gpus: &mut [Gpu], wow_pids: &[u32]) {
+    /// Complète chaque carte avec la mémoire vidéo utilisée en ce moment, la part de WoW et celle
+    /// de nos serveurs de traduction.
+    pub fn gpu_usage(gpus: &mut [Gpu], wow_pids: &[u32], tr_pids: &[u32]) {
         let adapters = pdh_values("\\GPU Adapter Memory(*)\\Dedicated Usage");
         let procs = pdh_values("\\GPU Process Memory(*)\\Dedicated Usage");
         for g in gpus.iter_mut() {
@@ -326,6 +333,18 @@ mod win {
                     .map(|(_, x)| *x)
                     .sum();
                 g.used_by_wow = Some(w.max(0) as u64);
+            }
+            if let Some(p) = &procs {
+                let of = |pids: &[u32]| -> i64 {
+                    p.iter()
+                        .filter(|(n, _)| {
+                            let n = n.to_lowercase();
+                            n.contains(&tag) && pids.iter().any(|pid| n.starts_with(&format!("pid_{pid}_")))
+                        })
+                        .map(|(_, x)| *x)
+                        .sum()
+                };
+                g.used_by_translation = Some(if tr_pids.is_empty() { 0 } else { of(tr_pids).max(0) as u64 });
             }
         }
     }
@@ -431,7 +450,7 @@ pub fn detect() -> Hw {
         let mut wow: Vec<String> = procs.into_iter().map(|(n, _)| n).collect();
         wow.dedup();
         let mut gpus = win::gpus();
-        win::gpu_usage(&mut gpus, &wow_pids);
+        win::gpu_usage(&mut gpus, &wow_pids, &crate::llama::server_pids());
         Hw {
             cpu,
             ram_total: t,
@@ -439,6 +458,7 @@ pub fn detect() -> Hw {
             gpus,
             runtimes: runtimes(),
             wow,
+            wow_peak: crate::mesures::wow_peak(),
         }
     }
     #[cfg(not(windows))]
@@ -452,6 +472,7 @@ pub fn detect() -> Hw {
             gpus: Vec::new(),
             runtimes: runtimes(),
             wow: Vec::new(),
+            wow_peak: crate::mesures::wow_peak(),
         }
     }
 }
@@ -740,6 +761,7 @@ mod tests {
                 ..Default::default()
             },
             wow: vec![],
+            wow_peak: None,
         }
     }
 

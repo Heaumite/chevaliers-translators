@@ -128,8 +128,14 @@ pub struct Tr {
     pub stats: TrStats,
     /// Traduire aussi les messages du joueur (0.11 : oui par défaut).
     pub own_too: bool,
-    /// Durées des dernières traductions de messages reçus (secondes).
+    /// Durées des dernières traductions de messages reçus (secondes), avec le modèle actif.
     lat: VecDeque<f64>,
+    /// Modèle actif pour lequel `lat` est mesuré (0.16.6 : remis à zéro au changement de modèle)
+    /// et durée retenue pour lui lors des parties précédentes.
+    lat_model: Option<String>,
+    prior: Option<f64>,
+    /// Traductions faites avec ce modèle depuis son chargement : les premières sont plus lentes.
+    lat_count: usize,
     /// Langue d'envoi choisie d'un clic sur un acronyme « [XX] » du chat, et fin de validité
     /// (0.16.4) : elle remplace Trad:AUTO.
     clicked: Option<(&'static str, Instant)>,
@@ -141,14 +147,74 @@ impl Tr {
     /// patiente ce temps-là dans le miroir, puis s'affiche telle quelle si la traduction tarde.
     /// Ainsi l'attente d'affichage suit la vitesse du modèle (équilibre traduction/affichage,
     /// 0.14.8) : modèle rapide, chat vif ; modèle plus lourd, court délai, toujours sans trou.
+    /// 0.16.6 : sans mesure encore pour le modèle actif (début de partie, modèle changé), la durée
+    /// retenue pour lui lors des parties précédentes ; les tout premiers messages, plus lents (le
+    /// modèle se met en route), ont un peu plus de marge ; ensuite la traduction se fait en temps
+    /// masqué (le message suivant est traduit pendant que le premier s'affiche).
     fn budget(&self) -> Duration {
+        let waiting = self.pending.values().filter(|p| matches!(p, Pending::Received { .. })).count();
+        budget_for(&self.lat.iter().copied().collect::<Vec<_>>(), self.prior, self.lat_count, waiting)
+    }
+
+    /// Modèle actif (annoncé par le moteur) : mesures remises à zéro s'il a changé, durée retenue
+    /// pour lui reprise.
+    fn follow_model(&mut self) {
+        let Some(active) = active_model() else { return };
+        if self.lat_model.as_deref() == Some(active.as_str()) {
+            return;
+        }
+        self.remember_latency();
+        self.lat.clear();
+        self.lat_count = 0;
+        self.prior = latency_store()[&active].as_f64();
+        self.lat_model = Some(active);
+    }
+
+    /// Durée médiane retenue pour le modèle mesuré (au moins 5 traductions).
+    fn remember_latency(&self) {
+        let (Some(model), true) = (self.lat_model.as_ref(), self.lat.len() >= 5) else { return };
         let mut l: Vec<f64> = self.lat.iter().copied().collect();
         l.sort_by(|a, b| a.total_cmp(b));
-        let med = l.get(l.len() / 2).copied().unwrap_or(1.0);
-        let waiting = self.pending.values().filter(|p| matches!(p, Pending::Received { .. })).count();
-        let eta = ((waiting / crate::engine::PARALLEL) as f64 + 1.0) * med;
-        Duration::from_secs_f64(eta.clamp(0.4, mirror::HOLD_MAX.as_secs_f64()))
+        let mut store = latency_store();
+        store[model.as_str()] = serde_json::json!((l[l.len() / 2] * 100.0).round() / 100.0);
+        let _ = std::fs::write(latency_path(), serde_json::to_vec_pretty(&store).unwrap_or_default());
     }
+}
+
+/// Budget d'attente de l'affichage (logique pure, testée) : médiane des mesures du modèle actif
+/// (3 au moins), sinon la durée retenue pour lui, sinon 1 s ; marge de moitié pour ses 3 premières
+/// traductions ; allongé si plusieurs messages attendent déjà.
+pub fn budget_for(lat: &[f64], prior: Option<f64>, count: usize, waiting: usize) -> Duration {
+    let mut l = lat.to_vec();
+    l.sort_by(|a, b| a.total_cmp(b));
+    let med = if l.len() >= 3 { l[l.len() / 2] } else { prior.unwrap_or_else(|| l.last().copied().unwrap_or(1.0)) };
+    let warm = if count < 3 { 1.5 } else { 1.0 };
+    let eta = ((waiting / crate::engine::PARALLEL) as f64 + 1.0) * med * warm;
+    Duration::from_secs_f64(eta.clamp(0.4, mirror::HOLD_MAX.as_secs_f64()))
+}
+
+/// Modèle actif annoncé par le moteur (« SalamandraTA 7B v3 sur la carte graphique »), partagé
+/// par toutes les fenêtres de WoW (0.16.6).
+static ACTIVE_MODEL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn active_model() -> Option<String> {
+    ACTIVE_MODEL.lock().ok().and_then(|m| m.clone())
+}
+
+fn set_active_model(label: &str) {
+    let name = label.split(" (étape").next().unwrap_or(label).trim().to_string();
+    if let Ok(mut m) = ACTIVE_MODEL.lock() {
+        *m = Some(name);
+    }
+}
+
+fn latency_path() -> std::path::PathBuf {
+    crate::fonts::cache_root().join("latences.json")
+}
+
+/// Durées médianes retenues par modèle (secondes par message reçu).
+fn latency_store() -> serde_json::Value {
+    std::fs::read(latency_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| serde_json::json!({}))
 }
 
 /// Codes de canal (protocole) d'un type de chat de WoW, pour Trad:AUTO ; `target` : numéro du
@@ -215,6 +281,9 @@ impl Tr {
             sent: VecDeque::new(),
             stats: TrStats::default(),
             lat: VecDeque::new(),
+            lat_model: None,
+            prior: None,
+            lat_count: 0,
             own_too: true,
             clicked: None,
         }
@@ -350,8 +419,6 @@ pub struct Live {
     pub proposal: Option<crate::conseil::Proposal>,
     pub proposal_shown: bool,
     pub proposal_answered: bool,
-    /// Vidéo du guide demandée depuis le jeu : fenêtre de l'application à ouvrir.
-    pub video_wanted: bool,
     cmd_nonces: VecDeque<String>,
     test: TestStats,
     band: BandStats,
@@ -377,6 +444,10 @@ pub struct Live {
     occluded_said: Option<Instant>,
     /// Dernier signe de vie de l'addon (chat miroir actif) ; `None` : addon sans signe de vie.
     pub last_alive: Option<Instant>,
+    /// Notifications pour le jeu (titre, détail) : changement de modèle (0.16.6).
+    pub notices: Vec<(String, String)>,
+    /// Modèles déjà prêts dans cette session (le premier n'est pas annoncé sur le jeu).
+    readies: usize,
     /// Dernier signe d'un addon qui attend l'application (lancée après la connexion : /reload).
     pub waiting_at: Option<Instant>,
     /// Messages relayés récents, par numéro : les lignes du miroir les citent (0.12.3).
@@ -425,6 +496,8 @@ impl Live {
             occluded: false,
             occluded_said: None,
             last_alive: None,
+            notices: Vec::new(),
+            readies: 0,
             ctx: 0,
             gfx: 0,
             digest: Vec::new(),
@@ -432,7 +505,6 @@ impl Live {
             proposal: None,
             proposal_shown: false,
             proposal_answered: false,
-            video_wanted: false,
             cmd_nonces: VecDeque::new(),
             waiting_at: None,
             bodies: HashMap::new(),
@@ -770,9 +842,6 @@ impl Live {
                             crate::engine::post(crate::engine::Control::Refuse);
                             self.proposal_answered = true;
                         }
-                        // Bouton « Regarder la vidéo » du guide en jeu (0.16.4) : fenêtre de
-                        // l'application, sur le lecteur de la vidéo.
-                        "video" => self.video_wanted = true,
                         _ => {}
                     }
                 }
@@ -1186,6 +1255,7 @@ impl Live {
         // La ligne attend sa traduction dans le miroir (elle s'affichera d'un coup, traduite) si
         // elle peut être prête à temps ; sinon elle s'affiche tout de suite et la traduction la
         // remplace à son arrivée.
+        tr.follow_model();
         let until = now + tr.budget();
         match (foreign, self.mirror.as_mut()) {
             (Some(l), Some(m)) if !late => {
@@ -1213,7 +1283,16 @@ impl Live {
         let mut failed: Vec<u16> = Vec::new();
         for e in events {
             match e {
-                Event::Status(s) => crate::say!("[traduction] {s}"),
+                Event::Status(s) => {
+                    crate::say!("[traduction] {s}");
+                    if let Some(label) = s.strip_prefix("prêt : ") {
+                        self.readies += 1;
+                        set_active_model(label);
+                    }
+                    if let Some(n) = model_notice(&s, self.readies) {
+                        self.notices.push(n);
+                    }
+                }
                 Event::Propose(p) => {
                     crate::say!("[proposition] {} {} : panneau sur le jeu hors combat", p.model.name, p.place.label());
                     self.proposal = Some(p);
@@ -1226,8 +1305,13 @@ impl Live {
                             tr.stats.cached += 1;
                         } else {
                             tr.lat.push_back(secs);
+                            tr.lat_count += 1;
                             if tr.lat.len() > 20 {
                                 tr.lat.pop_front();
+                            }
+                            // Durée retenue pour ce modèle (prochaines parties), toutes les 10.
+                            if tr.lat_count % 10 == 0 {
+                                tr.remember_latency();
                             }
                         }
                         let shown = format!("[{}] {t}", src.to_uppercase());
@@ -1410,6 +1494,31 @@ impl Live {
     }
 }
 
+/// Message du moteur qui mérite une notification sur le jeu (0.16.6) : montée ou descente du
+/// modèle selon la mémoire vidéo, repli après un échec, nouveau modèle prêt (pas le premier de la
+/// session, chargé à l'arrivée en jeu).
+pub fn model_notice(s: &str, readies: usize) -> Option<(String, String)> {
+    let model = |label: &str| label.split(" (étape").next().unwrap_or(label).trim().to_string();
+    if let Some(rest) = s.split_once("mémoire vidéo presque pleine").map(|x| x.1) {
+        let to = rest.rsplit_once("-> ").map(|x| model(x.1))?;
+        return Some(("Traduction : modèle plus léger".into(), format!("Mémoire vidéo presque pleine : passage à {to}.")));
+    }
+    if let Some(rest) = s.split_once("place revenue dans la mémoire vidéo").map(|x| x.1) {
+        let to = rest.rsplit_once("-> ").map(|x| model(x.1))?;
+        return Some(("Traduction : meilleur modèle".into(), format!("Place revenue dans la mémoire vidéo : passage à {to}.")));
+    }
+    if s.contains("trop lent en jeu") || s.contains("; repli sur") {
+        let first = model(s.split(" : ").next().unwrap_or(s));
+        return Some(("Traduction : repli".into(), format!("{first} écarté : le modèle suivant prend le relais.")));
+    }
+    if let Some(label) = s.strip_prefix("prêt : ") {
+        if readies > 1 {
+            return Some(("Traduction prête".into(), format!("{} est actif.", model(label))));
+        }
+    }
+    None
+}
+
 /// Sans signe de vie de l'addon pendant ce temps, le miroir est caché.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub const ALIVE_TIMEOUT: Duration = Duration::from_millis(1200);
@@ -1453,6 +1562,32 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_delay_follows_the_active_model() {
+        let s = |d: Duration| (d.as_secs_f64() * 100.0).round() / 100.0;
+        // Rien de mesuré, rien de retenu : 1 s, marge des premiers messages.
+        assert_eq!(s(budget_for(&[], None, 0, 0)), 1.5);
+        // Modèle déjà mesuré lors d'une partie précédente : sa durée, avec marge au début.
+        assert_eq!(s(budget_for(&[], Some(0.6), 0, 0)), 0.9);
+        // Mesures du modèle actif (médiane), plus de marge après ses 3 premières traductions.
+        assert_eq!(s(budget_for(&[0.5, 0.7, 0.6, 2.0], Some(1.4), 4, 0)), 0.7);
+        // File chargée : allongé ; plafonné.
+        assert!(budget_for(&[0.8, 0.8, 0.8], None, 9, crate::engine::PARALLEL * 2) > Duration::from_secs(2));
+        assert_eq!(budget_for(&[9.0, 9.0, 9.0], None, 9, 0), mirror::HOLD_MAX);
+        // Jamais moins de 0,4 s.
+        assert_eq!(s(budget_for(&[0.1, 0.1, 0.1], None, 9, 0)), 0.4);
+    }
+
+    #[test]
+    fn model_changes_become_game_notices() {
+        let n = model_notice("mémoire vidéo presque pleine (0,4 Go libres) : SalamandraTA 7B v3 sur la carte graphique -> TranslateGemma 4B sur la carte graphique (étape 2 sur 5 de la chaîne de repli)", 1).unwrap();
+        assert!(n.1.contains("TranslateGemma 4B sur la carte graphique") && !n.1.contains("étape"), "{n:?}");
+        assert!(model_notice("place revenue dans la mémoire vidéo (3,1 Go libres) : A -> B (étape 1 sur 5 de la chaîne de repli)", 1).unwrap().1.contains("passage à B"));
+        assert!(model_notice("prêt : SalamandraTA 7B v3 sur la carte graphique (étape 1 sur 5 de la chaîne de repli)", 1).is_none(), "premier modèle de la session annoncé");
+        assert!(model_notice("prêt : EuroLLM 1.7B sur la carte graphique (étape 3 sur 5)", 2).unwrap().1.contains("EuroLLM 1.7B"));
+        assert!(model_notice("9 phrases déjà traduites en mémoire", 1).is_none());
+    }
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;

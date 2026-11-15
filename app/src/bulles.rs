@@ -25,6 +25,12 @@ const BUBBLE_EDGE: Rgb = [150, 140, 118];
 pub const MAX_BUBBLES: usize = 8;
 /// Bulle sans nouvelles de l'addon depuis ce temps : retirée (il renvoie toutes les 2 s).
 const STALE: Duration = Duration::from_millis(3500);
+/// Vie d'une bulle (0.16.6) : 30 s après son apparition (l'addon la garde après celle du jeu),
+/// effacée progressivement pendant ses 8 dernières secondes.
+pub const LIFE: Duration = Duration::from_secs(30);
+const FADE: f32 = 8.0;
+/// Paliers de transparence du fondu (une image redessinée par palier).
+const FADE_STEPS: f32 = 24.0;
 /// Avance donnée à la place prédite (retard de la capture et de l'affichage).
 const LEAD: f32 = 0.06;
 /// Prédiction limitée à ce temps après le dernier relevé.
@@ -130,12 +136,21 @@ struct State {
     seen: Seen,
     body: String,
     at: Instant,
+    /// Apparition : la bulle s'efface en fin de vie (LIFE).
+    born: Instant,
     /// Vitesse mesurée (pixels par seconde).
     vel: (f32, f32),
     slot: u8,
     drawn: Option<Drawn>,
-    /// Dernière place posée (gauche, bas, texte) : rien n'est renvoyé si elle ne change pas.
-    posted: Option<(i32, i32, String)>,
+    /// Dernière place posée (gauche, bas, texte, palier de transparence) : rien n'est renvoyé si
+    /// elle ne change pas.
+    posted: Option<(i32, i32, String, u8)>,
+}
+
+/// Opacité d'une bulle selon son âge : pleine, puis effacée pendant les FADE dernières secondes.
+pub fn fade_level(age: Duration) -> u8 {
+    let left = LIFE.as_secs_f32() - age.as_secs_f32();
+    ((left / FADE).clamp(0.0, 1.0) * FADE_STEPS).ceil() as u8
 }
 
 #[derive(Default)]
@@ -145,6 +160,8 @@ pub struct Bubbles {
     /// Fenêtres à cacher au prochain passage.
     to_hide: Vec<u8>,
     pub seen_total: usize,
+    /// Bulles arrivées en fin de vie : plus reprises si l'addon les renvoie encore (une minute).
+    expired: Vec<(u16, Instant)>,
 }
 
 impl Bubbles {
@@ -155,8 +172,12 @@ impl Bubbles {
             self.font = font;
         }
         let mut next: Vec<State> = Vec::new();
+        self.expired.retain(|(_, t)| now.saturating_duration_since(*t) < Duration::from_secs(60));
         for (s, body) in list.into_iter().take(MAX_BUBBLES) {
             let Some(body) = body else { continue };
+            if self.expired.iter().any(|(id, _)| *id == s.id) {
+                continue;
+            }
             self.seen_total += 1;
             match self.states.iter().position(|o| o.seen.id == s.id) {
                 Some(i) => {
@@ -178,7 +199,7 @@ impl Bubbles {
                     o.at = now;
                     next.push(o);
                 }
-                None => next.push(State { seen: s, body, at: now, vel: (0.0, 0.0), slot: u8::MAX, drawn: None, posted: None }),
+                None => next.push(State { seen: s, body, at: now, born: now, vel: (0.0, 0.0), slot: u8::MAX, drawn: None, posted: None }),
             }
         }
         // Bulles disparues : leurs fenêtres sont cachées.
@@ -231,8 +252,13 @@ impl Bubbles {
             .map(|frame| Update { frame, left: 0, bottom: 0, canvas: None, hits: Vec::new() })
             .collect();
         let font = self.font.clone();
+        let expired = &mut self.expired;
         self.states.retain(|s| {
-            let keep = now.saturating_duration_since(s.at) < STALE;
+            let alive = now.saturating_duration_since(s.born) < LIFE;
+            if !alive {
+                expired.push((s.seen.id, now));
+            }
+            let keep = alive && now.saturating_duration_since(s.at) < STALE;
             if !keep && s.posted.is_some() {
                 ups.push(Update { frame: FIRST_FRAME + s.slot, left: 0, bottom: 0, canvas: None, hits: Vec::new() });
             }
@@ -250,16 +276,30 @@ impl Bubbles {
             let t = (now.saturating_duration_since(s.at).as_secs_f32() + LEAD).min(HORIZON);
             let left = s.seen.left + d.dx + (s.vel.0 * t).round() as i32;
             let bottom = s.seen.bottom + d.dy + (s.vel.1 * t).round() as i32;
-            let key = (left, bottom, text.clone());
+            let level = fade_level(now.saturating_duration_since(s.born));
+            let key = (left, bottom, text.clone(), level);
             if s.posted.as_ref() == Some(&key) {
                 continue;
             }
             let mut cv = d.canvas.clone();
+            if (level as f32) < FADE_STEPS {
+                fade(&mut cv, level as f32 / FADE_STEPS);
+            }
             clear_under(&mut cv, left, bottom, occ);
             s.posted = Some(key);
             ups.push(Update { frame, left, bottom, canvas: Some(cv), hits: Vec::new() });
         }
         ups
+    }
+}
+
+/// Transparence appliquée à toute l'image (pixels prémultipliés : chaque canal réduit).
+fn fade(cv: &mut Canvas, a: f32) {
+    let k = (a.clamp(0.0, 1.0) * 256.0) as u32;
+    for p in &mut cv.px {
+        let c = *p;
+        let ch = |shift: u32| ((((c >> shift) & 0xFF) * k) >> 8) << shift;
+        *p = ch(24) | ch(16) | ch(8) | ch(0);
     }
 }
 
@@ -486,6 +526,37 @@ mod tests {
         assert_eq!(font, "Fonts\\FRIZQT__.TTF");
         assert_eq!(parse(&[0, 0]).unwrap().0, vec![]);
         assert!(parse(&[1, 0, 1]).is_err());
+    }
+
+    #[test]
+    fn bubbles_live_thirty_seconds_and_fade_out() {
+        assert_eq!(fade_level(Duration::ZERO), 24);
+        assert_eq!(fade_level(Duration::from_secs(22)), 24);
+        assert_eq!(fade_level(Duration::from_secs(26)), 12);
+        assert_eq!(fade_level(LIFE), 0);
+        let mut book = FontBook::new();
+        for (name, data) in crate::fonts::fallback_fonts() {
+            let _ = book.add_fallback(&name, data);
+        }
+        let mut b = Bubbles::default();
+        let t0 = Instant::now();
+        let tr = |_: &str| Some("[DE] Bonsoir".to_string());
+        let alpha_max = |u: &Update| u.canvas.as_ref().map_or(0, |c| c.px.iter().map(|p| p >> 24).max().unwrap_or(0));
+        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], "Fonts\\FRIZQT__.TTF".into(), t0);
+        let full = alpha_max(&b.tick(&mut book, &tr, &[], t0)[0]);
+        // L'addon la garde après la bulle du jeu : à 26 s, à moitié effacée.
+        let t26 = t0 + Duration::from_secs(26);
+        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t26);
+        let half = alpha_max(&b.tick(&mut book, &tr, &[], t26)[0]);
+        assert!(half < full * 6 / 10 && half > full * 4 / 10, "{full} -> {half}");
+        // 30 s : retirée.
+        let t30 = t0 + LIFE;
+        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t30);
+        let ups = b.tick(&mut book, &tr, &[], t30);
+        assert!(ups.iter().all(|u| u.canvas.is_none()) && !b.active());
+        // Renvoyée encore par l'addon : pas reprise.
+        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t30 + Duration::from_secs(1));
+        assert!(!b.active(), "bulle expirée reprise");
     }
 
     #[test]

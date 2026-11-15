@@ -85,6 +85,12 @@ h1, h2, h3 { font-family: var(--display); font-weight: normal; color: var(--or-c
 .t-sable { background-color: #4a463c; background-image: repeating-linear-gradient(0deg, var(--hatch) 0 1px, transparent 1px 6px), repeating-linear-gradient(90deg, var(--hatch) 0 1px, transparent 1px 6px); }
 .t-vert { background-color: var(--sinople); background-image: repeating-linear-gradient(45deg, var(--hatch) 0 1px, transparent 1px 6px); }
 .t-or { background-color: var(--medaillon); background-image: radial-gradient(rgba(0, 0, 0, 0.28) 1.1px, transparent 1.5px); background-size: 6px 6px; }
+.t-bleu { background-color: #2f78d6; background-image: radial-gradient(rgba(0, 0, 0, 0.28) 1.1px, transparent 1.5px); background-size: 6px 6px; }
+.t-jaune { background-color: #e3c13a; background-image: radial-gradient(rgba(0, 0, 0, 0.28) 1.1px, transparent 1.5px); background-size: 6px 6px; }
+.t-violet { background-color: #9b45e0; background-image: radial-gradient(rgba(0, 0, 0, 0.28) 1.1px, transparent 1.5px); background-size: 6px 6px; }
+/* Modèle plus gros que la place pendant le jeu : sa couleur, rayée (pris quand WoW laisse la place). */
+.juste { background-image: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.5) 0 3px, transparent 3px 7px); background-size: auto; }
+.name .sw { align-self: center; }
 .t-gules { background-color: var(--gueules); background-image: repeating-linear-gradient(90deg, var(--hatch) 0 1px, transparent 1px 5px); }
 .t-argent { background: var(--libre); box-shadow: inset 0 0 0 1px var(--filet); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--terne); }
@@ -204,20 +210,11 @@ footer .path { overflow-wrap: anywhere; }
 .md b { color: var(--or-clair); font-weight: 600; }
 .md code { font: 12.5px Consolas, "Cascadia Mono", monospace; background: rgba(0, 0, 0, 0.35); padding: 0 4px; border-radius: 2px; overflow-wrap: anywhere; }
 
-/* Guide d'installation en vidéo (0.16.4) : lecteur chargé au clic seulement (rien n'est demandé à
-   YouTube avant), jamais lancé tout seul. */
-.guide { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px 22px; align-items: center;
-  margin: 14px 0 4px; padding: 14px; background: var(--fer); border: 1px solid var(--filet); box-shadow: 0 0 0 1px #000; }
+/* Ce que fait l'addon une fois installé, et d'où viennent ses mises à jour (0.16.5). */
+.guide { margin: 14px 0 4px; padding: 14px 18px; background: var(--fer); border: 1px solid var(--filet); box-shadow: 0 0 0 1px #000; }
 .guide h2 { font-size: 20px; margin: 0 0 6px; }
-.guide p { margin: 4px 0; font-size: 14px; color: var(--terne); }
+.guide p { margin: 4px 0; font-size: 14px; color: var(--terne); max-width: 80ch; }
 .guide a { color: var(--or-clair); overflow-wrap: anywhere; }
-.player { position: relative; aspect-ratio: 16 / 9; width: 100%; background: #000; border: 1px solid var(--or-sombre); overflow: hidden; }
-.player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-.facade { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; cursor: pointer; color: var(--or-clair);
-  background: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.7)), url("/banniere.jpg") left center / cover; font: 600 14px var(--body); }
-.facade svg { display: block; margin: 0 auto 8px; filter: drop-shadow(0 2px 4px #000); transition: transform 150ms ease; }
-.facade:hover svg, .facade:focus-visible svg { transform: scale(1.08); }
-@media (max-width: 760px) { .guide { grid-template-columns: 1fr; } }
 
 @media (max-width: 760px) {
   .wrap { padding: 16px; }
@@ -253,18 +250,12 @@ footer .path { overflow-wrap: anywhere; }
   <section class="update" id="update" aria-live="polite" hidden></section>
 
   <section class="guide" aria-labelledby="gh">
-    <div class="player" id="player">
-      <button class="facade" id="facade" type="button">
-        <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="rgba(0,0,0,0.55)" stroke="#e6c77e" stroke-width="2.5"/><path d="M26 20 46 32 26 44z" fill="#e6c77e"/></svg>
-        <span data-t="guide_play">Lire la vidéo</span>
-      </button>
-    </div>
-    <div>
-      <h2 id="gh" data-t="guide_title">Guide d'installation</h2>
-      <p data-t="guide_note">La vidéo n'est chargée depuis YouTube qu'au clic.</p>
-      <p><span data-t="guide_updates">Les mises à jour se font automatiquement depuis</span><br>
-        <a href="https://github.com/Heaumite/chevaliers-translators" target="_blank" rel="noopener">github.com/Heaumite/chevaliers-translators</a></p>
-    </div>
+    <h2 id="gh" data-t="guide_title">L'addon une fois installé</h2>
+    <p data-t="guide_text">Il fonctionne pour toutes les versions de World of Warcraft, dans toutes les langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, peu importe de quel pays il vient.</p>
+    <p><span data-t="guide_music">Musique de l'auteur de l'addon :</span>
+      <a href="https://www.youtube.com/watch?v=yvU-hxWE3VA" target="_blank" rel="noopener">youtube.com/watch?v=yvU-hxWE3VA</a></p>
+    <p><span data-t="guide_updates">L'addon se met à jour automatiquement depuis</span>
+      <a href="https://github.com/Heaumite/chevaliers-translators" target="_blank" rel="noopener">github.com/Heaumite/chevaliers-translators</a></p>
   </section>
 
   <section class="card" aria-labelledby="gpu">
@@ -304,7 +295,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const LANGS = ["fr", "en", "de", "es", "it", "ru"];
 const I18N = {
   fr: {
-    guide_title: "Guide d'installation", guide_play: "Lire la vidéo", guide_note: "La vidéo n'est chargée depuis YouTube qu'au clic.", guide_updates: "Les mises à jour se font automatiquement depuis",
+    guide_title: "L'addon une fois installé", guide_text: "Il fonctionne pour toutes les versions de World of Warcraft, dans toutes les langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, peu importe de quel pays il vient.", guide_updates: "L'addon se met à jour automatiquement depuis", guide_music: "Musique de l'auteur de l'addon :", maj_new: "Nouvelle version publiée par l'éditeur.", maj_btn: "Mettre à jour ({x})", maj_ready: "Nouvelle version téléchargée : elle remplace l'ancienne à la fermeture de WoW ou au prochain lancement.",
     locale: "fr-FR", gb: "Go", mbs: "Mo/s", lang_label: "Langue de la page",
     brand_sub: "Modèles de traduction", demo: "Démonstration", analyzing: "Analyse de votre PC…",
     models_title: "Modèles de traduction",
@@ -313,7 +304,8 @@ const I18N = {
     no_gpu: "Pas de carte graphique utilisable",
     cpu_lead: "La traduction tournera sur le processeur ({cpu}, {n} fils de calcul), plus lentement.",
     lead: "{total} de mémoire vidéo. Pendant le jeu, <strong>{free} restent libres</strong> d'après l'estimation : un modèle jusqu'à <strong>{usable}</strong> tient sans gêner WoW. Plus gros, il est pris quand WoW laisse la place : sous {margin} libres (saturation), la traduction redescend d'un cran, et remonte quand la place revient.",
-    seg_other: "Windows et autres programmes", seg_wow_measured: "WoW (mesuré)", seg_wow_ref: "WoW (référence, raids compris)",
+    lead_real: "{total} de mémoire vidéo. Pendant le jeu, <strong>{free} restent libres</strong> d'après les mesures sur ce PC : un modèle jusqu'à <strong>{usable}</strong> tient sans gêner WoW. Plus gros, il est pris quand WoW laisse la place : sous {margin} libres (saturation), la traduction redescend d'un cran, et remonte quand la place revient.",
+    seg_other: "Windows et autres programmes", seg_wow_now: "WoW (en ce moment)", seg_wow_peak: "WoW (plus haut mesuré en jeu)", seg_wow_rule: "WoW (règle de l'installation)", now_suffix: " (en ce moment)", vram_now: "de mémoire vidéo (en ce moment)",
     seg_only_when: " (seulement quand WoW laisse la place)", seg_model: "Modèle", seg_margin: "Seuil de saturation", seg_free: "Libre",
     missing: "manque {x}", on_cpu: "sur le processeur", on_gpu: "sur la carte",
     trial: "Test en jeu {where} : {r}", not_tested: "Pas encore testé en jeu sur ce PC.",
@@ -340,7 +332,7 @@ const I18N = {
     new_title: "Version {v} installée", new_lead: "Voici ses nouveautés.", new_close: "Masquer",
   },
   en: {
-    guide_title: "Installation guide", guide_play: "Play the video", guide_note: "The video is only loaded from YouTube when you click it.", guide_updates: "Updates are installed automatically from",
+    guide_title: "Once installed", guide_text: "It works with every version of World of Warcraft, in all European languages: it translates foreign languages into the player's own language, whatever country they come from.", guide_updates: "The addon updates itself automatically from", guide_music: "Music by the addon's author:", maj_new: "New version published by its maker.", maj_btn: "Update ({x})", maj_ready: "New version downloaded: it replaces the old one when WoW closes or at the next launch.",
     locale: "en-US", gb: "GB", mbs: "MB/s", lang_label: "Page language",
     brand_sub: "Translation models", demo: "Demo", analyzing: "Analyzing your PC…",
     models_title: "Translation models",
@@ -349,7 +341,8 @@ const I18N = {
     no_gpu: "No usable graphics card",
     cpu_lead: "Translation will run on the processor ({cpu}, {n} threads), more slowly.",
     lead: "{total} of video memory. While playing, an estimated <strong>{free} stays free</strong>: a model up to <strong>{usable}</strong> fits without hindering WoW. A larger one is used when WoW leaves room: below {margin} free (saturation), translation steps down one level, and steps back up when room returns.",
-    seg_other: "Windows and other programs", seg_wow_measured: "WoW (measured)", seg_wow_ref: "WoW (reference, raids included)",
+    lead_real: "{total} of video memory. While playing, as measured on this PC, <strong>{free} stays free</strong>: a model up to <strong>{usable}</strong> fits without hindering WoW. A larger one is used when WoW leaves room: below {margin} free (saturation), translation steps down one level, and steps back up when room returns.",
+    seg_other: "Windows and other programs", seg_wow_now: "WoW (right now)", seg_wow_peak: "WoW (highest measured in game)", seg_wow_rule: "WoW (installation rule)", now_suffix: " (right now)", vram_now: "of video memory (right now)",
     seg_only_when: " (only when WoW leaves room)", seg_model: "Model", seg_margin: "Saturation threshold", seg_free: "Free",
     missing: "{x} short", on_cpu: "on the processor", on_gpu: "on the graphics card",
     trial: "In-game test {where}: {r}", not_tested: "Not yet tested in game on this PC.",
@@ -376,7 +369,7 @@ const I18N = {
     new_title: "Version {v} installed", new_lead: "Here is what's new.", new_close: "Hide",
   },
   de: {
-    guide_title: "Installationsanleitung", guide_play: "Video abspielen", guide_note: "Das Video wird erst beim Klick von YouTube geladen.", guide_updates: "Updates kommen automatisch von",
+    guide_title: "Nach der Installation", guide_text: "Es funktioniert mit allen Versionen von World of Warcraft, in allen europäischen Sprachen: Es übersetzt Fremdsprachen in die Muttersprache des Spielers, egal aus welchem Land er kommt.", guide_updates: "Das Addon aktualisiert sich automatisch von", guide_music: "Musik des Addon-Autors:", maj_new: "Neue Version vom Herausgeber veröffentlicht.", maj_btn: "Aktualisieren ({x})", maj_ready: "Neue Version heruntergeladen: Sie ersetzt die alte, wenn WoW geschlossen wird oder beim nächsten Start.",
     locale: "de-DE", gb: "GB", mbs: "MB/s", lang_label: "Sprache der Seite",
     brand_sub: "Übersetzungsmodelle", demo: "Demo", analyzing: "Ihr PC wird analysiert…",
     models_title: "Übersetzungsmodelle",
@@ -385,7 +378,8 @@ const I18N = {
     no_gpu: "Keine nutzbare Grafikkarte",
     cpu_lead: "Die Übersetzung läuft auf dem Prozessor ({cpu}, {n} Threads), langsamer.",
     lead: "{total} Grafikspeicher. Während des Spiels bleiben schätzungsweise <strong>{free} frei</strong>: Ein Modell bis <strong>{usable}</strong> passt, ohne WoW zu stören. Ein größeres wird genutzt, wenn WoW Platz lässt: Unter {margin} frei (Sättigung) geht die Übersetzung eine Stufe zurück und steigt wieder, sobald Platz frei wird.",
-    seg_other: "Windows und andere Programme", seg_wow_measured: "WoW (gemessen)", seg_wow_ref: "WoW (Referenzwert, inkl. Raids)",
+    lead_real: "{total} Grafikspeicher. Während des Spiels bleiben laut Messungen auf diesem PC <strong>{free} frei</strong>: Ein Modell bis <strong>{usable}</strong> passt, ohne WoW zu stören. Ein größeres wird genutzt, wenn WoW Platz lässt: Unter {margin} frei (Sättigung) geht die Übersetzung eine Stufe zurück und steigt wieder, sobald Platz frei wird.",
+    seg_other: "Windows und andere Programme", seg_wow_now: "WoW (gerade)", seg_wow_peak: "WoW (höchster im Spiel gemessener Wert)", seg_wow_rule: "WoW (Installationsregel)", now_suffix: " (gerade)", vram_now: "Grafikspeicher (gerade)",
     seg_only_when: " (nur wenn WoW Platz lässt)", seg_model: "Modell", seg_margin: "Sättigungsschwelle", seg_free: "Frei",
     missing: "{x} fehlen", on_cpu: "auf dem Prozessor", on_gpu: "auf der Grafikkarte",
     trial: "Test im Spiel {where}: {r}", not_tested: "Auf diesem PC noch nicht im Spiel getestet.",
@@ -412,7 +406,7 @@ const I18N = {
     new_title: "Version {v} installiert", new_lead: "Das ist neu.", new_close: "Ausblenden",
   },
   es: {
-    guide_title: "Guía de instalación", guide_play: "Reproducir el vídeo", guide_note: "El vídeo solo se carga desde YouTube al hacer clic.", guide_updates: "Las actualizaciones llegan automáticamente desde",
+    guide_title: "Una vez instalado", guide_text: "Funciona con todas las versiones de World of Warcraft, en todos los idiomas europeos: traduce los idiomas extranjeros al idioma del jugador, sea cual sea su país.", guide_updates: "El addon se actualiza automáticamente desde", guide_music: "Música del autor del addon:", maj_new: "Nueva versión publicada por su editor.", maj_btn: "Actualizar ({x})", maj_ready: "Nueva versión descargada: sustituye a la anterior al cerrar WoW o en el próximo inicio.",
     locale: "es-ES", gb: "GB", mbs: "MB/s", lang_label: "Idioma de la página",
     brand_sub: "Modelos de traducción", demo: "Demostración", analyzing: "Analizando su PC…",
     models_title: "Modelos de traducción",
@@ -421,7 +415,8 @@ const I18N = {
     no_gpu: "No hay tarjeta gráfica utilizable",
     cpu_lead: "La traducción se ejecutará en el procesador ({cpu}, {n} hilos), más despacio.",
     lead: "{total} de memoria de vídeo. Durante el juego, según la estimación, <strong>quedan {free} libres</strong>: un modelo de hasta <strong>{usable}</strong> cabe sin molestar a WoW. Uno más grande se usa cuando WoW deja sitio: por debajo de {margin} libres (saturación), la traducción baja un nivel y vuelve a subir cuando hay sitio.",
-    seg_other: "Windows y otros programas", seg_wow_measured: "WoW (medido)", seg_wow_ref: "WoW (referencia, bandas incluidas)",
+    lead_real: "{total} de memoria de vídeo. Durante el juego, según las mediciones en este PC, <strong>quedan {free} libres</strong>: un modelo de hasta <strong>{usable}</strong> cabe sin molestar a WoW. Uno más grande se usa cuando WoW deja sitio: por debajo de {margin} libres (saturación), la traducción baja un nivel y vuelve a subir cuando hay sitio.",
+    seg_other: "Windows y otros programas", seg_wow_now: "WoW (ahora)", seg_wow_peak: "WoW (máximo medido en el juego)", seg_wow_rule: "WoW (regla de instalación)", now_suffix: " (ahora)", vram_now: "de memoria de vídeo (ahora)",
     seg_only_when: " (solo cuando WoW deja sitio)", seg_model: "Modelo", seg_margin: "Umbral de saturación", seg_free: "Libre",
     missing: "faltan {x}", on_cpu: "en el procesador", on_gpu: "en la tarjeta",
     trial: "Prueba en el juego {where}: {r}", not_tested: "Aún no probado en el juego en este PC.",
@@ -448,7 +443,7 @@ const I18N = {
     new_title: "Versión {v} instalada", new_lead: "Estas son sus novedades.", new_close: "Ocultar",
   },
   it: {
-    guide_title: "Guida all'installazione", guide_play: "Riproduci il video", guide_note: "Il video viene caricato da YouTube solo al clic.", guide_updates: "Gli aggiornamenti arrivano automaticamente da",
+    guide_title: "Una volta installato", guide_text: "Funziona con tutte le versioni di World of Warcraft, in tutte le lingue europee: traduce le lingue straniere nella lingua del giocatore, da qualunque paese provenga.", guide_updates: "L'addon si aggiorna automaticamente da", guide_music: "Musica dell'autore dell'addon:", maj_new: "Nuova versione pubblicata dall'editore.", maj_btn: "Aggiorna ({x})", maj_ready: "Nuova versione scaricata: sostituisce la precedente alla chiusura di WoW o al prossimo avvio.",
     locale: "it-IT", gb: "GB", mbs: "MB/s", lang_label: "Lingua della pagina",
     brand_sub: "Modelli di traduzione", demo: "Dimostrazione", analyzing: "Analisi del PC in corso…",
     models_title: "Modelli di traduzione",
@@ -457,7 +452,8 @@ const I18N = {
     no_gpu: "Nessuna scheda grafica utilizzabile",
     cpu_lead: "La traduzione girerà sul processore ({cpu}, {n} thread), più lentamente.",
     lead: "{total} di memoria video. Durante il gioco, secondo la stima, <strong>restano liberi {free}</strong>: un modello fino a <strong>{usable}</strong> ci sta senza disturbare WoW. Uno più grande viene usato quando WoW lascia spazio: sotto {margin} liberi (saturazione), la traduzione scende di un livello e risale quando lo spazio torna.",
-    seg_other: "Windows e altri programmi", seg_wow_measured: "WoW (misurato)", seg_wow_ref: "WoW (riferimento, incursioni comprese)",
+    lead_real: "{total} di memoria video. Durante il gioco, secondo le misure su questo PC, <strong>restano liberi {free}</strong>: un modello fino a <strong>{usable}</strong> ci sta senza disturbare WoW. Uno più grande viene usato quando WoW lascia spazio: sotto {margin} liberi (saturazione), la traduzione scende di un livello e risale quando lo spazio torna.",
+    seg_other: "Windows e altri programmi", seg_wow_now: "WoW (adesso)", seg_wow_peak: "WoW (massimo misurato in gioco)", seg_wow_rule: "WoW (regola d'installazione)", now_suffix: " (adesso)", vram_now: "di memoria video (adesso)",
     seg_only_when: " (solo quando WoW lascia spazio)", seg_model: "Modello", seg_margin: "Soglia di saturazione", seg_free: "Libero",
     missing: "mancano {x}", on_cpu: "sul processore", on_gpu: "sulla scheda",
     trial: "Test in gioco {where}: {r}", not_tested: "Non ancora testato in gioco su questo PC.",
@@ -484,7 +480,7 @@ const I18N = {
     new_title: "Versione {v} installata", new_lead: "Ecco le novità.", new_close: "Nascondi",
   },
   ru: {
-    guide_title: "Руководство по установке", guide_play: "Смотреть видео", guide_note: "Видео загружается с YouTube только по щелчку.", guide_updates: "Обновления устанавливаются автоматически из",
+    guide_title: "После установки", guide_text: "Работает во всех версиях World of Warcraft, со всеми европейскими языками: переводит иностранные языки на родной язык игрока, из какой бы страны он ни был.", guide_updates: "Аддон обновляется автоматически из", guide_music: "Музыка автора аддона:", maj_new: "Издатель выпустил новую версию.", maj_btn: "Обновить ({x})", maj_ready: "Новая версия загружена: она заменит старую после закрытия WoW или при следующем запуске.",
     locale: "ru-RU", gb: "ГБ", mbs: "МБ/с", lang_label: "Язык страницы",
     brand_sub: "Модели перевода", demo: "Демонстрация", analyzing: "Анализ вашего ПК…",
     models_title: "Модели перевода",
@@ -493,7 +489,8 @@ const I18N = {
     no_gpu: "Нет подходящей видеокарты",
     cpu_lead: "Перевод будет выполняться на процессоре ({cpu}, потоков: {n}), медленнее.",
     lead: "{total} видеопамяти. Во время игры, по оценке, <strong>остаётся свободно {free}</strong>: модель до <strong>{usable}</strong> помещается, не мешая WoW. Более крупная используется, когда WoW освобождает место: если свободно меньше {margin} (насыщение), перевод опускается на ступень и возвращается, когда место освобождается.",
-    seg_other: "Windows и другие программы", seg_wow_measured: "WoW (измерено)", seg_wow_ref: "WoW (эталон, с учётом рейдов)",
+    lead_real: "{total} видеопамяти. Во время игры, по измерениям на этом ПК, <strong>остаётся свободно {free}</strong>: модель до <strong>{usable}</strong> помещается, не мешая WoW. Более крупная используется, когда WoW освобождает место: если свободно меньше {margin} (насыщение), перевод опускается на ступень и возвращается, когда место освобождается.",
+    seg_other: "Windows и другие программы", seg_wow_now: "WoW (сейчас)", seg_wow_peak: "WoW (максимум, измеренный в игре)", seg_wow_rule: "WoW (правило установки)", now_suffix: " (сейчас)", vram_now: "видеопамяти (сейчас)",
     seg_only_when: " (только когда WoW освобождает место)", seg_model: "Модель", seg_margin: "Порог насыщения", seg_free: "Свободно",
     missing: "не хватает {x}", on_cpu: "на процессоре", on_gpu: "на видеокарте",
     trial: "Проверка в игре {where}: {r}", not_tested: "Ещё не проверено в игре на этом ПК.",
@@ -583,7 +580,21 @@ function stud(filled) {
 
 function shownModel() {
   if (!state) return null;
-  return state.modeles.find((m) => m.id === preview) || state.modeles.find((m) => m.actif) || state.modeles[0];
+  // Modèle survolé, sinon celui chargé en ce moment (ressources réelles), sinon l'actif.
+  const loaded = state.carte && state.carte.modele_charge;
+  return state.modeles.find((m) => m.id === preview) || (loaded && state.modeles.find((m) => m.id === loaded))
+    || state.modeles.find((m) => m.actif) || state.modeles[0];
+}
+
+// Couleur du modèle (0.16.6) : EuroLLM 1.7B bleu, TranslateGemma 4B jaune, SalamandraTA 7B violet.
+function tintOf(m) { return "t-" + ((m && m.teinte) || "bleu"); }
+
+// Mémoire vidéo du modèle : celle qu'il prend vraiment s'il est chargé, sinon son empreinte
+// (mesurée sur ce PC, ou estimée).
+function vramOf(m) {
+  const c = state.carte;
+  const now = !!(c && m && c.modele_charge === m.id && c.modele_reel > 0);
+  return { bytes: now ? c.modele_reel : (m ? m.empreinte : 0), now };
 }
 
 function renderGauge() {
@@ -599,16 +610,21 @@ function renderGauge() {
   $("gauge").hidden = false;
   $("gpu").textContent = c.nom;
   const usable = Math.max(0, c.libre_jeu - c.marge);
-  $("lead").innerHTML = t("lead", { total: go(c.total), free: go(c.libre_jeu), usable: go(usable), margin: go(c.marge) });
-  const need = m ? m.empreinte : 0;
-  const fits = m && need + c.marge <= c.libre_jeu;
+  // Règle des 7 Go seulement à l'installation ; ensuite les mesures réelles (0.16.6).
+  const real = c.wow_source && c.wow_source !== "regle";
+  $("lead").innerHTML = t(real ? "lead_real" : "lead", { total: go(c.total), free: go(c.libre_jeu), usable: go(usable), margin: go(c.marge) });
+  const v = vramOf(m);
+  const need = v.bytes;
+  const fits = m && (v.now || need + c.marge <= c.libre_jeu);
   const model = m && m.lieu !== "cpu" ? need : 0;
   const free = c.total - c.autres - c.wow - model - c.marge;
   const pct = (b) => (Math.max(0, b) / c.total) * 100 + "%";
+  const wowLabel = { maintenant: "seg_wow_now", pic: "seg_wow_peak", regle: "seg_wow_rule" }[c.wow_source] || "seg_wow_rule";
+  const modelLabel = m ? m.nom + (v.now ? t("now_suffix") : fits ? "" : t("seg_only_when")) : t("seg_model");
   const segs = [
     ["t-sable", c.autres, t("seg_other")],
-    ["t-vert", c.wow, c.wow_mesure ? t("seg_wow_measured") : t("seg_wow_ref")],
-    [fits ? "t-or" : "t-gules", model, m ? m.nom + (fits ? "" : t("seg_only_when")) : t("seg_model")],
+    ["t-vert", c.wow, t(wowLabel)],
+    [tintOf(m) + (fits ? "" : " juste"), model, modelLabel],
     ["t-gules", c.marge, t("seg_margin")],
     ["t-argent", free, t("seg_free")],
   ];
@@ -654,15 +670,17 @@ function estimLine(m) {
 function rowKey(m) {
   const d = m.dl;
   return JSON.stringify([lang, m.installe, m.actif, m.high, m.conseille, m.rang, m.estimation && m.estimation.raison,
-    m.lieu, m.raison, m.essai && m.essai.resume, m.empreinte,
-    d && d.etat, d && d.message, confirmDelete.has(m.id), state.carte && state.carte.libre_jeu]);
+    m.lieu, m.raison, m.essai && m.essai.resume, m.empreinte, state.carte && state.carte.modele_charge,
+    state.carte && state.carte.modele_reel,
+    d && d.etat, d && d.message, confirmDelete.has(m.id), state.carte && state.carte.libre_jeu,
+    m.maj && m.maj.prete, m.maj && m.maj.dl && m.maj.dl.etat, m.maj && m.maj.dl && m.maj.dl.message]);
 }
 
 function actionHtml(m) {
   const d = m.dl;
   if (d && d.etat === "en_cours") {
     return `<div class="progress" data-progress="${m.id}">
-      <div class="bar"><i class="t-or"></i></div><span></span></div>
+      <div class="bar"><i class="${tintOf(m)}"></i></div><span></span></div>
       <button class="link" data-act="annuler" data-id="${m.id}">${esc(t("cancel"))}</button>`;
   }
   let html = "";
@@ -673,6 +691,21 @@ function actionHtml(m) {
       html += `<button class="btn secondary" data-act="activer" data-id="${m.id}">${esc(t("activate"))}</button>`;
     } else {
       html += `<button class="btn secondary" disabled>${esc(t("activate"))}</button>`;
+    }
+    // Nouvelle version publiée par l'éditeur (0.16.6).
+    const u = m.maj;
+    if (u) {
+      const ud = u.dl;
+      if (ud && ud.etat === "en_cours") {
+        html += `<div class="progress" data-progress="maj:${m.id}"><div class="bar"><i class="${tintOf(m)}"></i></div><span></span></div>
+          <button class="link" data-act="annuler" data-id="maj:${m.id}">${esc(t("cancel"))}</button>`;
+      } else if (u.prete) {
+        html += `<p class="estim">${esc(t("maj_ready"))}</p>`;
+      } else {
+        if (ud && ud.etat === "erreur") html += `<p class="err">${esc(ud.message)}</p>`;
+        html += `<p class="estim">${esc(t("maj_new"))}</p>
+          <button class="btn primary" data-act="maj_modele" data-id="${m.id}">${esc(t("maj_btn", { x: go2(u.taille) }))}</button>`;
+      }
     }
     if (!m.low) {
       html += confirmDelete.has(m.id)
@@ -708,18 +741,20 @@ function rowHtml(m) {
   if (m.lieu === "cpu") {
     vram = `<b>${esc(t("cpu_title"))}</b>${esc(t("cpu_threads", { n: state.processeur.fils }))}`;
   } else {
-    const ratio = c ? Math.min(1, m.empreinte / Math.max(1, c.libre_jeu - c.marge)) : 0;
-    // Rouge : plus gros que la place estimée pendant le jeu (pris seulement quand WoW la laisse) ;
-    // gris : écarté par son test.
-    const tooBig = c && m.empreinte + c.marge > c.libre_jeu;
-    const tint = tooBig ? "t-gules" : bad ? "t-sable" : "t-or";
-    vram = `<b>${go(m.empreinte)}</b>${esc(t("vram_of", { how: m.mesuree ? t("measured") : t("estimated") }))}
+    const v = vramOf(m);
+    const ratio = c ? Math.min(1, v.bytes / Math.max(1, c.libre_jeu - c.marge)) : 0;
+    // Couleur du modèle ; rayée : plus gros que la place pendant le jeu (pris seulement quand
+    // WoW la laisse) ; gris : écarté par son test.
+    const tooBig = c && !v.now && v.bytes + c.marge > c.libre_jeu;
+    const tint = bad ? "t-sable" : tintOf(m) + (tooBig ? " juste" : "");
+    const how = v.now ? t("vram_now") : t("vram_of", { how: m.mesuree ? t("measured") : t("estimated") });
+    vram = `<b>${go(v.bytes)}</b>${esc(how)}
       ${c ? `<div class="mini" aria-hidden="true"><i class="${tint}" style="width:${ratio * 100}%"></i></div>` : ""}`;
   }
   return `<div class="row${m.actif ? " active" : ""}${bad ? " off" : ""}" data-row="${m.id}">
     <div class="studs" role="img" aria-label="${esc(t("quality", { q: m.qualite }))}">${studs}</div>
     <div>
-      <div class="name"><h3>${esc(m.nom)}</h3>${tags}</div>
+      <div class="name"><span class="sw ${tintOf(m)}" aria-hidden="true"></span><h3>${esc(m.nom)}</h3>${tags}</div>
       <p class="facts">${tagText ? esc(tagText) + " " : ""}${facts}</p>
       <p class="why${bad ? " bad" : ""}">${esc(cap(m.raison))}.</p>
       ${estimLine(m)}
@@ -734,8 +769,10 @@ function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slic
 
 function updateProgress() {
   for (const el of document.querySelectorAll("[data-progress]")) {
-    const m = state.modeles.find((x) => x.id === el.dataset.progress) || (el.dataset.progress === "moteur" ? state.moteur : null);
-    const d = m && m.dl;
+    const key = el.dataset.progress;
+    const upd = key.startsWith("maj:");
+    const m = state.modeles.find((x) => x.id === (upd ? key.slice(4) : key)) || (key === "moteur" ? state.moteur : null);
+    const d = m && (upd ? m.maj && m.maj.dl : m.dl);
     if (!d) continue;
     const p = d.total ? d.recu / d.total : 0;
     el.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
@@ -955,16 +992,6 @@ document.addEventListener("click", (ev) => {
     t0.disabled = true;
     act(t0.dataset.act, t0.dataset.id);
   }
-});
-// Vidéo du guide : le lecteur YouTube (sans cookies) remplace l'affiche au clic du joueur.
-$("facade").addEventListener("click", () => {
-  const f = document.createElement("iframe");
-  f.src = "https://www.youtube-nocookie.com/embed/VoAq1cGtAFY?autoplay=1&rel=0";
-  f.title = t("guide_title");
-  f.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
-  f.referrerPolicy = "strict-origin-when-cross-origin";
-  f.allowFullscreen = true;
-  $("player").replaceChildren(f);
 });
 $("lang").addEventListener("change", (ev) => {
   const l = ev.target.value;

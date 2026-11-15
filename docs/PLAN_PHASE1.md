@@ -193,3 +193,15 @@ ouverte depuis le guide en jeu par le bouton « Regarder la vidéo ».
 | --- | --- |
 | Langue de l'interface | Français d'abord, anglais ensuite |
 | Ordre des jalons | J2, J3, puis J4 et J5 en parallèle, J6 après une bêta |
+
+**0.16.5 (13/11)** : guide en jeu et fenêtre de l'application : présentation de l'addon une fois
+installé (toutes les versions de WoW, toutes les langues européennes vers celle du joueur) et dépôt
+GitHub des mises à jour ; lien et lecteur vidéo retirés.
+
+**0.16.6 (15/11)** : téléchargements des modèles protégés par un verrou entre processus (plus de
+fichier reçu deux fois), modèle déchargé à la fermeture de WoW et de l'application, bulles de 30 s
+effacées en fondu, avis en jeu (application pas active, changement de modèle, `/reload`), lancement
+au démarrage de Windows (à cocher), vérification quotidienne des nouvelles versions des modèles sur
+Hugging Face, délai d'affichage propre au modèle actif ; fenêtre des modèles aux couleurs des
+modèles (bleu, jaune, violet) avec les ressources réellement utilisées, règle des 7 Go limitée à
+l'installation.

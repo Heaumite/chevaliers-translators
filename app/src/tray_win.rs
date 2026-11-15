@@ -51,6 +51,7 @@ const CMD_QUIT: usize = 3;
 const CMD_UNINSTALL: usize = 4;
 const CMD_UPDATE: usize = 5;
 const CMD_AUTO_UPDATE: usize = 6;
+const CMD_AUTOSTART: usize = 8;
 const CMD_SHOW_UPDATE: usize = 7;
 
 /// Quitter confirmé dans le menu.
@@ -506,6 +507,7 @@ fn show_menu(hwnd: HWND) {
             wide("Désinstaller..."),
             wide("Rechercher une mise à jour"),
             wide("Rechercher les mises à jour automatiquement"),
+            wide("Lancer au démarrage de Windows"),
         ];
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, head.as_ptr());
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status.as_ptr());
@@ -524,6 +526,9 @@ fn show_menu(hwnd: HWND) {
         AppendMenuW(menu, MF_STRING, CMD_UPDATE, items[4].as_ptr());
         let checked = if crate::maj::auto_enabled() { windows_sys::Win32::UI::WindowsAndMessaging::MF_CHECKED } else { 0 };
         AppendMenuW(menu, MF_STRING | checked, CMD_AUTO_UPDATE, items[5].as_ptr());
+        // Lancement au démarrage de Windows (0.16.6) : décoché par défaut.
+        let auto = if crate::demarrage::enabled() { windows_sys::Win32::UI::WindowsAndMessaging::MF_CHECKED } else { 0 };
+        AppendMenuW(menu, MF_STRING | auto, CMD_AUTOSTART, items[6].as_ptr());
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(menu, MF_STRING, CMD_UNINSTALL, items[3].as_ptr());
         AppendMenuW(menu, MF_STRING, CMD_QUIT, items[2].as_ptr());
@@ -542,6 +547,16 @@ fn show_menu(hwnd: HWND) {
             CMD_UNINSTALL => confirm_uninstall(hwnd),
             CMD_UPDATE => crate::maj::check_now(),
             CMD_AUTO_UPDATE => crate::maj::set_auto(!crate::maj::auto_enabled()),
+            CMD_AUTOSTART => {
+                let on = !crate::demarrage::enabled();
+                match crate::demarrage::set(on) {
+                    Ok(()) => crate::say!(
+                        "[démarrage] lancement au démarrage de Windows {}",
+                        if on { "activé (sans fenêtre, icône près de l'horloge)" } else { "désactivé" }
+                    ),
+                    Err(e) => crate::say!("[démarrage] réglage impossible : {e}"),
+                }
+            }
             _ => {}
         }
     }

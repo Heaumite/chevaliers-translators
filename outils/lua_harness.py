@@ -142,6 +142,9 @@ function Texture:SetColorTexture(r, g, b, a) self.r, self.g, self.b = r, g, b en
 function Texture:Show() self.shown = true end
 function Texture:Hide() self.shown = false end
 function Texture:SetAllPoints() end
+function Texture:SetWidth(w) self.w = w end
+function Texture:SetHeight(h) self.h = h end
+function Texture:SetTexture(path) self.path = path end
 
 local Frame = {}
 Frame.__index = Frame
@@ -157,6 +160,8 @@ function Frame:RegisterEvent(e) self.events[e] = true end
 Frame.SetFrameStrata, Frame.SetFrameLevel, Frame.SetClampedToScreen, Frame.EnableMouse = noop, noop, noop, noop
 Frame.ClearAllPoints, Frame.SetPoint = noop, noop
 function Frame:SetSize(w, h) self.w, self.h = w, h end
+function Frame:SetHeight(h) self.h = h end
+function Frame:SetWidth(w) self.w = w end
 function Frame:SetScale(s) self.scale = s end
 function Frame:Hide() self.shown = false end
 function Frame:Show() self.shown = true end
@@ -179,6 +184,9 @@ function Probe:SetFont(path, size, flags) self.font = path; return true end
 function Probe:SetText(t) self.text = t end
 function Probe:SetWidth(w) self.width = w end
 function Probe:SetHeight(h) self.height = h end
+function Probe:SetTextColor() end
+function Probe:SetJustifyH() end
+function Probe:GetStringHeight() return 24 end
 function Probe:SetIndentedWordWrap(v) self.indented = v end
 function Probe:GetUnboundedStringWidth()
   local w = 0
@@ -484,6 +492,10 @@ def mock(root, binary):
     # Application absente à la connexion : l'addon attend (signe toutes les 10 s) ; coupé pour les
     # tests de trames, essayé plus bas.
     assert ct.waiting is True, "attente de l'application non notée"
+    # Notification en jeu (0.16.6) : addon inactif, lancer l'application puis /reload.
+    toast = g.ChevaliersTranslatorsToast
+    assert toast is not None and toast.shown, "notification « addon inactif » absente"
+    assert "/reload" in toast.text.text, toast.text.text
     ct.waiting = None
 
     w, h = int(1920 * 0.30) + 8, 48
@@ -894,6 +906,39 @@ def mock(root, binary):
         g.TICK(1 / 60)
     assert ct.Bubbles.stats.hidden > hidden0, "bulle sous une fenêtre du jeu"
     g.GameTooltip.visible = False
+    # 0.16.6 : bulle gardée 30 s après celle du jeu : à sa place tant que rien ne bouge, au-dessus
+    # de la barre de nom de celui qui parle si elle est affichée.
+    lua.execute("FACING = 0.731; GetPlayerFacing = function() return FACING end")
+    for _ in range(12):
+        g.TICK(1 / 60)
+    lua.execute("BUBBLE.IsVisible = function() return false end")
+    for _ in range(12):
+        g.TICK(1 / 60)
+    count = "local n = 0 for _, L in pairs(CT_TABLE.Bubbles.live) do if L.gone then n = n + 1 end end return n"
+    assert lua.execute(count) == 1, "bulle disparue du jeu non gardée"
+    assert g.HOLDER.alpha == 1, "cadre de bulle du jeu laissé effacé"
+    lua.execute('''
+      PLATE = { namePlateUnitToken = "nameplate1", GetCenter = function() return 600, 300 end,
+        GetTop = function() return 320 end, GetEffectiveScale = function() return 1 end }
+      C_NamePlate = { GetNamePlates = function() return { PLATE } end }
+      local oldGUID = UnitGUID
+      UnitGUID = function(u) if u == "nameplate1" then return "Player-9" end return oldGUID(u) end
+      FACING = 1.913
+    ''')
+    for _ in range(12):
+        g.TICK(1 / 60)
+    assert lua.execute(count) == 1, "bulle suivant la barre de nom retirée"
+    lua.execute("C_NamePlate = nil")
+    for _ in range(12):
+        g.TICK(1 / 60)
+    assert lua.execute(count) == 0, ("bulle figée gardée alors que le joueur a tourné", ct.Bubbles.lastError, lua.execute("local t = {} for id, L in pairs(CT_TABLE.Bubbles.live) do t[#t+1] = id .. '=' .. tostring(L.face) .. '/' .. tostring(L.gone) end return table.concat(t, ',')"))
+    # Fin de vie (30 s) : plus rien d'envoyé pour elle.
+    lua.execute("FACING = 1.913; BUBBLE.IsVisible = function() return true end")
+    g.TICK(31)
+    for _ in range(12):
+        g.TICK(1 / 60)
+    assert ct.Bubbles.sentSig == "", ct.Bubbles.sentSig
+    assert g.HOLDER.alpha == 1, "bulle du jeu de plus de 30 s laissée effacée"
     # Sa propre bulle (0.16.1) : le message du joueur lui-même est retrouvé aussi (traduit dans le
     # chat, il l'est dans sa bulle) ; un chuchotement envoyé n'a pas de bulle.
     g.FIRE("CHAT_MSG_SAY", "hello", "Testeur Batonnoir", "Commun", "", "Testeur Batonnoir", "", 0, 0, "", 0, 60, "Player-1-0ABC")
@@ -1182,19 +1227,15 @@ def mock(root, binary):
     g.SLASH("guide")
     gf = g.ChevaliersTranslatorsGuide
     assert gf is not None and gf.shown, "guide non affiché"
-    assert gf.video.url == "https://youtu.be/VoAq1cGtAFY" and gf.video.text == gf.video.url, "lien de la vidéo"
+    assert "toutes les versions de World of Warcraft" in gf.about.text, "texte du guide"
+    assert gf.music.url == "https://www.youtube.com/watch?v=yvU-hxWE3VA" and gf.music.text == gf.music.url, "lien de la musique"
     assert gf.repo.url == "https://github.com/Heaumite/chevaliers-translators", "lien du dépôt"
     assert gf.warnings == 1, "addon incompatible absent du guide"
-    assert g.ChevaliersTranslatorsDB.guideSeen == 3
+    assert g.ChevaliersTranslatorsDB.guideSeen == 4
     # Le lien ne se modifie pas : une frappe le remet.
-    gf.video.text = "abc"
-    gf.video.scripts["OnTextChanged"](gf.video, True)
-    assert gf.video.text == gf.video.url
-    # 0.16.4 : bouton « Regarder la vidéo » : demande transmise à l'application.
-    gf.watch.scripts["OnClick"](gf.watch)
-    assert any("Vidéo du guide" in m for m in list(g.LOG.values())[-2:]), list(g.LOG.values())[-2:]
-    out = feed(collect("video"), os.path.join(work, "video"))
-    assert "[demande] video" in out, out
+    gf.repo.text = "abc"
+    gf.repo.scripts["OnTextChanged"](gf.repo, True)
+    assert gf.repo.text == gf.repo.url
     lua.execute("C_AddOns.IsAddOnLoaded = function() return false end")
     print(f"Harnais OK : {decoded} trames peintes par l'addon décodées par ct-outils")
 

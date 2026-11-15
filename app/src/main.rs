@@ -187,6 +187,17 @@ mod app {
         if let Some(p) = log {
             Tray::set_journal(p);
         }
+        // Serveurs de traduction laissés par une version précédente ou un arrêt brutal (0.16.6) :
+        // arrêtés, leur mémoire vidéo rendue.
+        let strays = ct::llama::stop_strays(false);
+        if strays > 0 {
+            ct::say!("{strays} serveur(s) de traduction restés en mémoire arrêtés (mémoire vidéo rendue)");
+        }
+        // Nouvelles versions de modèles déjà téléchargées : mises en place avant toute traduction.
+        for name in ct::modeles_maj::apply_pending(&catalog::models_dir()) {
+            ct::say!("[modèles] nouvelle version de {name} mise en place");
+        }
+        ct::modeles_maj::start_checker(catalog::models_dir(), || !capture_win::wow_windows().is_empty());
         let tray = match Tray::new("En attente de World of Warcraft") {
             Ok(t) => t,
             Err(e) => {
@@ -196,6 +207,8 @@ mod app {
             }
         };
         desktop_shortcut();
+        // Lancement au démarrage activé par le joueur : suit l'exécutable s'il a changé de place.
+        ct::demarrage::follow_exe();
         // Ouverture par le joueur (0.15) : la fenêtre des modèles s'affiche ; « --discret » pour
         // un lancement sans fenêtre.
         if !std::env::args().any(|a| a == "--discret") {
@@ -294,6 +307,15 @@ mod app {
     /// mise à jour ; WoW au premier plan, une bulle d'abord (son clic ouvre la fenêtre), la fenêtre
     /// dès que WoW n'est plus devant. Vrai si la mise à jour vient d'être installée (arrêt).
     fn update_events(tray: &Tray) -> bool {
+        // Nouvelles versions de modèles publiées par leurs éditeurs (0.16.6).
+        for name in ct::modeles_maj::take_news() {
+            tray.notify(
+                "Nouvelle version d'un modèle",
+                &format!("L'éditeur de {name} en a publié une nouvelle version : fenêtre des modèles, « Mettre à jour »."),
+                false,
+            );
+            live_games::notify_in_game("Nouvelle version d'un modèle", &format!("{name} : à mettre à jour dans la fenêtre de l'application."));
+        }
         use std::sync::atomic::Ordering;
         let in_game = ct::overlay_win::Overlay::wow_in_front();
         for e in ct::maj::take_events() {
@@ -385,6 +407,9 @@ mod app {
         }
         if let Some(link) = ct::raccourci::remove() {
             ct::say!("  {} (raccourci du bureau)", link.display());
+        }
+        if ct::demarrage::enabled() && ct::demarrage::set(false).is_ok() {
+            ct::say!("  lancement au démarrage de Windows retiré");
         }
         let later = install::remove_now(&targets);
         if !later.is_empty() {
@@ -546,6 +571,20 @@ mod app {
         match r {
             Ok(()) => {
                 ct::say!("{} traduction arrêtée : {why}", journal::clock());
+                // Modèle déchargé (0.16.6) : le serveur s'arrête avec le moteur ; s'il tarde (une
+                // traduction en cours), il est arrêté au bout de 3 s. Rechargé à l'ouverture de WoW.
+                std::thread::sleep(Duration::from_secs(3));
+                let left = ct::llama::stop_strays(true);
+                ct::say!(
+                    "{} modèle déchargé, mémoire vidéo rendue{} ; il se recharge à l'ouverture de WoW",
+                    journal::clock(),
+                    if left > 0 { " (serveur arrêté de force)" } else { "" }
+                );
+                // Modèle libéré : une nouvelle version téléchargée prend sa place.
+                for name in ct::modeles_maj::apply_pending(&catalog::models_dir()) {
+                    ct::say!("[modèles] nouvelle version de {name} mise en place");
+                    tray.notify("Modèle mis à jour", &format!("Nouvelle version de {name} en place : elle servira à la prochaine partie."), false);
+                }
                 *last_error = None;
             }
             Err(e) => {
@@ -683,6 +722,12 @@ mod app {
     /// qu'à son redémarrage, /reload ne suffit pas (0.15.1).
     fn announce(tray: &Tray, flavor: &str, update: bool, files_changed: bool) {
         let label = flavor_label(flavor);
+        // Aussi sur le jeu, discrètement (0.16.6), dès que l'addon donne signe de vie.
+        if update && !files_changed {
+            live_games::notify_in_game("Addon mis à jour", &format!("Version {VERSION} posée : tape /reload pour la charger."));
+        } else if update {
+            live_games::notify_in_game("Addon mis à jour", &format!("Version {VERSION} avec de nouveaux fichiers : quitte et relance WoW pour la charger."));
+        }
         if update && !files_changed {
             // Fichiers Lua relus à chaque connexion : /reload seulement si un personnage est
             // déjà connecté. Sans /reload, l'ancienne version de l'addon reste chargée.

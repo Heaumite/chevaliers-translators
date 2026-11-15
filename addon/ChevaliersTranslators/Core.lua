@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.16.4"
+CT.VERSION = "0.16.6"
 
 local floor = math.floor
 local format = string.format
@@ -1500,6 +1500,14 @@ boot:SetScript("OnEvent", function(self, event)
     else
       CT.waiting = true
       Print("Prêt - l'application Chevaliers Translators n'est pas lancée : chat officiel. Lance-la, puis /reload pour traduire.")
+      -- Notification en jeu (0.16.6), peu après l'écran de chargement.
+      local function warn()
+        if CT.Toast then
+          CT.Toast("Chevaliers Translators n'est pas actif",
+            "Lance l'application Chevaliers Translators, puis tape /reload pour activer la traduction automatique.", 14)
+        end
+      end
+      if C_Timer and C_Timer.After then C_Timer.After(4, warn) else warn() end
     end
   else
     CT.Banner:Layout()

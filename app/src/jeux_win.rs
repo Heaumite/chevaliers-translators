@@ -206,6 +206,24 @@ const DOWNLOADS: u8 = 248;
 const COVER: u8 = 252;
 /// Panneau « langue de l'envoi traduit » après un clic sur un acronyme (0.16.4).
 const LANG_TOAST: u8 = 247;
+/// Notification discrète de l'application (0.16.6) : modèle monté ou descendu, addon mis à jour
+/// pendant le jeu (/reload).
+const NOTICE: u8 = 246;
+/// Temps d'affichage d'une notification.
+const NOTICE_FOR: Duration = Duration::from_secs(7);
+
+/// Notifications à montrer sur le jeu (titre, détail), au premier jeu ouvert, hors combat, l'une
+/// après l'autre.
+static NOTICES: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Notification discrète sur le jeu (0.16.6).
+pub fn notify_in_game(title: &str, detail: &str) {
+    if let Ok(mut n) = NOTICES.lock() {
+        if !n.iter().any(|(t, d)| t == title && d == detail) {
+            n.push((title.to_string(), detail.to_string()));
+        }
+    }
+}
 
 struct Session {
     /// Numéro du jeu (1, 2, 3... : le plus petit libre ; le journal et la file de traduction).
@@ -228,6 +246,7 @@ struct Session {
     hint_until: Option<Instant>,
     hint_last: Option<Instant>,
     lang_toast_until: Option<Instant>,
+    notice_until: Option<Instant>,
     last_raise: Instant,
     last_tick: Instant,
     overlay_error: bool,
@@ -417,11 +436,6 @@ impl Session {
                 }
             }
         }
-        // Vidéo du guide demandée depuis le jeu : fenêtre de l'application (lecteur lancé au clic).
-        if std::mem::take(&mut self.live.video_wanted) {
-            crate::say!("[guide] vidéo demandée depuis le jeu : fenêtre de l'application ouverte");
-            crate::tray_win::ask_running_to_open_models();
-        }
         if self.lang_toast_until.is_some_and(|t| now >= t) {
             self.overlay.hide(LANG_TOAST);
             self.lang_toast_until = None;
@@ -607,6 +621,34 @@ impl Session {
             self.overlay.hide(DOWNLOADS);
             self.downloads_until = None;
         }
+        // Notifications de l'application (0.16.6) : montée ou descente du modèle, addon à
+        // recharger. Au premier jeu, hors combat, WoW devant, 7 s chacune.
+        for n in self.live.notices.drain(..) {
+            notify_in_game(&n.0, &n.1);
+        }
+        if primary && self.notice_until.is_none() && in_front && calm && alive && self.live.last_alive.is_some() {
+            let next = NOTICES.lock().ok().and_then(|mut q| (!q.is_empty()).then(|| q.remove(0)));
+            if let (Some((title, detail)), Some((l, top, r, _))) = (next, self.rect()) {
+                let f = fonts.get_or_insert_with(crate::panel::Fonts::load);
+                let px = ((r - l) as f32 / 150.0).clamp(12.0, 24.0);
+                let rows = vec![
+                    crate::panel::Row { text: title.clone(), color: crate::panel::TITLE, title: true },
+                    crate::panel::Row { text: detail.clone(), color: crate::panel::TEXT, title: false },
+                ];
+                let cv = crate::panel::render(f, &rows, ((r - l) as f32 * 0.26) as usize, px);
+                // En haut à droite, sous la mini-carte : discret.
+                let left = r - cv.w as i32 - (px * 2.0) as i32;
+                let y = top + (px * 16.0) as i32;
+                if self.overlay.show_screen(NOTICE, left, y, &cv).is_ok() {
+                    crate::say!("[notification] {title} : {detail}");
+                    self.notice_until = Some(now + NOTICE_FOR);
+                }
+            }
+        }
+        if self.notice_until.is_some_and(|t| now >= t || combat) {
+            self.overlay.hide(NOTICE);
+            self.notice_until = None;
+        }
         let updates = self.live.mirror_tick(now);
         if !self.wow_front || combat {
             return;
@@ -755,6 +797,7 @@ pub fn run_games(
                     hint_until: None,
                     hint_last: None,
                     lang_toast_until: None,
+                    notice_until: None,
                     last_raise: now,
                     last_tick: now,
                     overlay_error: false,

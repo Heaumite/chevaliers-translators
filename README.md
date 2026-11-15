@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.16.4)
+# Chevaliers Translators (v0.16.6)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -25,8 +25,9 @@ Phase 1, jalon J1 (fondation) : `docs/PLAN_PHASE1.md`. Phase 0 (kit de test, ré
 
 ## Pour le joueur
 
-Guide d'installation en vidéo : <https://youtu.be/VoAq1cGtAFY> (aussi intégrée dans la fenêtre de
-l'application, lancée seulement au clic). Les mises à jour se font automatiquement depuis ce dépôt.
+Une fois installé, l'addon fonctionne pour toutes les versions de World of Warcraft, dans toutes les
+langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, peu
+importe de quel pays il vient. Il se met à jour automatiquement depuis ce dépôt.
 
 **Addon incompatible** : *WoW Translator* (il ajoute ses traductions dans le texte des messages du
 chat ; Chevaliers Translators ne retrouve plus ces messages). L'addon le signale à la connexion et
@@ -43,8 +44,10 @@ dans le guide : le désactiver dans la liste des addons.
    relit la présence de l'application qu'à la connexion et au `/reload`). Première installation
    pendant que le jeu tourne : redémarrer le jeu (la liste des addons n'est lue qu'au démarrage) ;
    une bulle le rappelle.
-3. WoW fermé : la traduction s'arrête 20 s après et rend la mémoire vidéo ; elle reprend à
-   l'ouverture suivante, pour la version du jeu lancée.
+3. WoW fermé : la traduction s'arrête 20 s après, le modèle est déchargé et rend la mémoire
+   vidéo ; il se recharge à l'ouverture suivante, pour la version du jeu lancée. Application
+   quittée : même chose (0.16.6). Application pas lancée à la connexion : un avis en jeu le dit
+   (« lance l'application, puis /reload »).
 4. Plusieurs WoW ouverts (multi-comptes, Retail et Classic côte à côte) : chacun est traduit, dans
    la langue de son client, avec un seul modèle de traduction pour tous (0.15). Chaque fenêtre doit
    être visible à l'écran (côte à côte, ou sur deux écrans) : un WoW entièrement caché derrière un
@@ -53,7 +56,8 @@ dans le guide : le désactiver dans la liste des addons.
 Menu de l'icône (clic gauche ou droit) : état (version du jeu, langue de traduction), **Modèles de
 traduction...** (fenêtre des modèles : moteur, pack low, autres modèles), **Journal de
 l'application**, **Rechercher une mise à jour**, **Mises à jour automatiques** (cochée par
-défaut), **Désinstaller...**, **Quitter**.
+défaut), **Lancer au démarrage de Windows** (décochée par défaut : à cocher soi-même ; l'application
+démarre alors avec la session, sans ouvrir sa fenêtre), **Désinstaller...**, **Quitter**.
 
 ### Mises à jour automatiques (0.16 ; 0.16.1 : sur demande, avec la note de version)
 
@@ -141,6 +145,59 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.16.6 (15/11/2026)
+
+- **Téléchargement des modèles fiable** : le même modèle pouvait se télécharger deux fois en même
+  temps (file de fond de l'application et fenêtre des modèles) dans le même fichier partiel ; la
+  jauge dépassait 100 % (« 1,04 Go sur 0,97 Go ») et le fichier était abîmé (« curl a renvoyé le
+  code 0 »). Un seul téléchargement par fichier maintenant (verrou partagé entre les processus),
+  l'autre suit sa progression ; un fichier qui dépasse la taille attendue est arrêté et repris de
+  zéro. La taille attendue est celle publiée par l'éditeur du modèle sur Hugging Face.
+- **Modèle déchargé à la fermeture** : WoW fermé (20 s après) ou application quittée, le serveur
+  de traduction s'arrête et rend la mémoire vidéo (journal : « modèle déchargé, mémoire vidéo
+  rendue ») ; il se recharge à l'ouverture de WoW. Au lancement, un serveur resté d'une session
+  précédente (application plantée) est arrêté.
+- **Bulles de 30 s** : la bulle traduite reste 30 s, même quand celle du jeu a disparu (au-dessus
+  de la barre de nom de celui qui parle, ou à sa dernière place tant que la caméra ne bouge pas),
+  et s'efface en fondu sur ses 8 dernières secondes.
+- **Avis en jeu** : application pas lancée à la connexion, un panneau le dit (« lance
+  l'application Chevaliers Translators, puis tape /reload »). Changement de modèle (mémoire vidéo
+  presque pleine : plus léger ; place revenue : meilleur ; repli) et addon mis à jour (`/reload`
+  nécessaire) : petit avis discret en haut à droite du jeu, 7 s, jamais en combat.
+- **Lancer au démarrage de Windows** : entrée du menu de l'icône, décochée par défaut. Cochée,
+  l'application démarre avec la session sans ouvrir sa fenêtre ; elle suit l'exécutable s'il
+  change de place, et la désinstallation la retire.
+- **Mises à jour des modèles** : une fois par jour (WoW fermé), l'application regarde sur Hugging
+  Face si l'éditeur a publié une nouvelle version des fichiers de modèle installés (empreinte
+  SHA-256). Nouvelle version : téléchargée en fond, vérifiée, puis mise à la place de l'ancienne
+  quand le modèle ne sert pas ; la fenêtre des modèles la signale (« Nouvelle version du modèle »)
+  avec un bouton pour la prendre tout de suite. Les nouveaux modèles (nouvelles familles) arrivent
+  avec les mises à jour de l'application.
+- **Délai d'affichage adapté au modèle** : l'attente qui donne l'illusion d'une traduction en
+  temps réel est mesurée pour le modèle actif et gardée d'une session à l'autre ; les premiers
+  messages partent avec le délai connu de ce modèle (un peu plus large tant qu'il chauffe), les
+  suivants sont traduits pendant l'affichage des précédents.
+- **Fenêtre des modèles : couleurs et ressources réelles** : chaque modèle a sa couleur, dans la
+  jauge, la liste et les téléchargements : EuroLLM 1.7B **bleu**, TranslateGemma 4B **jaune**,
+  SalamandraTA 7B **violet** (rayée quand il n'est pris que si WoW laisse la place). La jauge montre
+  ce qui est réellement utilisé : WoW en ce moment (WoW fermé : son plus haut mesuré en jeu), le
+  modèle chargé et ce qu'il prend vraiment (même s'il diffère du modèle actif, après une descente),
+  Windows et les autres programmes sans lui. La règle des 7 Go pour WoW ne vaut plus qu'à
+  l'installation (rien encore de mesuré en jeu sur ce PC) ; ensuite le réel la remplace, la marge de
+  saturation (0,6 Go sur une carte de 16 Go) restant gardée.
+- **Version** : l'étiquette `v0.16.5` avait été posée sur le code de la 0.16.4 (la compilation sur
+  GitHub l'a refusée) ; voir les commandes de livraison.
+
+## 0.16.5 (13/11/2026)
+
+- **Guide en jeu** : sous la bannière, le lien d'une musique de l'auteur de l'addon, ce que fait
+  l'addon une fois installé (toutes les versions de
+  World of Warcraft, toutes les langues européennes traduites vers la langue du joueur, quel que
+  soit son pays) et le dépôt GitHub d'où il se met à jour automatiquement (lien à copier). Il
+  s'affiche de nouveau une fois. Le lien vidéo et le bouton « Regarder la vidéo » sont retirés,
+  ainsi que le lecteur vidéo de la fenêtre de l'application (même texte et même lien de musique, en
+  six langues).
 
 ## 0.16.4 (13/11/2026)
 
@@ -514,15 +571,22 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.4.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.6.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.16.4)
+## Vérifié avant livraison (0.16.6)
 
-- 135 tests Rust sous Linux : dont, en 0.16.4, l'acronyme de langue trouvé (et pas les noms entre
+- 140 tests Rust sous Linux : dont, en 0.16.6, le téléchargement partagé entre deux processus
+  (le second suit le premier, aucun fichier reçu deux fois), le fichier plus grand que prévu
+  arrêté et repris, la taille et l'empreinte publiées lues dans la liste des fichiers de Hugging
+  Face, SHA-256 en flux (fichier lu par morceaux), la commande de lancement au démarrage, les
+  bulles qui vivent 30 s et s'effacent en fondu, le délai d'affichage propre au modèle actif, les
+  changements de modèle transformés en avis en jeu, WoW compté 7 Go seulement sans mesure en jeu
+  (ensuite ce qu'il prend, ou son plus haut WoW fermé), le modèle chargé jamais compté dans
+  « autres programmes », les couleurs bleu, jaune, violet des trois modèles ; en 0.16.4, l'acronyme de langue trouvé (et pas les noms entre
   crochets) et cliquable avant l'icône de copie, les styles des bulles lus après la police sans
   gêner les textes, le bord de la bulle aux couleurs de la classe, l'attente de Maj et d'Entrée
   relâchées ; en 0.16.3, la garde du cache du bandeau (changements de
@@ -575,7 +639,9 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   guide avec ses deux liens non modifiables, addon incompatible signalé à la connexion et dans le
   guide (0.16.3) ; boîte rouverte quand Entrée répétée la referme avant le collage, Échap qui annule,
   couleur de classe et icône de spécialisation (inspection d'un joueur proche) dans la trame des
-  bulles, bouton « Regarder la vidéo » du guide transmis à l'application (0.16.4) ;
+  bulles (0.16.4) ; guide avec le texte de présentation et le lien GitHub non modifiable (0.16.5) ;
+  avis « application pas active » à la connexion, bulle gardée 30 s après celle du jeu (barre de
+  nom, ou place figée retirée quand la caméra bouge), bulle expirée jamais reprise (0.16.6) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
   WoW modifiés » côté application ; un réglage sans rapport ne repeint rien) ; `monter` / `non` ; vrai fichier de présence avec `e = 1` : texte du jeu
   laissé visible, description « dispositif télévision » reçue par l'application ;
@@ -584,25 +650,37 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   téléchargements, serveur arrêté avec l'application) compilé contre `windows-sys` avec la
   configuration Windows forcée, sans avertissement nouveau ; **pas encore exécuté sous Windows** :
   c'est le test ci-dessous.
+- Fenêtre des modèles (0.16.6) ouverte dans Chromium (démonstration) en français et en anglais :
+  couleurs des trois modèles dans la jauge et la liste, « WoW (en ce moment) », modèle chargé avec
+  sa mémoire réelle, phrase « d'après les mesures sur ce PC », aucune erreur JavaScript.
 - Fenêtre de l'application (0.16.1) ouverte dans Chromium en français, allemand, russe, anglais et
   espagnol : textes, nombres et unités de chaque langue, encadré de mise à jour avec sa note
   (Markdown rendu, HTML de la note échappé), bouton qui dépose la demande d'installation, encadré
   « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
   erreur JavaScript.
 
-## Test de la 0.16.4 (PowerShell)
+## Test de la 0.16.6 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
+| Version | fenêtre de l'application et `/chevaliers` : 0.16.6 ; GitHub : la compilation de `v0.16.6` passe |
+| Téléchargement d'un modèle | fenêtre des modèles, télécharger un modèle pendant que la file de fond tourne : la jauge ne dépasse pas 100 % ; journal « déjà en cours de téléchargement » au lieu d'un second téléchargement ; modèle installé |
+| Modèle déchargé | quitter l'application (ou fermer WoW et attendre 20 s) : plus de `llama-server` dans le Gestionnaire des tâches, mémoire vidéo rendue ; journal « modèle déchargé » |
+| Bulles 30 s | un joueur qui parle : la bulle traduite reste 30 s (même après celle du jeu), s'efface en fondu à la fin ; tourner la caméra : une bulle figée disparaît |
+| Avis « pas actif » | application quittée, se connecter (ou `/reload`) : panneau « Chevaliers Translators n'est pas actif… lance l'application, puis tape /reload » ; application lancée puis `/reload` : traduction active |
+| Lancer au démarrage | menu de l'icône : « Lancer au démarrage de Windows » décochée ; la cocher, redémarrer la session Windows : médaillon près de l'horloge, sans fenêtre ; la décocher : plus lancée |
+| Avis de modèle | WoW en jeu, changer l'échelle de rendu au maximum : avis discret en haut à droite « Traduction : modèle plus léger » ; hors combat avec de la place : « meilleur modèle » |
+| Mises à jour des modèles | journal (WoW fermé, 3 min après le lancement) : « [modèles] versions publiées vérifiées : tout est à jour » ; fenêtre des modèles : rien à signaler tant que l'éditeur n'a rien publié |
+| Fenêtre des modèles | carrés de couleur devant les noms : EuroLLM 1.7B bleu, TranslateGemma 4B jaune, SalamandraTA 7B violet ; même couleur dans la jauge ; WoW ouvert et modèle chargé : « WoW (en ce moment) » et « <modèle> (en ce moment) » avec les valeurs du Gestionnaire des tâches (Performances > GPU > mémoire dédiée) ; WoW fermé : « WoW (plus haut mesuré en jeu) » ; seuil de saturation 0,6 Go |
+| Délai d'affichage | premiers messages traduits affichés sans longue attente ; `%LOCALAPPDATA%\ChevaliersTranslators\latences.json` créé après une dizaine de traductions |
 | Trad:AUTO | `/dire hello`, puis écrire en français et Maj+Entrée en tenant les touches une seconde : le message part traduit ; journal : « collé et envoyé » puis « parti » |
 | Acronyme cliquable | clic sur `[DE]` d'un message traduit : panneau « Envoi traduit en allemand » ; Maj+Entrée en Trad:AUTO : journal « FR → DE (Trad:AUTO, langue choisie d'un clic…) » |
 | Bulles de classe | en ville, un joueur qui parle : bulle bordée de la couleur de sa classe ; icône de spécialisation (la tienne tout de suite, celle d'un joueur proche après quelques secondes) |
-| Vidéo du guide | `/chevaliers guide`, bouton « Regarder la vidéo » : la fenêtre de l'application s'ouvre sur l'encadré « Guide d'installation » ; clic sur l'affiche : la vidéo se lance (jamais toute seule) ; lien GitHub : ouvert dans le navigateur |
 | Cache du bandeau | passer plusieurs fois sur une autre fenêtre (Alt+Tab, clic sur le second écran) puis revenir : le bandeau reste caché ; journal : plus de « la capture ne lit plus le bandeau sous son cache » ; « bandeau lu à travers son cache : le cache tient » |
 | Une seule bulle | en ville, `/dire hello` puis un joueur qui parle une autre langue : une seule bulle (celle de l'application, avec sa pointe), traduite `[EN] …` ; un message en français : bulle de l'application avec le texte d'origine ; en combat : bulles de Blizzard |
-| Guide | `/chevaliers guide` : bannière titrée « Chevaliers Translators », lien de la vidéo et lien GitHub ; clic dans un cadre puis Ctrl+C : lien copié |
+| Guide | `/chevaliers guide` : bannière titrée « Chevaliers Translators », lien de la musique, texte « Une fois installé, l'addon fonctionne pour toutes les versions… » et lien GitHub ; clic dans un cadre puis Ctrl+C : lien copié ; fenêtre de l'application : même texte, lien GitHub ouvert dans le navigateur |
 | Addon incompatible | WoW Translator activé : à la connexion, ligne rouge « Addon incompatible : WoW Translator » ; même ligne dans le guide |
 | Langue de la fenêtre | liste en haut à droite : Deutsch -> toute la page en allemand (jauge, raisons, boutons) ; fermer et rouvrir : toujours en allemand |
 | Mise à jour proposée | de bout en bout : la 0.16.1 lancée (sans recompiler), publier la 0.16.2 sur GitHub, puis menu de l'icône « Rechercher une mise à jour » : fenêtre ouverte sur l'encadré « Mise à jour 0.16.2 disponible », bouton, note dessous ; l'encadré reste (fenêtre fermée et rouverte) ; clic : l'application redémarre en 0.16.2, encadré « Version 0.16.2 installée » ; ensuite (0.16.2) l'entrée du menu de l'icône pour les versions suivantes |

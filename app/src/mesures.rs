@@ -100,6 +100,15 @@ pub fn load(key: &str) -> Option<Observed> {
     load_from(&file(), key)
 }
 
+/// WoW au plus haut, toutes conditions confondues (0.16.6) ; `None` : rien de mesuré encore.
+pub fn wow_peak_from(path: &std::path::Path) -> Option<u64> {
+    std::fs::read_to_string(path).ok()?.lines().filter_map(Observed::parse).map(|o| o.wow_peak).filter(|&w| w > 0).max()
+}
+
+pub fn wow_peak() -> Option<u64> {
+    wow_peak_from(&file())
+}
+
 pub fn save_to(path: &std::path::Path, o: &Observed) -> Result<(), String> {
     let old = std::fs::read_to_string(path).unwrap_or_default();
     let mut out = String::from(HEADER);
@@ -269,6 +278,10 @@ mod tests {
         assert_eq!(load_from(&path, "_retail_ 3840x1600").unwrap().minutes, 50.0);
         assert_eq!(load_from(&path, "_forever_ 3840x1600").unwrap(), b);
         assert!(load_from(&path, "_classic_era_ 1920x1080").is_none());
+        // WoW au plus haut, toutes conditions confondues ; rien de mesuré : None (installation).
+        save_to(&path, &Observed { key: "_classic_era_ 1920x1080".into(), wow_peak: 4 * GIB, ..a.clone() }).unwrap();
+        assert_eq!(wow_peak_from(&path), Some(11 * GIB));
+        assert_eq!(wow_peak_from(&dir.join("absent.tsv")), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

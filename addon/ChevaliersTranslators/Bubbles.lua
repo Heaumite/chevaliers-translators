@@ -17,6 +17,10 @@
 -- spécialisation quand elle est connue : la sienne, et celle des joueurs proches ou du groupe,
 -- demandée au jeu par une inspection discrète (hors combat, une à la fois, jamais pendant que la
 -- fenêtre d'inspection est ouverte), gardée pour la session.
+-- 0.16.6 : une bulle reste 30 s après son apparition, même quand celle du jeu a disparu, puis
+-- l'application l'efface progressivement (transparence). Après la bulle du jeu, elle suit la barre
+-- de nom de celui qui parle si elle est affichée ; sinon elle reste à sa dernière place tant que la
+-- caméra ne bouge pas (joueur qui tourne, avance, zoome ou fait pivoter la vue : retirée).
 -- /chevaliers bulles on | off
 
 local _, CT = ...
@@ -39,6 +43,10 @@ local BUBBLE_EVENTS = {
 }
 
 local TEXT_MAX = 120    -- octets de texte au plus par bulle dans la trame
+local LIFE = 30         -- secondes : vie d'une bulle depuis son apparition (0.16.6)
+local TURN = 0.15       -- radians : le joueur a tourné, une bulle figée ne serait plus à sa place
+local STEP = 1.5        -- mètres : le joueur a bougé
+local ZOOM = 0.5        -- zoom de la caméra changé
 
 local INSPECT_EVERY = 2     -- secondes entre deux inspections
 local INSPECT_WAIT = 4      -- réponse attendue ce temps
@@ -49,6 +57,8 @@ local B = {
   asked = {},               -- GUID -> moment de la dernière inspection demandée
   inspectAt = -100,
   sentSig = "", sentAt = -100,
+  live = {},                -- numéro du message -> { first, item, gone, face, x, y, zoom }
+  done = {},                -- numéro du message -> fin de sa bulle (plus jamais reprise)
   stats = { frames = 0, matched = 0, unknown = 0, hidden = 0, errors = 0, replaced = 0 },
   -- Cadres de bulles de Blizzard effacés (0.16.3) : rendus visibles dès qu'ils ne sont plus à nous.
   erased = setmetatable({}, { __mode = "k" }),
@@ -298,7 +308,7 @@ local function Scan()
       local r, g, bl = fs:GetTextColor()
       if IsSecret(path) or IsSecret(size) or IsSecret(r) then return nil end
       local cr, cg, cb = ClassColor(guid)
-      return { id = id, l = rect[1], b = rect[2], w = rect[3], h = rect[4],
+      return { id = id, l = rect[1], b = rect[2], w = rect[3], h = rect[4], guid = guid,
         r = r or 1, g = g or 1, bl = bl or 1, px = (size or 12) * k, font = type(path) == "string" and path or "",
         text = Norm(text), visual = VisualOf(bubble),
         cr = cr, cg = cg, cb = cb, icon = SpecIcon(guid, GetTime()) }
@@ -363,10 +373,129 @@ local function Payload(list)
 end
 B.Payload = Payload
 
+-- Position du joueur et de la caméra : une bulle figée n'est gardée que si rien n'a bougé.
+local function Pose()
+  local face = GetPlayerFacing and GetPlayerFacing()
+  local x, y
+  if UnitPosition then
+    local ok, a, b = pcall(UnitPosition, "player")
+    if ok and not IsSecret(a) then x, y = a, b end
+  end
+  local zoom = GetCameraZoom and GetCameraZoom()
+  if IsSecret(face) then face = nil end
+  return face, x, y, zoom
+end
+
+local function Moved(L, face, x, y, zoom)
+  if IsMouseButtonDown and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton")) then
+    return true -- vue que l'on fait pivoter à la souris
+  end
+  -- Repères inconnus quand la bulle a disparu : pris maintenant.
+  if L.face == nil then L.face = face end
+  if L.x == nil then L.x, L.y = x, y end
+  if L.zoom == nil then L.zoom = zoom end
+  if face and L.face then
+    local d = math.abs(face - L.face) % (2 * math.pi)
+    if math.min(d, 2 * math.pi - d) > TURN then return true end
+  end
+  if x and L.x and ((x - L.x) ^ 2 + (y - L.y) ^ 2) > STEP * STEP then return true end
+  if zoom and L.zoom and math.abs(zoom - L.zoom) > ZOOM then return true end
+  return false
+end
+
+-- Place d'une bulle au-dessus de la barre de nom de celui qui parle (si elle est affichée).
+local function OverNameplate(guid, e)
+  if not (guid and C_NamePlate and C_NamePlate.GetNamePlates) then return nil end
+  local ok, plates = pcall(C_NamePlate.GetNamePlates)
+  if not ok or type(plates) ~= "table" then return nil end
+  local _, ph = GetPhysicalScreenSize()
+  local k0 = (ph or 768) / 768
+  for _, plate in ipairs(plates) do
+    local unit = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
+    local okG, g = pcall(UnitGUID, unit or "")
+    if okG and not IsSecret(g) and g == guid then
+      local cx, top = plate:GetCenter(), plate:GetTop()
+      if cx and top and not IsSecret(cx) and not IsSecret(top) then
+        local k = plate:GetEffectiveScale() * k0
+        return floor(cx * k - e.w / 2), floor(top * k + e.px * 1.2)
+      end
+    end
+  end
+end
+B.OverNameplate = OverNameplate
+
+-- Bulles gardées 30 s (0.16.6) : celles du jeu encore visibles, puis, une fois disparues, à leur
+-- place (barre de nom, ou dernière place si rien n'a bougé) ; plus vieilles que 30 s : rendues au
+-- jeu telles quelles.
+function B:Linger(list, now)
+  local out, seen = {}, {}
+  for id, t in pairs(self.done) do
+    if now - t > 120 then self.done[id] = nil end
+  end
+  for _, e in ipairs(list) do
+    local L = (not self.done[e.id]) and self.live[e.id]
+    if self.done[e.id] then
+      seen[e.id] = true
+    elseif not L then
+      L = { first = now }
+      self.live[e.id] = L
+    end
+    if L then
+      seen[e.id] = true
+      if now - L.first < LIFE then
+        L.item, L.gone = e, nil
+        out[#out + 1] = e
+      end
+    end
+  end
+  local replaces = self:Replaces()
+  local face, x, y, zoom = Pose()
+  local _, ph = GetPhysicalScreenSize()
+  local ui = CT.Mirror and CT.Mirror.UiRects and CT.Mirror:UiRects((ph or 768) / 768) or {}
+  for id, L in pairs(self.live) do
+    if not seen[id] then
+      local keep = replaces and L.item and now - L.first < LIFE
+      if keep and not L.gone then
+        L.gone, L.face, L.x, L.y, L.zoom = now, face, x, y, zoom
+      end
+      if keep then
+        local e = {}
+        for k, v in pairs(L.item) do e[k] = v end
+        e.visual = nil
+        local l, b = OverNameplate(e.guid, e)
+        if l then
+          e.l, e.b = l, b
+        elseif Moved(L, face, x, y, zoom) then
+          keep = false
+        end
+        if keep and #out < MAX then
+          local hidden = false
+          for _, r in ipairs(ui) do
+            if Overlaps({ e.l, e.b, e.w, e.h }, r) then hidden = true break end
+          end
+          if not hidden then out[#out + 1] = e end
+        end
+      end
+      if not keep then
+        self.live[id] = nil
+        self.done[id] = now
+      end
+    elseif now - L.first >= LIFE then
+      -- Bulle du jeu encore là après 30 s : rendue au jeu telle quelle.
+      self.live[id] = nil
+      self.done[id] = now
+    end
+  end
+  return out
+end
+
 function B:Poll(now)
   local list = {}
   if self:Enabled() and CT.Mirror and CT.Mirror.mode ~= "off" and not (CT.InLockdown and CT.InLockdown()) then
-    list = Scan()
+    list = self:Linger(Scan(), now)
+  else
+    for id in pairs(self.live) do self.done[id] = GetTime() end
+    self.live = {}
   end
   -- Bulles de Blizzard effacées sous les nôtres ; les autres (inconnues, sous une fenêtre du jeu,
   -- combat) rendues visibles.

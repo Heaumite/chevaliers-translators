@@ -110,6 +110,13 @@ pub fn by_id(id: &str) -> Option<&'static Model> {
     all().find(|m| m.id == id)
 }
 
+/// Couleur du modèle dans la fenêtre de l'application (jauge, liste ; 0.16.6) : EuroLLM 1.7B
+/// bleu, TranslateGemma 4B jaune, SalamandraTA 7B violet (ordre du catalogue).
+pub fn tint(m: &Model) -> &'static str {
+    const TINTS: [&str; 3] = ["bleu", "jaune", "violet"];
+    all().position(|x| x.id == m.id).and_then(|i| TINTS.get(i).copied()).unwrap_or("bleu")
+}
+
 /// Modèle du catalogue correspondant à un nom de fichier.
 pub fn by_file(name: &str) -> Option<&'static Model> {
     all().find(|m| m.file.eq_ignore_ascii_case(name))
@@ -371,14 +378,39 @@ pub fn record_trial(file: &str, place: Place, t: &Trial) {
 
 // --- Carte graphique pendant le jeu ----------------------------------------------------------
 
+/// D'où vient la mémoire vidéo comptée pour WoW (0.16.6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WowSource {
+    /// Règle de l'installation : rien encore de mesuré en jeu sur ce PC, WoW compté 7 Go.
+    Rule,
+    /// Mesurée maintenant, WoW ouvert.
+    Now,
+    /// WoW fermé : son plus haut mesuré en jeu sur ce PC.
+    Peak,
+}
+
+impl WowSource {
+    pub fn code(self) -> &'static str {
+        match self {
+            WowSource::Rule => "regle",
+            WowSource::Now => "maintenant",
+            WowSource::Peak => "pic",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Card {
     pub name: String,
     pub dedicated: u64,
     pub wow_running: bool,
-    /// Mémoire vidéo comptée pour WoW : la référence, ou sa mesure si elle est plus haute.
+    /// Mémoire vidéo comptée pour WoW : la règle des 7 Go à l'installation (ou sa mesure si elle
+    /// est plus haute), puis le réel (0.16.6).
     pub wow: u64,
     pub wow_measured: bool,
+    pub wow_source: WowSource,
+    /// Mémoire vidéo réellement prise par le modèle de traduction chargé (0 : aucun), 0.16.6.
+    pub translation: u64,
     /// Mémoire vidéo libre pendant le jeu, avant chargement d'un modèle.
     pub free_in_game: u64,
 }
@@ -406,20 +438,29 @@ pub fn card_for(hw: &Hw, flavor: Option<&str>) -> Option<Card> {
         .max_by_key(|g| g.dedicated)
         .map(|g| {
             let used_now = g.used.unwrap_or(0);
-            // WoW compté au moins pour la référence ; plus s'il en utilise davantage.
+            let translation = g.used_by_translation.unwrap_or(0);
             let measured = if wow_running { g.used_by_wow } else { None };
-            let (wow, wow_measured) = match measured {
-                Some(w) if w >= reference => (w, true),
-                _ => (reference, false),
+            let (wow, wow_source) = match (hw.wow_peak, measured) {
+                // Installation (rien de mesuré en jeu sur ce PC) : WoW compté pour la référence,
+                // plus s'il en utilise déjà davantage.
+                (None, Some(w)) if w >= reference => (w, WowSource::Now),
+                (None, _) => (reference, WowSource::Rule),
+                // Ensuite, le réel (0.16.6) : WoW ouvert, ce qu'il prend ; fermé, son plus haut
+                // mesuré en jeu. La marge de saturation reste gardée à part (`gouverneur`).
+                (Some(_), Some(w)) => (w, WowSource::Now),
+                (Some(p), None) => (p, WowSource::Peak),
             };
-            let others = used_now.saturating_sub(measured.unwrap_or(0));
+            // Windows et les autres programmes : ni WoW, ni le modèle de traduction chargé.
+            let others = used_now.saturating_sub(measured.unwrap_or(0)).saturating_sub(translation);
             let used_in_game = others + wow;
             Card {
                 name: g.name.clone(),
                 dedicated: g.dedicated,
                 wow_running,
                 wow,
-                wow_measured,
+                wow_measured: wow_source != WowSource::Rule,
+                wow_source,
+                translation,
                 free_in_game: g.dedicated.saturating_sub(used_in_game),
             }
         })
@@ -481,7 +522,9 @@ pub fn offer(hw: &Hw, dir: &Path) -> Offer {
 }
 
 pub fn installed_in(dir: &Path, m: &Model) -> bool {
-    std::fs::metadata(dir.join(m.file)).map(|md| md.len()).ok() == Some(m.size)
+    let Some(len) = std::fs::metadata(dir.join(m.file)).map(|md| md.len()).ok() else { return false };
+    // Taille du catalogue, ou celle publiée depuis par l'éditeur (nouvelle version, 0.16.6).
+    len == m.size || crate::modeles_maj::known_size(m.file) == Some(len)
 }
 
 pub fn offer_with(
@@ -613,6 +656,25 @@ pub fn active_file() -> PathBuf {
     crate::fonts::cache_root().join("modele-actif.txt")
 }
 
+/// Modèle chargé en ce moment par la traduction (0.16.6) : il peut différer du modèle actif
+/// (le gouverneur descend d'un cran quand la mémoire vidéo sature). Écrit à chaque chargement ;
+/// la fenêtre des modèles ne le croit que si un serveur de traduction tourne.
+pub fn loaded_file() -> PathBuf {
+    crate::fonts::cache_root().join("modele-charge.txt")
+}
+
+pub fn write_loaded(id: &str) {
+    let p = loaded_file();
+    if let Some(d) = p.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(&p, id);
+}
+
+pub fn read_loaded() -> Option<&'static Model> {
+    std::fs::read_to_string(loaded_file()).ok().and_then(|s| by_id(s.trim()))
+}
+
 pub fn read_active() -> Option<String> {
     std::fs::read_to_string(active_file()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
@@ -703,7 +765,7 @@ pub fn free_disk(dir: &Path) -> Option<u64> {
 
 /// Programme de téléchargement : curl.exe (livré avec Windows 10 et 11), remplaçable
 /// par la variable CT_CURL (tests).
-fn curl() -> String {
+pub(crate) fn curl() -> String {
     std::env::var("CT_CURL").unwrap_or_else(|_| if cfg!(windows) { "curl.exe" } else { "curl" }.into())
 }
 
@@ -780,6 +842,13 @@ fn curl_once(
         }
         p.got = len;
         report(p);
+        // Plus grand que le fichier attendu : il ne peut pas être bon, arrêt tout de suite au lieu
+        // de télécharger pour rien (0.16.6).
+        if p.total > 0 && len > p.total {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok((false, Some(0), String::new()));
+        }
     };
     let mut err = String::new();
     if let Some(mut e) = child.stderr.take() {
@@ -790,28 +859,92 @@ fn curl_once(
     Ok((status.success(), status.code(), err.trim().to_string()))
 }
 
-/// Télécharge un modèle et vérifie sa taille exacte. Coupure du serveur ou débit tombé sous
-/// 100 Ko/s pendant 30 s : nouvel essai qui reprend la partie déjà reçue (fichier .part).
+/// Verrou d'un téléchargement (0.16.6), partagé entre l'application et sa fenêtre : deux
+/// processus qui écrivaient le même fichier .part le faisaient grossir au-delà de sa taille
+/// (« 106 % : 1,04 Go sur 0,97 Go ») et le rendaient faux (« curl a renvoyé le code 0 »). Le
+/// système le relâche si le processus s'arrête.
+fn lock_download(dir: &Path, file: &str) -> Result<Option<std::fs::File>, std::fs::File> {
+    let path = dir.join(format!("{file}.verrou"));
+    match std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path) {
+        Ok(f) => match f.try_lock() {
+            Ok(()) => Ok(Some(f)),
+            Err(_) => Err(f),
+        },
+        // Verrou impossible à créer (dossier en lecture seule ?) : téléchargement sans verrou.
+        Err(_) => Ok(None),
+    }
+}
+
+/// Télécharge un modèle et vérifie sa taille exacte : celle publiée aujourd'hui par son éditeur
+/// (0.16.6, le fichier a pu être remplacé par une nouvelle version), sinon celle du catalogue.
 pub fn download_model_with(
     m: &Model,
     dir: &Path,
     cancel: &AtomicBool,
     report: &mut dyn FnMut(&Progress),
 ) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("{} : {e}", dir.display()))?;
-    let part = dir.join(format!("{}.part", m.file));
     let dest = dir.join(m.file);
     if file_len(&dest) == m.size {
         return Ok(());
     }
-    let mut p = Progress { total: m.size, ..Default::default() };
+    let size = crate::modeles_maj::published_size(m).unwrap_or(m.size);
+    if size != m.size && file_len(&dest) == size {
+        return Ok(());
+    }
+    download_file(m.url, &dest, size, m.name, cancel, report)
+}
+
+/// Télécharge `url` vers `dest` et vérifie sa taille exacte. Coupure du serveur ou débit tombé
+/// sous 100 Ko/s pendant 30 s : nouvel essai qui reprend la partie déjà reçue (fichier .part).
+/// Déjà en cours dans l'autre processus (application ou fenêtre) : sa progression est suivie
+/// jusqu'à la fin, sans second téléchargement.
+pub fn download_file(
+    url: &str,
+    dest: &Path,
+    size: u64,
+    name: &str,
+    cancel: &AtomicBool,
+    report: &mut dyn FnMut(&Progress),
+) -> Result<(), String> {
+    let dir = dest.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir).map_err(|e| format!("{} : {e}", dir.display()))?;
+    let file_name = dest.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    let part = dir.join(format!("{file_name}.part"));
+    if file_len(dest) == size {
+        return Ok(());
+    }
+    let mut p = Progress { total: size, ..Default::default() };
+    let _lock = match lock_download(dir, &file_name) {
+        Ok(l) => l,
+        Err(held) => {
+            p.problem = "déjà en cours de téléchargement (application ou fenêtre des modèles) : progression suivie".into();
+            loop {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(CANCELLED.into());
+                }
+                p.got = file_len(&part).max(file_len(dest));
+                report(&p);
+                if held.try_lock().is_ok() {
+                    // L'autre a fini (ou s'est arrêté) : fichier complet, ou reprise ici.
+                    if file_len(dest) == size {
+                        p.got = size;
+                        report(&p);
+                        return Ok(());
+                    }
+                    p.problem.clear();
+                    break Some(held);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+    };
     for attempt in 1..=ATTEMPTS {
         p.attempt = attempt;
         let have = file_len(&part);
-        if have == m.size {
+        if have == size {
             break;
         }
-        if have > m.size {
+        if have > size {
             // Fichier partiel plus grand que prévu : il ne peut pas être bon.
             let _ = std::fs::remove_file(&part);
         }
@@ -825,11 +958,18 @@ pub fn download_model_with(
                 std::thread::sleep(Duration::from_millis(200));
             }
         }
-        let (ok, code, err) = curl_once(m.url, &part, true, &mut p, cancel, report)?;
-        if ok && file_len(&part) == m.size {
+        let (ok, code, err) = curl_once(url, &part, true, &mut p, cancel, report)?;
+        let got = file_len(&part);
+        if ok && got == size {
             break;
         }
         p.problem = match code {
+            // curl content mais taille fausse : jamais « code 0 » (0.16.6).
+            Some(0) if got > size => {
+                let _ = std::fs::remove_file(&part);
+                format!("fichier reçu plus grand que prévu ({} sur {}) : recommencé", go(got), go(size))
+            }
+            Some(0) => format!("fichier reçu incomplet ({} sur {}) : reprise", go(got), go(size)),
             Some(56) | Some(18) => "connexion coupée par le serveur".into(),
             Some(28) => "débit trop faible pendant 30 s".into(),
             Some(6) | Some(7) => "serveur injoignable (connexion Internet ?)".into(),
@@ -840,16 +980,15 @@ pub fn download_model_with(
         report(&p);
     }
     let got = file_len(&part);
-    if got != m.size {
+    if got != size {
         return Err(format!(
-            "{} incomplet après {ATTEMPTS} essais ({} sur {}, dernier problème : {}) : relancer le téléchargement, il reprendra là",
-            m.name,
+            "{name} incomplet après {ATTEMPTS} essais ({} sur {}, dernier problème : {}) : relancer le téléchargement, il reprendra là",
             go(got),
-            go(m.size),
+            go(size),
             p.problem
         ));
     }
-    std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1128,6 +1267,7 @@ mod tests {
             },
             runtimes: Runtimes { vulkan: true, ..Default::default() },
             wow: if wow.is_some() { vec!["Wow.exe".into()] } else { vec![] },
+            wow_peak: None,
         }
     }
 
@@ -1154,6 +1294,8 @@ mod tests {
         );
         assert_eq!(o.high, Some("salamandrata-7b"));
         assert!(o.entries.windows(2).skip(1).all(|w| w[0].footprint <= w[1].footprint));
+        // Couleurs des modèles dans la fenêtre (0.16.6) : bleu, jaune, violet.
+        assert_eq!(o.entries.iter().map(|e| tint(e.model)).collect::<Vec<_>>(), ["bleu", "jaune", "violet"]);
         // WoW mesuré à 5,6 Go : compté 7 Go (référence, raids compris) ; 16 - 1,3 - 7 = 7,7 Go libres.
         let c = o.card.as_ref().unwrap();
         assert!(!c.wow_measured && (c.others() as f64 / GIB as f64 - 1.3).abs() < 0.01);
@@ -1166,6 +1308,20 @@ mod tests {
         let h3 = pc(16 * GIB, Some(9 * GIB), Some(8 * GIB), 40 * GIB, true);
         let c3 = card(&h3).unwrap();
         assert_eq!((c3.wow, c3.wow_measured, c3.free_in_game), (8 * GIB, true, 7 * GIB));
+        // Après les premières mesures en jeu (0.16.6), le réel : WoW ouvert (3,2 Go), ce qu'il
+        // prend ; le modèle chargé (4,3 Go) n'est compté ni dans « autres » ni dans le libre.
+        let mut h4 = pc(16 * GIB, Some(85 * GIB / 10), Some(32 * GIB / 10), 40 * GIB, true);
+        h4.wow_peak = Some(6 * GIB);
+        h4.gpus[0].used_by_translation = Some(43 * GIB / 10);
+        let c4 = card(&h4).unwrap();
+        assert_eq!((c4.wow, c4.wow_source, c4.translation), (32 * GIB / 10, WowSource::Now, 43 * GIB / 10));
+        assert_eq!(c4.others() / (GIB / 10), 10, "{}", gib(c4.others()));
+        assert_eq!(c4.free_in_game / (GIB / 10), 118);
+        // WoW fermé : son plus haut mesuré en jeu (6 Go), plus la règle des 7 Go.
+        let mut h5 = pc(16 * GIB, Some(GIB), None, 40 * GIB, true);
+        h5.wow_peak = Some(6 * GIB);
+        let c5 = card(&h5).unwrap();
+        assert_eq!((c5.wow, c5.wow_source, c5.wow_measured, c5.free_in_game), (6 * GIB, WowSource::Peak, true, 9 * GIB));
         // Carte de 8 Go, WoW non lancé : 0,5 Go + 7 Go de référence, 0,5 Go libre. Plus de réserve
         // (0.14.2) : tout tient à côté d'un WoW réglé au plus bas (2 Go), sur la carte quand WoW
         // laisse la place ; la traduction redescend avant la saturation.
@@ -1286,7 +1442,7 @@ mod tests {
         std::fs::write(
             &fake,
             "#!/bin/sh\nout=\"\"\nurl=\"\"\nwhile [ $# -gt 0 ]; do if [ \"$1\" = \"-o\" ]; then out=\"$2\"; fi; url=\"$1\"; shift; done\n\
-             case \"$url\" in *lent*) sleep 5;; esac\n\
+             case \"$url\" in *lent*) sleep 5;; *pause*) sleep 0.3;; *gros*) head -c 1600 /dev/zero >> \"$out\"; exit 0;; esac\n\
              head -c 400 /dev/zero >> \"$out\"\nsize=$(wc -c < \"$out\")\nif [ \"$size\" -lt 1000 ]; then exit 56; fi\nexit 0\n",
         )
         .unwrap();
@@ -1330,6 +1486,24 @@ mod tests {
         assert_eq!(r.unwrap_err(), CANCELLED);
         assert!(t0.elapsed() < Duration::from_secs(3));
         assert_eq!(file_len(&dir.join("lent.gguf.part")), 400);
+        // Même modèle demandé deux fois en même temps (application et fenêtre, 0.16.6) : un seul
+        // téléchargement, l'autre suit sa progression ; fichier exact.
+        let m4 = Model { file: "partage.gguf", url: "http://exemple.invalid/pause.gguf", ..m3 };
+        let d2 = dir.clone();
+        let m4b = Model { ..m4 };
+        let first = std::thread::spawn(move || download_model_with(&m4b, &d2, &AtomicBool::new(false), &mut |_| {}));
+        std::thread::sleep(Duration::from_millis(100));
+        let mut followed = false;
+        let second = download_model_with(&m4, &dir, &AtomicBool::new(false), &mut |p| {
+            followed |= p.problem.contains("déjà en cours");
+        });
+        assert!(first.join().unwrap().is_ok() && second.is_ok());
+        assert!(followed, "le second appel devait suivre le premier");
+        assert_eq!(file_len(&dir.join("partage.gguf")), 1200);
+        // Fichier reçu plus grand que prévu : jamais « code 0 », le partiel est effacé.
+        let m5 = Model { file: "gros.gguf", url: "http://exemple.invalid/gros.gguf", ..m4 };
+        let e = download_model_with(&m5, &dir, &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        assert!(e.contains("plus grand que prévu") && !e.contains("code 0"), "{e}");
         std::env::remove_var("CT_CURL");
         std::fs::remove_dir_all(dir).ok();
     }

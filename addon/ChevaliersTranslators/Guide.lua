@@ -1,12 +1,13 @@
 -- Chevaliers Translators
--- Guide.lua : petit panneau « Guide d'installation » affiché une fois, à la première utilisation
+-- Guide.lua : petit panneau de présentation affiché une fois, à la première utilisation
 -- de l'addon et à chaque nouvelle révision de son contenu (et par /chevaliers guide).
 -- 0.16.3 : bannière titrée « Chevaliers Translators », lien de la vidéo du guide d'installation et
 -- lien du dépôt GitHub d'où viennent les mises à jour automatiques. WoW ne peut ni lire une vidéo
 -- ni ouvrir un lien : chaque lien est dans un cadre où il se sélectionne d'un clic, Ctrl+C le
 -- copie, il se colle dans le navigateur. Addons incompatibles chargés : signalés en rouge.
--- 0.16.4 : bouton « Regarder la vidéo » : l'application ouvre sa fenêtre sur le lecteur de la
--- vidéo (lancée seulement au clic sur Lire).
+-- 0.16.5 : lien d'une musique de l'auteur, ce que fait l'addon une fois installé (toutes les
+-- versions de WoW, toutes les langues européennes vers celle du joueur) et le dépôt GitHub de ses
+-- mises à jour.
 -- Fermeture par la croix, ou au bout de 60 s si aucun lien n'a été touché.
 -- Le panneau n'est construit qu'au premier affichage. Appelé par Core.lua via CT.ShowGuide().
 
@@ -15,9 +16,9 @@ CT = CT or {}
 
 local MEDIA = "Interface\\AddOns\\ChevaliersTranslators\\Media\\"
 -- Révision du contenu du guide : un guide changé s'affiche de nouveau une fois (0.15.1).
-CT.GUIDE_REV = 3
-CT.GUIDE_VIDEO = "https://youtu.be/VoAq1cGtAFY"
+CT.GUIDE_REV = 4
 CT.GUIDE_REPO = "https://github.com/Heaumite/chevaliers-translators"
+CT.GUIDE_MUSIC = "https://www.youtube.com/watch?v=KzwXwlVVSvE"
 
 local GOLD = { 0.902, 0.78, 0.494 }
 
@@ -63,7 +64,7 @@ local function BuildGuide()
   if guideFrame then return guideFrame end
   local f = CreateFrame("Frame", "ChevaliersTranslatorsGuide", UIParent)
   f:SetFrameStrata("DIALOG")
-  f:SetSize(500, 300)
+  f:SetSize(500, 332)
   f:SetPoint("CENTER")
   f:EnableMouse(true)
   pcall(f.SetClampedToScreen, f, true)
@@ -105,37 +106,27 @@ local function BuildGuide()
   -- Croix de fermeture.
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
-  -- Guide d'installation en vidéo.
-  Label(f, "GameFontNormalLarge", "Guide d'installation :", -140, GOLD)
-  f.video = LinkBox(f, CT.GUIDE_VIDEO, -164, 290)
-  -- WoW ne lit pas de vidéo : l'application l'ouvre dans sa fenêtre (lecteur lancé au clic).
-  local okB, watch = pcall(CreateFrame, "Button", nil, f, "UIPanelButtonTemplate")
-  if not okB or not watch then watch = CreateFrame("Button", nil, f) end
-  watch:SetSize(150, 24)
-  watch:SetPoint("TOPLEFT", f, "TOPLEFT", 330, -164)
-  watch:SetText("Regarder la vidéo")
-  watch:SetScript("OnClick", function()
-    f.hideAt = nil
-    if CT.SendCommand and (CT.liveSeen or (CT.Mirror and CT.Mirror.mode ~= "off")) then
-      CT.SendCommand("video")
-      CT.Print("Vidéo du guide : elle s'ouvre dans la fenêtre de l'application (clique sur Lire la vidéo).")
-    else
-      CT.Print("Vidéo du guide : lance l'application Chevaliers Translators pour la regarder dans sa fenêtre, ou copie le lien (clic dans le cadre, Ctrl+C) dans ton navigateur.")
-    end
-  end)
-  f.watch = watch
-  Label(f, "GameFontDisableSmall",
-    "Le bouton ouvre la vidéo dans la fenêtre de l'application. Ou : clic dans le cadre, Ctrl+C, puis colle le lien dans ton navigateur.", -192)
+  -- Musique de l'auteur.
+  Label(f, "GameFontNormal", "Guide de première installation depuis Curseforge :", -140, GOLD)
+  f.music = LinkBox(f, CT.GUIDE_MUSIC, -162)
+  -- Ce que fait l'addon une fois installé.
+  local about = Label(f, "GameFontHighlight",
+    "Une fois installé, l'addon fonctionne pour toutes les versions de World of Warcraft, dans toutes "
+    .. "les langues européennes : il traduit les langues étrangères vers la langue d'origine du joueur, "
+    .. "peu importe de quel pays il vient.", -196)
+  pcall(about.SetSpacing, about, 3)
+  f.about = about
   -- Mises à jour.
-  Label(f, "GameFontHighlight", "Les mises à jour se font automatiquement depuis :", -222)
-  f.repo = LinkBox(f, CT.GUIDE_REPO, -244)
+  Label(f, "GameFontNormal", "L'addon se met à jour automatiquement depuis :", -256, GOLD)
+  f.repo = LinkBox(f, CT.GUIDE_REPO, -278)
+  Label(f, "GameFontDisableSmall", "Clic dans un cadre, puis Ctrl+C pour copier le lien.", -306)
   -- Addons incompatibles chargés (rempli à chaque affichage).
-  f.warn = Label(f, "GameFontHighlightSmall", "", -278, { 1, 0.35, 0.3 })
+  f.warn = Label(f, "GameFontHighlightSmall", "", -332, { 1, 0.35, 0.3 })
   pcall(f.warn.SetSpacing, f.warn, 2)
   -- Fermeture automatique au bout de 60 s après l'affichage (sauf lien touché).
   f:SetScript("OnShow", function(self) self.hideAt = GetTime() + 60 end)
   f:SetScript("OnHide", function(self)
-    pcall(self.video.ClearFocus, self.video)
+    pcall(self.music.ClearFocus, self.music)
     pcall(self.repo.ClearFocus, self.repo)
   end)
   f:SetScript("OnUpdate", function(self)
@@ -153,8 +144,58 @@ local function FillWarnings(f)
     lines[#lines + 1] = "Addon incompatible : " .. a.title .. ". " .. a.why
   end
   f.warn:SetText(table.concat(lines, "\n"))
-  f:SetHeight(#lines > 0 and 300 + 40 * #lines or 290)
+  f:SetHeight(#lines > 0 and 348 + 40 * #lines or 332)
   f.warnings = #lines
+end
+
+-- Notification de l'addon (0.16.6) : petit panneau en haut de l'écran, logo, titre et texte,
+-- effacé en fondu au bout de `seconds` (clic : fermé tout de suite).
+local toast
+function CT.Toast(title, text, seconds)
+  local ok = pcall(function()
+    if not toast then
+      local f = CreateFrame("Frame", "ChevaliersTranslatorsToast", UIParent)
+      f:SetFrameStrata("DIALOG")
+      f:SetSize(460, 64)
+      f:SetPoint("TOP", UIParent, "TOP", 0, -150)
+      f:EnableMouse(true)
+      local bg = f:CreateTexture(nil, "BACKGROUND")
+      bg:SetAllPoints(f)
+      bg:SetColorTexture(0.055, 0.051, 0.039, 0.92)
+      local edge = f:CreateTexture(nil, "BORDER")
+      edge:SetPoint("TOPLEFT")
+      edge:SetPoint("BOTTOMLEFT")
+      edge:SetWidth(3)
+      edge:SetColorTexture(0.788, 0.647, 0.353, 1)
+      local logo = f:CreateTexture(nil, "ARTWORK")
+      logo:SetSize(40, 40)
+      logo:SetPoint("LEFT", f, "LEFT", 12, 0)
+      logo:SetTexture(MEDIA .. "Logo")
+      f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+      f.title:SetPoint("TOPLEFT", f, "TOPLEFT", 62, -10)
+      f.title:SetPoint("RIGHT", f, "RIGHT", -12, 0)
+      pcall(f.title.SetJustifyH, f.title, "LEFT")
+      f.text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      f.text:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -4)
+      f.text:SetPoint("RIGHT", f, "RIGHT", -12, 0)
+      pcall(f.text.SetJustifyH, f.text, "LEFT")
+      f:SetScript("OnMouseUp", function(self) self:Hide() end)
+      f:SetScript("OnUpdate", function(self)
+        local left = (self.hideAt or 0) - GetTime()
+        if left <= 0 then self:Hide() return end
+        pcall(self.SetAlpha, self, math.min(1, left / 1.5))
+      end)
+      toast = f
+    end
+    toast.title:SetText(title)
+    toast.text:SetText(text)
+    local h = 26 + (toast.text.GetStringHeight and toast.text:GetStringHeight() or 24)
+    toast:SetHeight(math.max(64, h + 14))
+    toast.hideAt = GetTime() + (seconds or 10)
+    pcall(toast.SetAlpha, toast, 1)
+    toast:Show()
+  end)
+  return ok and toast
 end
 
 -- Affiche le guide (et retient qu'il a été vu, pour ne plus l'ouvrir tout seul).

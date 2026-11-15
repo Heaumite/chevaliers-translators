@@ -265,6 +265,87 @@ pub fn tie_to_app(child: &Child) {
 #[cfg(not(windows))]
 pub fn tie_to_app(_child: &Child) {}
 
+/// Nos serveurs de traduction en cours (llama-server.exe de notre dossier du moteur ; jamais un
+/// llama.cpp lancé par le joueur ailleurs) : `f(processus, poignée ouverte avec `access`)`.
+#[cfg(windows)]
+fn each_server(
+    access: u32,
+    mut f: impl FnMut(&windows_sys::Win32::System::Diagnostics::ToolHelp::PROCESSENTRY32W, windows_sys::Win32::Foundation::HANDLE),
+) {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW};
+    let ours = crate::catalog::runtime_dir().to_string_lossy().to_lowercase();
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return;
+        }
+        let mut e: PROCESSENTRY32W = std::mem::zeroed();
+        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut ok = Process32FirstW(snap, &mut e) != 0;
+        while ok {
+            let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+            let name = String::from_utf16_lossy(&e.szExeFile[..len]).to_lowercase();
+            if name == "llama-server.exe" {
+                let h = OpenProcess(access, 0, e.th32ProcessID);
+                if !h.is_null() {
+                    let mut buf = [0u16; 1024];
+                    let mut n = buf.len() as u32;
+                    let path = if QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut n) != 0 {
+                        String::from_utf16_lossy(&buf[..n as usize]).to_lowercase()
+                    } else {
+                        String::new()
+                    };
+                    if path.starts_with(&ours) {
+                        f(&e, h);
+                    }
+                    CloseHandle(h);
+                }
+            }
+            ok = Process32NextW(snap, &mut e) != 0;
+        }
+        CloseHandle(snap);
+    }
+}
+
+/// Serveurs de traduction restés en vie (0.16.6) : au lancement, ceux de notre dossier du moteur
+/// laissés par une version précédente ou un arrêt brutal ; WoW fermé ou à la sortie
+/// (`only_ours`), ceux lancés par cette application encore là. Arrêtés ; leur nombre.
+#[cfg(windows)]
+pub fn stop_strays(only_ours: bool) -> usize {
+    use windows_sys::Win32::System::Threading::{TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE};
+    let me = std::process::id();
+    let mut stopped = 0;
+    each_server(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, |e, h| {
+        if (!only_ours || e.th32ParentProcessID == me) && unsafe { TerminateProcess(h, 0) } != 0 {
+            stopped += 1;
+        }
+    });
+    stopped
+}
+
+#[cfg(not(windows))]
+pub fn stop_strays(_only_ours: bool) -> usize {
+    0
+}
+
+/// Identifiants de nos serveurs de traduction en cours (0.16.6 : mémoire vidéo réellement prise
+/// par le modèle, dans la fenêtre des modèles).
+#[cfg(windows)]
+pub fn server_pids() -> Vec<u32> {
+    let mut v = Vec::new();
+    each_server(windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION, |e, _| v.push(e.th32ProcessID));
+    v
+}
+
+#[cfg(not(windows))]
+pub fn server_pids() -> Vec<u32> {
+    Vec::new()
+}
+
 /// Règle la priorité du serveur sur la carte (modèle chargé) ; texte pour le joueur.
 pub fn apply_priority(pid: u32, place: Place, t: &Tuning) -> String {
     if place != Place::Gpu || t.priority == GpuPriority::Normal {

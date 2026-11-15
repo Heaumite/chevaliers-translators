@@ -813,6 +813,9 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
                 match launch(&cfg, &plan, p) {
                     Ok(r) => {
                         say(format!("prêt : {}", step_label(&plan, p)));
+                        if let Some(c) = plan.step(p) {
+                            catalog::write_loaded(c.model.id);
+                        }
                         lat.clear();
                         running = Some(r);
                     }

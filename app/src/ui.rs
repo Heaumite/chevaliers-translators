@@ -78,12 +78,14 @@ fn demo_hw() -> Hw {
             name: "AMD Radeon RX 6950 XT".into(),
             vendor_id: 0x1002,
             dedicated: 16 * GIB - 16 * 1024 * 1024,
-            used: Some(69 * GIB / 10),
+            used: Some(82 * GIB / 10),
             used_by_wow: Some(56 * GIB / 10),
+            used_by_translation: Some(13 * GIB / 10),
             ..Default::default()
         }],
         runtimes: Runtimes { vulkan: true, ..Default::default() },
         wow: vec!["WowClassic.exe".into()],
+        wow_peak: Some(6 * GIB),
     }
 }
 
@@ -178,6 +180,8 @@ fn state_json(s: &Shared, lang: &str) -> Value {
     let p = s.plan();
     let active = s.active();
     let (eff, why) = catalog::effective_active(active.as_deref(), &o);
+    // Nouvelles versions publiées par les éditeurs (0.16.6, dernière vérification, sans réseau).
+    let updates = if s.demo { Vec::new() } else { crate::modeles_maj::available(&s.dir) };
     let models: Vec<Value> = o
         .entries
         .iter()
@@ -194,6 +198,8 @@ fn state_json(s: &Shared, lang: &str) -> Value {
                 "codes_langues": if m.langs == catalog::Langs::Low { json!(["fr", "en", "es", "it", "de", "ru"]) } else { json!([]) },
                 "licence": m.license,
                 "qualite": m.quality,
+                // Couleur du modèle dans la fenêtre (jauge, liste) : bleu, jaune, violet (0.16.6).
+                "teinte": catalog::tint(m),
                 "empreinte": e.footprint,
                 "mesuree": e.measured,
                 "lieu": e.place.map(|p| p.code()),
@@ -216,14 +222,25 @@ fn state_json(s: &Shared, lang: &str) -> Value {
                 })),
                 "actif": eff.model.id == m.id,
                 "dl": dl_json(s.dls.get(m.id)),
+                "maj": updates.iter().find(|u| u.model.id == m.id).map(|u| json!({
+                    "taille": u.size,
+                    "prete": u.ready || s.dls.get(&format!("maj:{}", m.id)).is_some_and(|d| d.state == "fini"),
+                    "dl": dl_json(s.dls.get(&format!("maj:{}", m.id))),
+                })),
             })
         })
         .collect();
+    // Ressources réellement utilisées (0.16.6) : modèle chargé et ce qu'il prend vraiment ; WoW
+    // compté 7 Go seulement à l'installation, ensuite le réel ; marge de saturation gardée.
+    let loaded = if s.demo { Some(eff.model) } else { catalog::read_loaded() };
     let card = o.card.as_ref().map(|c| {
         json!({
             "nom": c.name, "total": c.dedicated, "autres": c.others(), "wow": c.wow,
-            "wow_mesure": c.wow_measured, "wow_lance": c.wow_running, "libre_jeu": c.free_in_game,
+            "wow_mesure": c.wow_measured, "wow_source": c.wow_source.code(), "wow_lance": c.wow_running,
+            "libre_jeu": c.free_in_game,
             "marge": crate::gouverneur::saturation(c.dedicated),
+            "modele_reel": c.translation,
+            "modele_charge": loaded.filter(|_| c.translation > 0).map(|m| m.id),
         })
     });
     json!({
@@ -340,6 +357,57 @@ fn start_download(state: &State, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Nouvelle version d'un modèle installé (0.16.6) : téléchargée à côté de l'ancienne, vérifiée ;
+/// l'application la met en place quand aucun serveur ne l'utilise (lancement, WoW fermé).
+fn start_model_update(state: &State, id: &str) -> Result<(), String> {
+    let m = catalog::by_id(id).ok_or_else(|| format!("modèle inconnu : {id}"))?;
+    let key = format!("maj:{id}");
+    let mut s = state.lock().unwrap();
+    if s.dls.get(&key).is_some_and(|d| d.state == "en_cours") {
+        return Ok(());
+    }
+    let total = crate::modeles_maj::available(&s.dir).iter().find(|u| u.model.id == id).map_or(m.size, |u| u.size);
+    let cancel = Arc::new(AtomicBool::new(false));
+    s.dls.insert(key.clone(), Dl { got: 0, total, speed: 0.0, state: "en_cours", message: String::new(), cancel: cancel.clone() });
+    let dir = s.dir.clone();
+    drop(s);
+    let st = state.clone();
+    crate::say!("Nouvelle version : {}", m.name);
+    std::thread::spawn(move || {
+        let mut report = |p: &catalog::Progress| {
+            if let Some(d) = st.lock().unwrap().dls.get_mut(&key) {
+                d.got = p.got;
+                if p.total > 0 {
+                    d.total = p.total;
+                }
+                d.speed = p.speed;
+                d.message = p.problem.clone();
+            }
+        };
+        let r = crate::modeles_maj::download_update(m, &dir, &cancel, &mut report);
+        if let Some(d) = st.lock().unwrap().dls.get_mut(&key) {
+            match r {
+                Ok(()) => {
+                    d.state = "fini";
+                    d.got = d.total;
+                    d.message.clear();
+                    crate::say!("  {} : nouvelle version prête (mise en place quand la traduction est arrêtée)", m.name);
+                }
+                Err(e) if e == catalog::CANCELLED => {
+                    d.state = "annule";
+                    d.message = e;
+                }
+                Err(e) => {
+                    crate::say!("  {} : {e}", m.name);
+                    d.state = "erreur";
+                    d.message = e;
+                }
+            }
+        }
+    });
+    Ok(())
+}
+
 /// Téléchargement simulé (démonstration) : 90 Mo/s.
 fn simulate(total: u64, cancel: &AtomicBool, report: &mut dyn FnMut(&catalog::Progress)) -> Result<(), String> {
     let mut p = catalog::Progress { total, attempt: 1, ..Default::default() };
@@ -385,6 +453,7 @@ fn act(state: &State, action: &str, id: &str) -> Result<(), String> {
             Ok(())
         }
         "telecharger" => start_download(state, id),
+        "maj_modele" => start_model_update(state, id),
         "annuler" => {
             if let Some(d) = state.lock().unwrap().dls.get(id) {
                 d.cancel.store(true, Ordering::Relaxed);
