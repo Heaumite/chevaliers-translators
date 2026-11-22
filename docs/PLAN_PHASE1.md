@@ -223,3 +223,8 @@ langue de lecture (SalamandraTA 7B pour l'ukrainien seulement) ; langue de lectu
 quand WoW n'existe pas dans celle-ci ; besoin porté à 30 messages par minute ; Trad:AUTO qui garde
 l'interlocuteur étranger, boutons des onglets de chuchotement et Battle.net, anciennes lignes du
 miroir oubliées après un `/reload`.
+
+**0.17.2 (22/11)** : chat traduit qui revient tout de suite après un écran de chargement (mort en
+instance comprise) : chargement levé aussi à l'entrée dans le monde, contexte envoyé en priorité et
+répété, fin du chargement déduite du retour du bandeau ; chat caché 0,3 s après la disparition du
+bandeau (1,2 s avant).

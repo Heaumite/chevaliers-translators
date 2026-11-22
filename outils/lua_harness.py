@@ -1122,6 +1122,23 @@ def mock(root, binary):
     assert lua.eval("CT_TABLE.ContextFlags()") & 32 == 0
     out = feed(collect("charge", max_ticks=200, idle=30), os.path.join(work, "charge"))
     assert "[contexte]" in out and "écran de chargement" not in out, out
+    # 0.17.1 : libération après une mort en instance : quitter le monde puis y revenir sans fin
+    # d'écran de chargement signalée ; le chargement est levé à l'entrée dans le monde, et la trame
+    # « chargement » encore en attente part avec le contexte du moment.
+    g.FIRE("PLAYER_LEAVING_WORLD")
+    assert lua.eval("CT_TABLE.ContextFlags()") & 32 == 32
+    g.FIRE("PLAYER_ENTERING_WORLD")
+    assert lua.eval("CT_TABLE.ContextFlags()") & 32 == 0, "chargement resté levé sans LOADING_SCREEN_DISABLED"
+    out = feed(collect("liberation", max_ticks=200, idle=30), os.path.join(work, "liberation"))
+    assert "écran de chargement" not in out, out
+    # 0.17.1 : un changement de contexte part en priorité (vérifié 4 fois par seconde), même avec
+    # une file pleine.
+    g.IN_COMBAT = True
+    assert lua.eval("CT_TABLE.ContextFlags()") & 1 == 1
+    out = feed(collect("combat-prio", max_ticks=200, idle=30), os.path.join(work, "combat-prio"))
+    assert "[contexte] combat" in out, out
+    g.IN_COMBAT = False
+    feed(collect("fin-combat", max_ticks=200, idle=30), os.path.join(work, "fin-combat"))
     # 0.14.3 : en champ de bataille, UnitIsAFK et IsInInstance rendent des valeurs secrètes : ni
     # testées ni comptées (seule l'instance lisible compte).
     lua.execute('UnitIsAFK = function() return SECRET end; IsInInstance = function() return true, SECRET end')
@@ -1275,7 +1292,7 @@ def mock(root, binary):
     gf = g.ChevaliersTranslatorsGuide
     assert gf is not None and gf.shown, "guide non affiché"
     assert "toutes les versions de World of Warcraft" in gf.about.text, "texte du guide"
-    assert gf.music.url == "https://www.youtube.com/watch?v=KzwXwlVVSvE" and gf.music.text == gf.music.url, "Guide d'inqtallation"
+    assert gf.music.url == "https://www.youtube.com/watch?v=KzwXwlVVSvE" and gf.music.text == gf.music.url, "lien de la musique"
     assert gf.repo.url == "https://github.com/Heaumite/chevaliers-translators", "lien du dépôt"
     assert gf.warnings == 1, "addon incompatible absent du guide"
     assert g.ChevaliersTranslatorsDB.guideSeen == 4

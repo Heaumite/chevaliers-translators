@@ -441,6 +441,9 @@ pub struct Live {
     errors: HashMap<DecodeError, usize>,
     last_key: Option<(u8, u16, usize)>,
     last_err: Option<DecodeError>,
+    /// Bandeau absent de l'image depuis ce moment (écran de chargement, choix du personnage,
+    /// interface masquée ; 0.17.1).
+    nosync_since: Option<Instant>,
     idle_since: Instant,
     polls: usize,
     frames_seen: usize,
@@ -499,6 +502,7 @@ impl Live {
             errors: HashMap::new(),
             last_key: None,
             last_err: None,
+            nosync_since: None,
             idle_since: now,
             polls: 0,
             frames_seen: 0,
@@ -628,6 +632,13 @@ impl Live {
 
     /// Langue choisie par un clic droit sur un pseudo, à annoncer sur le jeu (une fois).
     #[cfg_attr(not(windows), allow(dead_code))]
+    /// Bandeau absent de l'image depuis au moins 0,3 s, après un premier contact avec l'addon
+    /// (0.17.1) : écran de chargement ou interface masquée ; rien n'est dessiné sur le jeu (avant :
+    /// 1,2 s sans signe de vie, le chat restait visible sur l'écran de chargement).
+    pub fn banner_gone(&self, now: Instant) -> bool {
+        self.last_alive.is_some() && self.nosync_since.is_some_and(|t| now.saturating_duration_since(t) >= BANNER_GONE)
+    }
+
     pub fn take_lang_toast(&mut self) -> Option<&'static str> {
         self.lang_toast.take()
     }
@@ -691,10 +702,29 @@ impl Live {
             Ok(d) => {
                 self.last_err = None;
                 self.idle_since = now;
+                // Bandeau revenu après une absence (0.17.1) : l'écran de chargement le recouvrait
+                // entièrement, il est donc fini, même si sa fin n'a pas été signalée (trame peinte
+                // sous l'écran de chargement) ; le chat traduit revient aussitôt.
+                if let Some(t) = self.nosync_since.take() {
+                    let gap = now.saturating_duration_since(t);
+                    if gap >= BANNER_GONE && self.ctx & crate::engine::CTX_LOADING != 0 {
+                        self.ctx &= !crate::engine::CTX_LOADING;
+                        crate::engine::set_context_of(self.game, self.ctx);
+                        crate::say!("[contexte] fin de l'écran de chargement (bandeau revenu)");
+                    }
+                    // Plus de 2 s sans bandeau (chargement) : les bulles d'avant ne sont plus à
+                    // leur place, même si le début du chargement n'a pas été vu.
+                    if gap >= Duration::from_secs(2) {
+                        if let Some(m) = self.mirror.as_mut() {
+                            m.bubbles.reset(now);
+                        }
+                    }
+                }
                 self.on_frame(d, now)
             }
             Err(DecodeError::NoSync) => {
                 self.last_err = None;
+                self.nosync_since.get_or_insert(now);
                 false
             }
             Err(e) => {
@@ -1593,6 +1623,8 @@ pub fn model_notice(s: &str, readies: usize) -> Option<(String, String)> {
 /// Sans signe de vie de l'addon pendant ce temps, le miroir est caché.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub const ALIVE_TIMEOUT: Duration = Duration::from_millis(1200);
+/// Bandeau absent de l'image depuis ce temps : jeu recouvert (écran de chargement), 0.17.1.
+pub const BANNER_GONE: Duration = Duration::from_millis(300);
 
 /// Traduction d'un seul jeu, la fenêtre de WoW trouvée (outils de développement) ; l'application
 /// traduit toutes les fenêtres de WoW ouvertes (`jeux_win::run_games`, 0.15).
@@ -1704,6 +1736,37 @@ mod tests {
 
     fn chat(l: &mut Live, id: u16, chan: u8, sender: &str, text: &str) {
         l.on_fragment(FRAME_CHAT, &frag(id, chan, &format!("{sender}\u{1F}{text}")), Instant::now());
+    }
+
+    #[test]
+    fn banner_back_after_a_loading_screen_ends_it() {
+        // 0.17.1 : l'écran de chargement recouvre le bandeau. Le chat traduit se cache 0,3 s après
+        // sa disparition, et revient dès que le bandeau revient, même si la trame de fin de
+        // chargement a été peinte sous l'écran de chargement (mort en instance, libération).
+        use crate::decode::{Decoded, Geometry};
+        use crate::proto::Frame;
+        let (mut l, _log) = live("fr");
+        let alive = |seq: u16, ctx: u8| -> Result<Decoded, DecodeError> {
+            Ok(Decoded { frame: Frame { ftype: crate::proto::FRAME_ALIVE, seq, payload: vec![1, ctx, 0, 7] }, geometry: Geometry { block: 2, cols: 40, right: 100, bottom: 100 } })
+        };
+        let t0 = Instant::now();
+        l.feed_result(alive(1, 2), t0);
+        assert_eq!(l.ctx, 2);
+        // Le joueur quitte le monde : trame de chargement lue, puis le bandeau disparaît.
+        l.feed_result(alive(2, 2 | crate::engine::CTX_LOADING), t0 + Duration::from_millis(50));
+        assert_ne!(l.ctx & crate::engine::CTX_LOADING, 0);
+        l.feed_result(Err(DecodeError::NoSync), t0 + Duration::from_millis(100));
+        assert!(!l.banner_gone(t0 + Duration::from_millis(300)));
+        assert!(l.banner_gone(t0 + Duration::from_millis(401)), "caché 0,3 s après la disparition");
+        // Le bandeau revient, encore avec l'ancienne trame : le chargement est fini.
+        l.feed_result(alive(2, 2 | crate::engine::CTX_LOADING), t0 + Duration::from_secs(20));
+        assert_eq!(l.ctx & crate::engine::CTX_LOADING, 0);
+        assert!(!l.banner_gone(t0 + Duration::from_secs(20)));
+        // Un instant sans bandeau (moins de 0,3 s) ne lève pas un chargement en cours.
+        l.feed_result(alive(3, crate::engine::CTX_LOADING), t0 + Duration::from_secs(21));
+        l.feed_result(Err(DecodeError::NoSync), t0 + Duration::from_millis(21_050));
+        l.feed_result(alive(3, crate::engine::CTX_LOADING), t0 + Duration::from_millis(21_100));
+        assert_ne!(l.ctx & crate::engine::CTX_LOADING, 0);
     }
 
     #[test]

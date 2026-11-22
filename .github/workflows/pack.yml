@@ -40,11 +40,15 @@ jobs:
           (cd publie && sha256sum MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf > MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf.sha256)
           ls -l publie
       # Jamais « dernière version » : la mise à jour de l'application lit la dernière version vX.Y.Z.
+      # gh envoie le fichier en flux (1,97 Go) ; relancé, le workflow remplace les fichiers.
       - name: Publication
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: pack-europe-1
-          name: Pack Europe 1 (MiLMMT-46 4B)
-          make_latest: "false"
-          body_path: outils/packs/NOTE-pack-europe.md
-          files: publie/*
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view pack-europe-1 >/dev/null 2>&1; then
+            gh release upload pack-europe-1 publie/* --clobber
+          else
+            gh release create pack-europe-1 publie/* --title "Pack Europe 1 (MiLMMT-46 4B)" \
+              --notes-file outils/packs/NOTE-pack-europe.md --latest=false --target "$GITHUB_SHA"
+          fi
+          gh release view pack-europe-1

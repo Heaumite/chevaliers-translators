@@ -456,7 +456,8 @@ impl Session {
         // choix du personnage) ou que WoW est fermé ou réduit ; revient avec lui. Une autre
         // application active ne le cache pas : le chat reste sur WoW, sauf sous sa fenêtre.
         let in_front = self.in_front();
-        let alive = self.live.last_alive.is_none_or(|t| now.saturating_duration_since(t) < ALIVE_TIMEOUT);
+        // Bandeau disparu de l'image (écran de chargement, 0.17.1) : caché après 0,3 s.
+        let alive = self.live.last_alive.is_none_or(|t| now.saturating_duration_since(t) < ALIVE_TIMEOUT) && !self.live.banner_gone(now);
         let front = if in_front {
             alive
         } else if self.rect().is_none() {

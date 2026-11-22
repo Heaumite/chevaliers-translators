@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.17.1"
+CT.VERSION = "0.17.2"
 
 local floor = math.floor
 local format = string.format
@@ -378,13 +378,44 @@ end
 
 -- Écran de chargement (0.17.0) : signalé en priorité dès que le personnage quitte le monde
 -- (avant que l'écran de chargement recouvre le jeu), levé à sa fin. Deux trames : une trame ne
--- reste que quelques images à l'écran.
+-- reste que quelques images à l'écran. 0.17.1 : les trames de vie encore en attente prennent le
+-- contexte du moment (une trame « chargement » restée dans la file ne repasse pas après).
+local ctxSent, ctxCheck = -1, 0
 local function SendContextNow()
-  local p = { 1, ContextFlags(), gfxGen, SESSION }
+  local f = ContextFlags()
+  local p = { 1, f, gfxGen, SESSION }
+  for i = phead, ptail do
+    if prio[i] and prio[i].t == CT.FRAME_ALIVE then prio[i].p = p end
+  end
   EnqueuePrio(CT.FRAME_ALIVE, p, 4)
   EnqueuePrio(CT.FRAME_ALIVE, p, 4)
   idleShown = -1
+  ctxSent = f
 end
+CT.SendContextNow = SendContextNow
+
+-- Contexte changé (combat, chat verrouillé, instance, écran de chargement) : signalé en priorité,
+-- vérifié 4 fois par seconde (0.17.1 ; avant, la trame de vie attendait que la file du bandeau se
+-- vide : après une mort en instance, le chat traduit revenait plusieurs secondes trop tard).
+local function WatchContext(now)
+  if now - ctxCheck < 0.25 then return end
+  ctxCheck = now
+  if ContextFlags() ~= ctxSent then SendContextNow() end
+end
+
+-- Fin du chargement : signalée encore 3 fois (une trame peinte pendant que l'écran de chargement
+-- s'efface peut ne pas être vue), et le chat miroir est redécrit tout de suite.
+local function LoadingOver()
+  if not chatOn then return end
+  SendContextNow()
+  if CT.Mirror and CT.Mirror.Refresh then CT.Mirror:Refresh() end
+  if C_Timer and C_Timer.After then
+    for _, d in ipairs({ 0.5, 1.5, 3 }) do
+      C_Timer.After(d, function() if chatOn and not CT.loading then SendContextNow() end end)
+    end
+  end
+end
+
 local loadWatch = CreateFrame("Frame")
 for _, ev in ipairs({ "PLAYER_LEAVING_WORLD", "LOADING_SCREEN_ENABLED", "LOADING_SCREEN_DISABLED", "PLAYER_ENTERING_WORLD" }) do
   pcall(loadWatch.RegisterEvent, loadWatch, ev)
@@ -393,17 +424,25 @@ loadWatch:SetScript("OnEvent", function(_, event)
   local was = CT.loading
   if event == "PLAYER_LEAVING_WORLD" or event == "LOADING_SCREEN_ENABLED" then
     CT.loading = true
-  elseif event == "LOADING_SCREEN_DISABLED" then
+  else
+    -- LOADING_SCREEN_DISABLED, ou PLAYER_ENTERING_WORLD (0.17.1) : certains changements de zone
+    -- (libération après une mort en instance) n'ont pas d'écran de chargement signalé ; le
+    -- chargement restait levé et rien n'était plus dessiné.
     CT.loading = false
   end
-  if CT.loading ~= was and chatOn then SendContextNow() end
+  if CT.loading ~= was and chatOn then
+    if CT.loading then SendContextNow() else LoadingOver() end
+  end
 end)
 
 local driver = CreateFrame("Frame")
 driver:SetScript("OnUpdate", function()
   ticks = ticks + 1
   local now = GetTime()
-  if chatOn then WatchBacklog(now) end
+  if chatOn then
+    WatchBacklog(now)
+    if CT.Mirror and CT.Mirror.mode and CT.Mirror.mode ~= "off" then WatchContext(now) end
+  end
   -- Cadence planifiée : l'attente n'est pas arrondie à l'image suivante, la moyenne
   -- tient le nombre de trames demandé. Chaque trame reste au moins 2 images à l'écran.
   if now < nextSwap or ticks < 2 then return end

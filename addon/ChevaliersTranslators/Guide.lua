@@ -107,7 +107,7 @@ local function BuildGuide()
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
   -- Musique de l'auteur.
-  Label(f, "GameFontNormal", "Guide d'installation :", -140, GOLD)
+  Label(f, "GameFontNormal", "Guide d'installation de l'addon :", -140, GOLD)
   f.music = LinkBox(f, CT.GUIDE_MUSIC, -162)
   -- Ce que fait l'addon une fois installé.
   local about = Label(f, "GameFontHighlight",

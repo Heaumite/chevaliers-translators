@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.17.1)
+# Chevaliers Translators (v0.17.2)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -146,6 +146,25 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.17.2 (22/11/2026)
+
+- **Le chat traduit revient tout de suite après un écran de chargement**, notamment après une
+  mort en instance (libération, retour au cimetière). Plusieurs corrections :
+  - certains changements de zone ne signalent pas la fin de l'écran de chargement : l'addon
+    restait « en chargement » et l'application ne dessinait plus rien. Le chargement est
+    maintenant levé aussi à l'entrée dans le monde ;
+  - la trame qui annonce la fin du chargement pouvait être peinte pendant que l'écran de
+    chargement s'effaçait, donc jamais vue, et la suivante attendait que la file du bandeau se
+    vide. L'addon la renvoie maintenant 3 fois dans les 3 s qui suivent, et tout changement de
+    contexte (combat, chat verrouillé, chargement) part en priorité, vérifié 4 fois par seconde.
+    Une trame « chargement » encore en attente part avec le contexte du moment ;
+  - l'application sait aussi que l'écran de chargement recouvre entièrement le bandeau. Quand le
+    bandeau revient, le chargement est fini, même si sa fin n'a pas été vue ;
+  - le chat miroir est redécrit dès la fin du chargement.
+- **Plus de chat traduit sur l'écran de chargement** : il disparaissait 1,2 s après le dernier
+  signe de vie de l'addon, et restait donc visible un moment. Il est caché 0,3 s après la
+  disparition du bandeau de l'image.
 
 ## 0.17.1 (22/11/2026)
 
@@ -684,20 +703,25 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.17.1.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.17.2.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.17.1)
+## Vérifié avant livraison (0.17.2)
+
+- 0.17.2 : test Rust du bandeau qui revient après un écran de chargement (chargement levé, chat
+  caché 0,3 s après la disparition du bandeau, pas pour un instant plus court) ; harnais : sortie
+  du monde puis retour sans fin d'écran de chargement signalée (chargement levé, trame en attente
+  mise au contexte du moment), changement de contexte envoyé en priorité.
 
 - Banc d'essai de traduction directe (`outils/pack_europe.py` pour le pack ; banc, notes COMET-22
   et chrF++ hors dépôt) : MiLMMT-46 4B, son pack Europe, TranslateGemma 4B et SalamandraTA 7B sur
   6 directions et 192 segments, plus l'ukrainien et le serbe (48 segments) ; empreinte du pack
   dans `outils/packs/europe.sha256`.
 - Compilation Windows vérifiée depuis Linux (`cargo check --target x86_64-pc-windows-gnu`).
-- 148 tests Rust sous Linux : dont, en 0.17.1, la langue de lecture (client de WoW ou langue de
+- 149 tests Rust sous Linux : dont, en 0.17.1, la langue de lecture (client de WoW ou langue de
   Windows absente de WoW), les noms anglais du jeu pour ces lecteurs, Trad:AUTO qui garde la langue
   de l'interlocuteur étranger, le modèle retiré remplacé (choix gardé, ancien fichier effacé une
   fois le nouveau installé), le pack de chaque langue (SalamandraTA 7B pour l'ukrainien
@@ -796,13 +820,15 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
   erreur JavaScript.
 
-## Test de la 0.17.0 (PowerShell)
+## Test de la 0.17.2 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
-| Version | fenêtre de l'application et `/chevaliers` : 0.17.1 ; GitHub : le workflow « Pack Europe » publie `pack-europe-1`, puis la compilation de `v0.17.1` passe |
+| Version | fenêtre de l'application et `/chevaliers` : 0.17.2 ; GitHub : la compilation de `v0.17.2` passe (le pack Europe est déjà publié) |
+| Écran de chargement | portail ou pierre de foyer : le chat traduit disparaît dès l'écran de chargement (moins d'une demi-seconde) et revient dès l'arrivée ; journal : « [contexte] écran de chargement » puis « [contexte] en jeu… » ou « fin de l'écran de chargement (bandeau revenu) » |
+| Mort en instance | mourir en donjon, libérer l'esprit : à l'arrivée au cimetière, le chat traduit est là tout de suite (messages de groupe traduits) ; de même en revenant dans l'instance |
 | Pack Europe | lancement de l'application : bulle « … MiLMMT-46 4B 1,84 Go… » ; fin du téléchargement : journal « [modèles] TranslateGemma 4B (remplacé par MiLMMT-46 4B) : ancien fichier effacé » ; fenêtre des modèles : MiLMMT-46 4B en jaune, SalamandraTA 7B « pour une autre langue » |
 | Pack Europe en jeu | `/chevaliers essai 4b` (hors combat, en ville) : verdict compatible, latence et messages par minute notés ; journal du serveur : `MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf` chargé |
 | Langue de lecture | journal à l'ouverture de WoW : « traduction vers FR (langue du client de WoW) » ; Windows en polonais et WoW en anglais : « vers PL (langue de Windows (absente de WoW)) » |

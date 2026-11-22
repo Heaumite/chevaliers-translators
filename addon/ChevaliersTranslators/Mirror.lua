@@ -756,6 +756,12 @@ function M:Frames()
   return ChatFrames(GetTime())
 end
 
+-- Toutes les fenêtres redécrites au prochain passage (fin d'un écran de chargement, 0.17.1), sans
+-- renvoyer les textes déjà connus de l'application.
+function M:Refresh()
+  for _, st in pairs(self.state) do st.at = -100 end
+end
+
 function M:Reset()
   iconsSent = {}
   self.texts = {}
