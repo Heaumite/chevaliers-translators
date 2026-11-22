@@ -98,7 +98,9 @@ fn find_sync(img: &Image, max: usize) -> Vec<(usize, usize, usize)> {
             let b2 = crossings[1] - crossings[2];
             let bf = (b1 + b2) / 2.0;
             let block = bf.round() as usize;
-            if !(2..=16).contains(&block) || (b1 - bf).abs() > 1.0 || (b2 - bf).abs() > 1.0 {
+            // Blocs de 1 à 16 pixels (0.17.0 : 1 pixel permis, 2 par défaut côté addon).
+            let tol = if block == 1 { 0.5 } else { 1.0 };
+            if !(1..=16).contains(&block) || (b1 - bf).abs() > tol || (b2 - bf).abs() > tol {
                 continue;
             }
             let right = (crossings[0] + bf - 0.5).round() as usize;

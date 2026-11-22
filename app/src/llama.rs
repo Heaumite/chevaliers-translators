@@ -137,7 +137,11 @@ pub const CONTEXT_PER_SLOT: u32 = 512;
 
 /// Modèle à attention à fenêtre glissante (famille Gemma).
 pub fn sliding_window(model: &Path) -> bool {
-    model.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase().contains("gemma"))
+    model.file_name().is_some_and(|n| {
+        let n = n.to_string_lossy().to_lowercase();
+        // MiLMMT-46 (0.17.1) : un Gemma 3 sous un autre nom.
+        n.contains("gemma") || n.contains("milmmt")
+    })
 }
 
 /// Arguments de llama-server.

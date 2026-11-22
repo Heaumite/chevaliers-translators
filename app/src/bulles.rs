@@ -12,25 +12,32 @@
 //! Les bulles suivent le personnage qui parle : entre deux relevés de l'addon (10 par seconde au
 //! plus, et toute la chaîne capture-affichage), la place est prolongée selon la vitesse mesurée,
 //! pour que la traduction colle à la bulle quand la caméra tourne.
+//!
+//! 0.17.0 : une bulle vit 60 s, apparaît en fondu pendant ses 10 premières secondes et s'efface
+//! pendant ses 10 dernières. Plusieurs bulles qui se chevauchent s'empilent : la plus ancienne en
+//! bas, les plus récentes au-dessus ; quand une bulle s'en va, celles du dessus redescendent en
+//! glissant. Nouveau dessin : plaque sombre en dégradé, ombre douce, liseré fin, barre d'accent
+//! aux couleurs de la classe, acronyme de la langue en couleur d'accent.
 
 use std::time::{Duration, Instant};
 
-use super::{advances, parse_markup, wrap, Canvas, FontBook, Item, Layout, Rgb, Update, PLATE};
+use super::{advances, parse_markup, wrap, Canvas, FontBook, Item, Layout, Rgb, Update};
 
 /// Première fenêtre des bulles (les fenêtres de chat sont numérotées de 1 à ~10, les panneaux
 /// à partir de 248).
 pub const FIRST_FRAME: u8 = 200;
-/// Bord de la bulle (et de sa pointe).
-const BUBBLE_EDGE: Rgb = [150, 140, 118];
 pub const MAX_BUBBLES: usize = 8;
 /// Bulle sans nouvelles de l'addon depuis ce temps : retirée (il renvoie toutes les 2 s).
 const STALE: Duration = Duration::from_millis(3500);
-/// Vie d'une bulle (0.16.6) : 30 s après son apparition (l'addon la garde après celle du jeu),
-/// effacée progressivement pendant ses 8 dernières secondes.
-pub const LIFE: Duration = Duration::from_secs(30);
-const FADE: f32 = 8.0;
+/// Vie d'une bulle (0.17.0) : 60 s après son apparition (l'addon la garde après celle du jeu),
+/// apparue en fondu pendant ses 10 premières secondes, effacée pendant ses 10 dernières.
+pub const LIFE: Duration = Duration::from_secs(60);
+pub const FADE_IN: f32 = 10.0;
+pub const FADE_OUT: f32 = 10.0;
 /// Paliers de transparence du fondu (une image redessinée par palier).
 const FADE_STEPS: f32 = 24.0;
+/// Glissement des bulles empilées vers leur place (part de l'écart comblée par seconde).
+const SLIDE: f32 = 9.0;
 /// Avance donnée à la place prédite (retard de la capture et de l'affichage).
 const LEAD: f32 = 0.06;
 /// Prédiction limitée à ce temps après le dernier relevé.
@@ -130,6 +137,8 @@ pub struct Drawn {
     pub canvas: Canvas,
     pub dx: i32,
     pub dy: i32,
+    /// Marge de l'ombre autour de la bulle dans l'image (0.17.0).
+    pub margin: i32,
 }
 
 struct State {
@@ -145,12 +154,43 @@ struct State {
     /// Dernière place posée (gauche, bas, texte, palier de transparence) : rien n'est renvoyé si
     /// elle ne change pas.
     posted: Option<(i32, i32, String, u8)>,
+    /// Hauteur dont la bulle est remontée au-dessus des plus anciennes qu'elle chevauche (0.17.0),
+    /// telle qu'affichée (elle glisse vers sa place).
+    lift: f32,
 }
 
-/// Opacité d'une bulle selon son âge : pleine, puis effacée pendant les FADE dernières secondes.
+/// Opacité d'une bulle selon son âge (0.17.0) : apparition en fondu pendant FADE_IN secondes
+/// (lisible tôt : la montée ralentit vers la fin), pleine, puis effacée pendant les FADE_OUT
+/// dernières secondes.
 pub fn fade_level(age: Duration) -> u8 {
-    let left = LIFE.as_secs_f32() - age.as_secs_f32();
-    ((left / FADE).clamp(0.0, 1.0) * FADE_STEPS).ceil() as u8
+    let a = age.as_secs_f32();
+    let t_in = (a / FADE_IN).clamp(0.0, 1.0);
+    let fade_in = 1.0 - (1.0 - t_in) * (1.0 - t_in);
+    let fade_out = ((LIFE.as_secs_f32() - a) / FADE_OUT).clamp(0.0, 1.0);
+    (fade_in.min(fade_out) * FADE_STEPS).ceil() as u8
+}
+
+/// Hauteurs de remontée des bulles empilées (0.17.0). `rects` : (gauche, bas, largeur, hauteur)
+/// de chaque bulle à sa place naturelle, de la plus ancienne à la plus récente. Chaque bulle monte
+/// juste au-dessus des plus anciennes qu'elle chevaucherait.
+pub fn stack_lifts(rects: &[(i32, i32, i32, i32)], gap: i32) -> Vec<i32> {
+    let mut placed: Vec<(i32, i32, i32, i32)> = Vec::new();
+    let mut lifts = Vec::with_capacity(rects.len());
+    for &(l, b, w, h) in rects {
+        let mut lift = 0;
+        // Au plus une montée par bulle déjà placée : la boucle s'arrête toujours.
+        for _ in 0..=placed.len() {
+            let bottom = b + lift;
+            let hit = placed.iter().filter(|&&(pl, pb, pw, ph)| l < pl + pw && pl < l + w && bottom < pb + ph + gap && pb < bottom + h).map(|&(_, pb, _, ph)| pb + ph + gap).max();
+            match hit {
+                Some(top) => lift = top - b,
+                None => break,
+            }
+        }
+        placed.push((l, b + lift, w, h));
+        lifts.push(lift);
+    }
+    lifts
 }
 
 #[derive(Default)]
@@ -162,6 +202,8 @@ pub struct Bubbles {
     pub seen_total: usize,
     /// Bulles arrivées en fin de vie : plus reprises si l'addon les renvoie encore (une minute).
     expired: Vec<(u16, Instant)>,
+    /// Passage précédent (glissement des bulles empilées).
+    last_tick: Option<Instant>,
 }
 
 impl Bubbles {
@@ -172,7 +214,7 @@ impl Bubbles {
             self.font = font;
         }
         let mut next: Vec<State> = Vec::new();
-        self.expired.retain(|(_, t)| now.saturating_duration_since(*t) < Duration::from_secs(60));
+        self.expired.retain(|(_, t)| now.saturating_duration_since(*t) < LIFE + Duration::from_secs(30));
         for (s, body) in list.into_iter().take(MAX_BUBBLES) {
             let Some(body) = body else { continue };
             if self.expired.iter().any(|(id, _)| *id == s.id) {
@@ -199,7 +241,7 @@ impl Bubbles {
                     o.at = now;
                     next.push(o);
                 }
-                None => next.push(State { seen: s, body, at: now, born: now, vel: (0.0, 0.0), slot: u8::MAX, drawn: None, posted: None }),
+                None => next.push(State { seen: s, body, at: now, born: now, vel: (0.0, 0.0), slot: u8::MAX, drawn: None, posted: None, lift: 0.0 }),
             }
         }
         // Bulles disparues : leurs fenêtres sont cachées.
@@ -223,6 +265,17 @@ impl Bubbles {
         for s in &mut self.states {
             s.drawn = None;
             s.posted = None;
+        }
+    }
+
+    /// Écran de chargement (0.17.0) : les bulles d'avant ne sont plus à leur place ; toutes
+    /// retirées, et pas reprises si l'addon les renvoie.
+    pub fn reset(&mut self, now: Instant) {
+        for s in self.states.drain(..) {
+            self.expired.push((s.seen.id, now));
+            if s.posted.is_some() {
+                self.to_hide.push(FIRST_FRAME + s.slot);
+            }
         }
     }
 
@@ -264,8 +317,11 @@ impl Bubbles {
             }
             keep
         });
+        let dt = self.last_tick.map_or(0.0, |t| now.saturating_duration_since(t).as_secs_f32()).min(0.25);
+        self.last_tick = Some(now);
+        // Place naturelle de chaque bulle (prédite), puis empilement : la plus ancienne en bas.
+        let mut natural: Vec<(i32, i32, String)> = Vec::with_capacity(self.states.len());
         for s in &mut self.states {
-            let frame = FIRST_FRAME + s.slot;
             // Pas (encore) de traduction, ou rien à traduire : la bulle porte le texte d'origine
             // (celle de Blizzard est effacée par l'addon).
             let text = translation(&s.body).unwrap_or_else(|| s.body.clone());
@@ -276,6 +332,39 @@ impl Bubbles {
             let t = (now.saturating_duration_since(s.at).as_secs_f32() + LEAD).min(HORIZON);
             let left = s.seen.left + d.dx + (s.vel.0 * t).round() as i32;
             let bottom = s.seen.bottom + d.dy + (s.vel.1 * t).round() as i32;
+            natural.push((left, bottom, text));
+        }
+        let mut order: Vec<usize> = (0..self.states.len()).collect();
+        order.sort_by_key(|&i| self.states[i].born);
+        // Rectangle de chaque bulle sans son ombre (gauche, bas, largeur, hauteur).
+        let rects: Vec<(i32, i32, i32, i32)> = order
+            .iter()
+            .map(|&i| {
+                let d = self.states[i].drawn.as_ref().unwrap();
+                let m = d.margin;
+                (natural[i].0 + m, natural[i].1 + m, d.canvas.w as i32 - 2 * m, d.canvas.h as i32 - 2 * m)
+            })
+            .collect();
+        let lifts = stack_lifts(&rects, 3);
+        for (k, &i) in order.iter().enumerate() {
+            let s = &mut self.states[i];
+            let target = lifts[k] as f32;
+            // Nouvelle bulle : directement à sa place ; ensuite, glissement vers la place.
+            if s.posted.is_none() && s.lift == 0.0 {
+                s.lift = target;
+            } else {
+                s.lift += (target - s.lift) * (dt * SLIDE).min(1.0);
+                if (target - s.lift).abs() < 0.5 {
+                    s.lift = target;
+                }
+            }
+        }
+        for (i, s) in self.states.iter_mut().enumerate() {
+            let frame = FIRST_FRAME + s.slot;
+            let d = s.drawn.as_ref().unwrap();
+            let (left, bottom0, ref text) = natural[i];
+            let text = text.clone();
+            let bottom = bottom0 + s.lift.round() as i32;
             let level = fade_level(now.saturating_duration_since(s.born));
             let key = (left, bottom, text.clone(), level);
             if s.posted.as_ref() == Some(&key) {
@@ -319,25 +408,55 @@ fn clear_under(cv: &mut Canvas, left: i32, bottom: i32, occ: &[(i32, i32, i32, i
     }
 }
 
-/// Plaque de la bulle : au moins la taille du texte d'origine, centrée sur lui, s'agrandissant vers
-/// le haut si la traduction est plus longue ; texte centré ligne par ligne, comme les bulles du
-/// jeu ; pointe en bas à gauche vers celui qui parle (0.16.3, la bulle de Blizzard étant effacée).
+/// Distance signée d'un point à un rectangle aux coins arrondis (négative dedans).
+fn round_box(fx: f32, fy: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> f32 {
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let (hx, hy) = ((x1 - x0) / 2.0 - r, (y1 - y0) / 2.0 - r);
+    let (qx, qy) = ((fx - cx).abs() - hx, (fy - cy).abs() - hy);
+    (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r
+}
+
+fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
+    let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
+    [m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2])]
+}
+
+/// « [DE] Bonsoir » -> (« DE », « Bonsoir ») : l'acronyme de la langue d'origine.
+fn lang_tag(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('[')?;
+    let (code, after) = rest.split_once("] ")?;
+    ((2..=3).contains(&code.len()) && code.chars().all(|c| c.is_ascii_uppercase())).then_some((code, after))
+}
+
+/// Haut et bas du dégradé de la plaque (0.17.0).
+const PLATE_TOP: Rgb = [38, 40, 48];
+const PLATE_BOTTOM: Rgb = [17, 18, 23];
+/// Accent sans classe connue : or doux.
+const ACCENT: Rgb = [214, 178, 110];
+
+/// Bulle (0.17.0) : plaque sombre en dégradé aux coins arrondis, ombre douce, liseré fin, barre
+/// d'accent à gauche aux couleurs de la classe, pointe en bas à gauche vers celui qui parle. Au
+/// moins la taille du texte d'origine, centrée sur lui, s'agrandissant vers le haut si la
+/// traduction est plus longue ; texte centré ligne par ligne, comme les bulles du jeu ; acronyme
+/// de la langue d'origine en couleur d'accent.
 pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
     let px = s.px.clamp(8.0, 64.0);
     let base = book.base(font);
     let (ascent, natural) = book.line_metrics(base, px);
     let line_h = natural.max(px);
     let layout = Layout::new(book, base, px, line_h, None);
-    // Icône de la spécialisation en tête du texte (0.16.4).
-    let marked;
-    let text_in = match s.style {
-        Some(st) if st.icon > 0 => {
-            marked = format!("|T{}:0|t {text}", st.icon);
-            marked.as_str()
-        }
-        _ => text,
+    let accent = s.style.map_or(ACCENT, |st| st.class);
+    let tag_c = mix(accent, [255, 255, 255], 0.35);
+    // Acronyme en couleur d'accent, icône de la spécialisation en tête (0.16.4).
+    let tagged = match lang_tag(text) {
+        Some((code, rest)) => format!("|cff{:02x}{:02x}{:02x}[{code}]|r {rest}", tag_c[0], tag_c[1], tag_c[2]),
+        None => text.to_string(),
     };
-    let items = parse_markup(text_in, s.color);
+    let text_in = match s.style {
+        Some(st) if st.icon > 0 => format!("|T{}:0|t {tagged}", st.icon),
+        _ => tagged,
+    };
+    let items = parse_markup(&text_in, s.color);
     let advs = advances(book, base, px, &items, None, &layout);
     // Largeur de coupe : celle du texte d'origine, au moins 8 caractères.
     let wrap_w = (s.width as f32).max(px * 8.0);
@@ -349,79 +468,130 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
     };
     let widths: Vec<f32> = rows.iter().map(|r| row_w(r)).collect();
     let content_w = widths.iter().copied().fold(0.0f32, f32::max);
-    let pad = (px * 0.45).round().max(3.0);
-    let w = (content_w.max(s.width as f32) + 2.0 * pad).ceil() as usize;
+    // Mesures de la bulle.
+    let pad_x = (px * 0.7).round().max(5.0);
+    let pad_y = (px * 0.45).round().max(4.0);
+    let bar = (px * 0.2).round().clamp(2.0, 4.0);
+    let inset = (px * 0.35).round().max(3.0);
+    let bar_space = inset + bar;
+    let plate_w = (content_w.max(s.width as f32) + 2.0 * pad_x + bar_space).ceil();
     let text_h = rows.len().max(1) as f32 * line_h;
-    let plate_h = (text_h.max(s.height as f32) + 2.0 * pad).ceil() as usize;
-    // Pointe sous la plaque, à gauche.
-    let tail_h = (px * 0.6).round().max(5.0) as usize;
-    let h = plate_h + tail_h;
+    let plate_h = (text_h.max(s.height as f32) + 2.0 * pad_y).ceil();
+    let tail_h = (px * 0.65).round().max(6.0);
+    // Marge de l'ombre autour de la bulle.
+    let m = (px * 0.55).round().clamp(4.0, 12.0);
+    let shadow_dy = (m / 3.0).max(1.0);
+    let w = (plate_w + 2.0 * m) as usize;
+    let h = (plate_h + tail_h + 2.0 * m) as usize;
     let mut cv = Canvas::new(w, h);
-    // Plaque aux coins arrondis ; bord et légère teinte aux couleurs de la classe (0.16.4), sinon
-    // bord clair discret.
-    let r = (px * 0.5).max(4.0);
-    let ph = plate_h;
-    let (edge_c, plate_c, edge_w) = match s.style {
-        Some(st) => {
-            let tint = |a: u8, b: u8| (a as f32 * 0.84 + b as f32 * 0.16).round() as u8;
-            (st.class, [tint(PLATE[0], st.class[0]), tint(PLATE[1], st.class[1]), tint(PLATE[2], st.class[2])], 2.5)
+    let (x0, y0, x1, y1) = (m, m, m + plate_w, m + plate_h);
+    let r = (px * 0.65).max(5.0).min(plate_h / 2.0);
+    // Pointe : base sur le bas de la plaque (prolongée dedans pour s'y raccorder), sommet en bas
+    // à gauche.
+    let base_l = (x0 + r + px * 0.25).min(x0 + plate_w * 0.3);
+    let base_r = base_l + px * 1.05;
+    let tip = (base_l - px * 0.25, y1 + tail_h);
+    let tail_cov = |fx: f32, fy: f32, grow: f32| -> f32 {
+        if fy < y1 - 3.0 || fy > tip.1 + grow + 0.5 {
+            return 0.0;
         }
-        None => (BUBBLE_EDGE, PLATE, 1.5),
+        let t = ((fy - y1) / tail_h).clamp(0.0, 1.0);
+        let xl = base_l + (tip.0 - base_l) * t - grow;
+        let xr = base_r + (tip.0 - base_r) * t + grow;
+        ((fx - xl + 0.5).min(xr - fx + 0.5)).clamp(0.0, 1.0) * (tip.1 + grow + 0.5 - fy).clamp(0.0, 1.0)
     };
-    for y in 0..ph {
+    let tint = |c: Rgb| match s.style {
+        Some(st) => mix(c, st.class, 0.12),
+        None => c,
+    };
+    let (top_c, bottom_c) = (tint(PLATE_TOP), tint(PLATE_BOTTOM));
+    let (line_c, line_a) = match s.style {
+        Some(st) => (st.class, 0.6),
+        None => ([255, 255, 255], 0.16),
+    };
+    // 1. Ombre douce, un peu décalée vers le bas.
+    for y in 0..h {
         for x in 0..w {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let cx = fx.clamp(r, w as f32 - r);
-            let cy = fy.clamp(r, ph as f32 - r);
-            let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
-            let inside = (r - d + 0.5).clamp(0.0, 1.0);
-            if inside > 0.0 {
-                let wide = edge_w > 2.0;
-                let near = x == 0 || y == 0 || x == w - 1 || y == ph - 1 || (wide && (x == 1 || y == 1 || x == w - 2 || y == ph - 2));
-                let edge = (d - (r - edge_w)).clamp(0.0, 1.0).max(if near { 1.0 } else { 0.0 });
-                let c = if edge > 0.0 { edge_c } else { plate_c };
-                cv.blend(x as i32, y as i32, c, 0.93 * inside);
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5 - shadow_dy);
+            let d = round_box(fx, fy, x0, y0, x1, y1, r);
+            let mut a = 0.40 * (1.0 - (d / m).clamp(0.0, 1.0)).powi(2);
+            a = a.max(0.30 * tail_cov(fx, fy, 1.0));
+            if a > 0.004 {
+                cv.blend(x as i32, y as i32, [0, 0, 0], a);
             }
         }
     }
-    // Pointe : triangle dont la base est sur le bas de la plaque, sommet en bas à gauche.
-    let base_l = (r + px * 0.4).min(w as f32 * 0.3);
-    let base_r = base_l + px * 0.9;
-    let tip = (base_l - px * 0.25, (ph + tail_h) as f32);
-    for y in ph.saturating_sub(1)..h {
+    // 2. Plaque en dégradé, liseré fin au bord.
+    for y in 0..h {
         let fy = y as f32 + 0.5;
-        // Bords gauche et droit du triangle à cette hauteur.
-        let t = ((fy - ph as f32) / tail_h as f32).clamp(0.0, 1.0);
-        let xl = base_l + (tip.0 - base_l) * t;
-        let xr = base_r + (tip.0 - base_r) * t;
+        let g = ((fy - y0) / plate_h).clamp(0.0, 1.0);
+        let fill = mix(top_c, bottom_c, g);
         for x in 0..w {
             let fx = x as f32 + 0.5;
-            let cov = ((fx - xl + 0.5).min(xr - fx + 0.5)).clamp(0.0, 1.0);
-            if cov > 0.0 {
-                let border = fx - xl < edge_w || xr - fx < edge_w || fy > tip.1 - edge_w;
-                cv.blend(x as i32, y as i32, if border { edge_c } else { plate_c }, 0.93 * cov);
+            let d = round_box(fx, fy, x0, y0, x1, y1, r);
+            let cov = (0.5 - d).clamp(0.0, 1.0);
+            if cov <= 0.0 {
+                continue;
+            }
+            cv.blend(x as i32, y as i32, fill, 0.92 * cov);
+            let line = cov - (0.5 - (d + 1.2)).clamp(0.0, 1.0);
+            if line > 0.0 {
+                cv.blend(x as i32, y as i32, line_c, line_a * line);
             }
         }
     }
-    // Texte centré verticalement dans la plaque, chaque ligne centrée.
-    let top = (ph as f32 - text_h) / 2.0;
+    // 3. Pointe, du ton du bas de la plaque, liseré sur ses deux bords obliques.
+    for y in (y1 as usize).saturating_sub(3)..h {
+        let fy = y as f32 + 0.5;
+        for x in 0..w {
+            let fx = x as f32 + 0.5;
+            let cov = tail_cov(fx, fy, 0.0);
+            if cov <= 0.0 {
+                continue;
+            }
+            cv.blend(x as i32, y as i32, bottom_c, if fy < y1 { 1.0 } else { 0.92 } * cov);
+            if fy > y1 + 0.5 {
+                let inner = tail_cov(fx, fy, -1.2);
+                let line = (cov - inner).clamp(0.0, 1.0);
+                if line > 0.0 {
+                    cv.blend(x as i32, y as i32, line_c, line_a * line);
+                }
+            }
+        }
+    }
+    // 4. Barre d'accent à gauche, bouts arrondis.
+    let (bx0, bx1) = (x0 + inset, x0 + inset + bar);
+    let (by0, by1) = (y0 + pad_y * 0.8, (y1 - pad_y * 0.8).max(y0 + pad_y * 0.8 + bar));
+    for y in by0.floor() as usize..(by1.ceil() as usize).min(h) {
+        for x in bx0.floor() as usize..(bx1.ceil() as usize).min(w) {
+            let d = round_box(x as f32 + 0.5, y as f32 + 0.5, bx0, by0, bx1, by1, bar / 2.0);
+            let cov = (0.5 - d).clamp(0.0, 1.0);
+            if cov > 0.0 {
+                cv.blend(x as i32, y as i32, accent, cov);
+            }
+        }
+    }
+    // 5. Texte centré verticalement dans la plaque, chaque ligne centrée à droite de la barre.
+    let top = y0 + (plate_h - text_h) / 2.0;
     let asc = ascent * line_h / natural.max(1.0);
+    let inner_l = x0 + bar_space;
+    let inner_w = plate_w - bar_space;
     for (j, row) in rows.iter().enumerate() {
-        let x_off = (w as f32 - widths[j]) / 2.0 - row.first().map_or(0.0, |(x, _)| *x);
+        let x_off = inner_l + (inner_w - widths[j]) / 2.0 - row.first().map_or(0.0, |(x, _)| *x);
         let baseline = (top + j as f32 * line_h + asc).round() as i32;
         for (x, it) in row {
             if let Item::Icon(ic) = it {
                 // Icône (spécialisation) : centrée sur la ligne.
                 let (iw, ih) = crate::icons::size_px(ic, px, 1.0);
                 let (iw, ih) = (iw.round().max(1.0) as usize, ih.round().max(1.0) as usize);
-                let x0 = (x + x_off).round() as i32;
-                let y0 = (top + j as f32 * line_h + (line_h - ih as f32) / 2.0).round() as i32;
+                let ix = (x + x_off).round() as i32;
+                let iy = (top + j as f32 * line_h + (line_h - ih as f32) / 2.0).round() as i32;
                 let img = crate::icons::image_or_shape(ic.id, iw, ih);
                 for yy in 0..ih {
                     for xx in 0..iw {
                         let p = img.px[yy * iw + xx];
                         if p[3] > 0 {
-                            cv.blend(x0 + xx as i32, y0 + yy as i32, [p[0], p[1], p[2]], p[3] as f32 / 255.0);
+                            cv.blend(ix + xx as i32, iy + yy as i32, [p[0], p[1], p[2]], p[3] as f32 / 255.0);
                         }
                     }
                 }
@@ -429,13 +599,13 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
             }
             let Item::Char(c, col) = it else { continue };
             let Some(f) = book.pick(base, *c) else { continue };
-            let (m, bmp) = book.glyph(f, *c, px).clone();
-            let gx = (x + x_off + m.xmin as f32).round() as i32;
-            let gy = baseline - (m.ymin + m.height as i32);
-            for (ox, oy, color, a) in [(1, 1, [0u8, 0, 0], 0.7f32), (0, 0, *col, 1.0)] {
-                for by in 0..m.height {
-                    for bx in 0..m.width {
-                        let cov = bmp[by * m.width + bx];
+            let (gm, bmp) = book.glyph(f, *c, px).clone();
+            let gx = (x + x_off + gm.xmin as f32).round() as i32;
+            let gy = baseline - (gm.ymin + gm.height as i32);
+            for (ox, oy, color, a) in [(1, 1, [0u8, 0, 0], 0.55f32), (0, 0, *col, 1.0)] {
+                for by in 0..gm.height {
+                    for bx in 0..gm.width {
+                        let cov = bmp[by * gm.width + bx];
                         if cov > 0 {
                             cv.blend(gx + bx as i32 + ox, gy + by as i32 + oy, color, a * cov as f32 / 255.0);
                         }
@@ -444,10 +614,11 @@ pub fn draw(book: &mut FontBook, font: &str, s: &Seen, text: &str) -> Drawn {
             }
         }
     }
-    let dx = -((w as i32 - s.width) / 2);
-    // Coin bas-gauche de l'image : sous la plaque, la pointe.
-    let dy = -(pad as i32) - tail_h as i32;
-    Drawn { text: text.to_string(), canvas: cv, dx, dy }
+    // Plaque centrée sur le texte d'origine ; coin bas-gauche de l'image sous la pointe et l'ombre.
+    let margin = m as i32;
+    let dx = -((plate_w as i32 - s.width) / 2) - margin;
+    let dy = -(pad_y as i32) - tail_h as i32 - margin;
+    Drawn { text: text.to_string(), canvas: cv, dx, dy, margin }
 }
 
 /// Bulles de plusieurs relevés gardées par numéro (tests).
@@ -513,9 +684,14 @@ mod tests {
         }
         let s = Seen { style: Some(Style { class: [0xAA, 0xD3, 0x72], icon: 0 }), ..seen(1, 0, 0) };
         let d = draw(&mut book, "x", &s, "Hello");
-        let mid = d.canvas.px[d.canvas.w / 2];
-        let (r, g, b) = ((mid >> 16) & 0xFF, (mid >> 8) & 0xFF, mid & 0xFF);
-        assert!(g > r && g > b && g > 120, "bord du haut aux couleurs de la classe : {r} {g} {b}");
+        // Barre d'accent aux couleurs de la classe (0.17.0) : à gauche, à mi-hauteur de la plaque.
+        let row = d.margin as usize + (d.canvas.h - 2 * d.margin as usize) / 3;
+        let classy = (0..d.canvas.w / 4).any(|x| {
+            let p = d.canvas.px[row * d.canvas.w + x];
+            let (r, g, b) = ((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
+            g > 150 && g > r + 20 && g > b + 40
+        });
+        assert!(classy, "barre d'accent aux couleurs de la classe absente");
     }
 
     #[test]
@@ -529,10 +705,13 @@ mod tests {
     }
 
     #[test]
-    fn bubbles_live_thirty_seconds_and_fade_out() {
-        assert_eq!(fade_level(Duration::ZERO), 24);
-        assert_eq!(fade_level(Duration::from_secs(22)), 24);
-        assert_eq!(fade_level(Duration::from_secs(26)), 12);
+    fn bubbles_live_sixty_seconds_with_fades() {
+        // 0.17.0 : apparition en fondu sur 10 s, pleine, effacement sur les 10 dernières.
+        assert_eq!(fade_level(Duration::ZERO), 0);
+        assert!(fade_level(Duration::from_secs(2)) >= 8, "à peine lisible à 2 s : {}", fade_level(Duration::from_secs(2)));
+        assert_eq!(fade_level(Duration::from_secs(10)), 24);
+        assert_eq!(fade_level(Duration::from_secs(49)), 24);
+        assert_eq!(fade_level(Duration::from_secs(55)), 12);
         assert_eq!(fade_level(LIFE), 0);
         let mut book = FontBook::new();
         for (name, data) in crate::fonts::fallback_fonts() {
@@ -542,21 +721,76 @@ mod tests {
         let t0 = Instant::now();
         let tr = |_: &str| Some("[DE] Bonsoir".to_string());
         let alpha_max = |u: &Update| u.canvas.as_ref().map_or(0, |c| c.px.iter().map(|p| p >> 24).max().unwrap_or(0));
+        let at = |b: &mut Bubbles, book: &mut FontBook, secs: u64| {
+            let t = t0 + Duration::from_secs(secs);
+            b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t);
+            b.tick(book, &tr, &[], t)
+        };
         b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], "Fonts\\FRIZQT__.TTF".into(), t0);
-        let full = alpha_max(&b.tick(&mut book, &tr, &[], t0)[0]);
-        // L'addon la garde après la bulle du jeu : à 26 s, à moitié effacée.
-        let t26 = t0 + Duration::from_secs(26);
-        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t26);
-        let half = alpha_max(&b.tick(&mut book, &tr, &[], t26)[0]);
+        let start = b.tick(&mut book, &tr, &[], t0);
+        assert_eq!(alpha_max(&start[0]), 0, "invisible à son apparition");
+        let rising = alpha_max(&at(&mut b, &mut book, 3)[0]);
+        let full = alpha_max(&at(&mut b, &mut book, 12)[0]);
+        assert!(rising > 0 && rising < full, "fondu entrant : {rising} puis {full}");
+        // L'addon la garde après la bulle du jeu : à 55 s, à moitié effacée.
+        let half = alpha_max(&at(&mut b, &mut book, 55)[0]);
         assert!(half < full * 6 / 10 && half > full * 4 / 10, "{full} -> {half}");
-        // 30 s : retirée.
-        let t30 = t0 + LIFE;
-        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t30);
-        let ups = b.tick(&mut book, &tr, &[], t30);
+        // 60 s : retirée.
+        let ups = at(&mut b, &mut book, 60);
         assert!(ups.iter().all(|u| u.canvas.is_none()) && !b.active());
         // Renvoyée encore par l'addon : pas reprise.
-        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t30 + Duration::from_secs(1));
+        b.update(vec![(seen(1, 800, 500), Some("Guten Abend".into()))], String::new(), t0 + Duration::from_secs(61));
         assert!(!b.active(), "bulle expirée reprise");
+    }
+
+    #[test]
+    fn overlapping_bubbles_stack_newest_on_top_and_slide_back_down() {
+        // Empilement pur : la plus ancienne reste en bas, les suivantes montent au-dessus.
+        let lifts = stack_lifts(&[(100, 500, 200, 40), (120, 505, 180, 40), (110, 500, 200, 40), (900, 500, 100, 40)], 3);
+        assert_eq!(lifts, vec![0, 38, 86, 0]);
+        let mut book = FontBook::new();
+        for (name, data) in crate::fonts::fallback_fonts() {
+            let _ = book.add_fallback(&name, data);
+        }
+        let mut b = Bubbles::default();
+        let t0 = Instant::now();
+        let tr = |body: &str| Some(format!("[DE] {body}"));
+        let list = |ids: &[u16]| ids.iter().map(|&id| (seen(id, 800, 500), Some(format!("Message {id}")))).collect::<Vec<_>>();
+        // Deux répliques du même joueur, à la même place.
+        b.update(list(&[1]), "Fonts\\FRIZQT__.TTF".into(), t0);
+        b.tick(&mut book, &tr, &[], t0);
+        let t1 = t0 + Duration::from_secs(2);
+        b.update(list(&[1, 2]), String::new(), t1);
+        let ups = b.tick(&mut book, &tr, &[], t1);
+        let pos = |ups: &[Update], b: &Bubbles, id: u16| ups.iter().find(|u| u.frame == FIRST_FRAME + slots(b)[&id] && u.canvas.is_some()).map(|u| (u.bottom, u.canvas.as_ref().unwrap().h as i32));
+        let old = b.states.iter().find(|s| s.seen.id == 1).unwrap().posted.clone().unwrap();
+        let (new_bottom, _) = pos(&ups, &b, 2).expect("nouvelle bulle posée");
+        assert!(new_bottom > old.1 + 20, "la plus récente au-dessus : {new_bottom} / {}", old.1);
+        // La plus ancienne s'en va : la récente redescend en glissant (pas d'un coup).
+        let t2 = t1 + Duration::from_millis(100);
+        b.update(list(&[2]), String::new(), t2);
+        let ups = b.tick(&mut book, &tr, &[], t2);
+        let (mid, _) = pos(&ups, &b, 2).expect("bulle en train de descendre");
+        assert!(mid < new_bottom && mid > old.1, "glissement : {new_bottom} -> {mid} -> {}", old.1);
+        let mut t = t2;
+        for _ in 0..30 {
+            t += Duration::from_millis(50);
+            b.update(list(&[2]), String::new(), t);
+            b.tick(&mut book, &tr, &[], t);
+        }
+        let last = b.states[0].posted.clone().unwrap();
+        assert_eq!(last.1, old.1, "revenue à sa place naturelle");
+        // Aperçu de la bulle pour l'œil (CT_APERCU=dossier).
+        if let Ok(dir) = std::env::var("CT_APERCU") {
+            for (name, st, text) in [
+                ("bulle_classe.bmp", Some(Style { class: [0x33, 0x93, 0xFF], icon: 0 }), "[DE] Bonsoir à tous, qui vient au donjon ce soir ?"),
+                ("bulle_simple.bmp", None, "Salut, on se retrouve à l'entrée ?"),
+            ] {
+                let s = Seen { style: st, ..seen(1, 0, 0) };
+                let d = draw(&mut book, "x", &s, text);
+                std::fs::write(std::path::Path::new(&dir).join(name), d.canvas.to_bmp([92, 110, 84])).unwrap();
+            }
+        }
     }
 
     #[test]
@@ -570,11 +804,11 @@ mod tests {
         let tr = |body: &str| (body == "Guten Abend zusammen!").then(|| "[DE] Bonsoir à tous !".to_string());
         // Une bulle traduite, une bulle dans la langue du client : toutes deux dessinées (0.16.3,
         // la bulle de Blizzard est effacée), la seconde avec son texte d'origine.
-        b.update(
-            vec![(seen(1, 800, 500), Some("Guten Abend zusammen!".into())), (seen(2, 300, 400), Some("Salut".into()))],
-            "Fonts\\FRIZQT__.TTF".into(),
-            t0,
-        );
+        let both = || vec![(seen(1, 800, 500), Some("Guten Abend zusammen!".into())), (seen(2, 300, 400), Some("Salut".into()))];
+        b.update(both(), "Fonts\\FRIZQT__.TTF".into(), t0);
+        // Fondu entrant terminé (0.17.0) : 10 s plus tard, l'addon les a renvoyées.
+        let t0 = t0 + Duration::from_secs(10);
+        b.update(both(), String::new(), t0);
         let ups = b.tick(&mut book, &tr, &[], t0);
         assert_eq!(ups.len(), 2, "chaque bulle a sa fenêtre");
         let u = ups.iter().find(|u| u.frame == FIRST_FRAME + slots(&b)[&1]).unwrap();
@@ -585,8 +819,10 @@ mod tests {
         assert!(cv.w as i32 >= 180 && cv.h as i32 >= 30);
         assert!(u.left <= 800 && u.left + cv.w as i32 >= 980 && u.bottom <= 500);
         // Pointe en bas à gauche : pixels dessinés sous la plaque à gauche, rien à droite.
-        let row = cv.h - 3;
-        let painted = |x: usize| cv.px[row * cv.w + x] >> 24 != 0;
+        // (Sous la pointe : la marge de l'ombre, 0.17.0 ; l'ombre seule est presque transparente.)
+        let m = b.states.iter().find(|s| s.seen.id == 1).unwrap().drawn.as_ref().unwrap().margin as usize;
+        let row = cv.h - m - 3;
+        let painted = |x: usize| cv.px[row * cv.w + x] >> 24 > 120;
         assert!((0..cv.w / 3).any(painted), "pointe absente");
         assert!(!(cv.w * 2 / 3..cv.w).any(painted), "pointe mal placée");
         // Du texte clair est dessiné sur la plaque sombre.

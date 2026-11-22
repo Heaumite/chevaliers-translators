@@ -1,6 +1,6 @@
 [package]
 name = "chevaliers-translators"
-version = "0.16.7"
+version = "0.17.1"
 edition = "2021"
 description = "Chevaliers Translators - traduction du chat de World of Warcraft sur le PC du joueur"
 license = "GPL-3.0-or-later"
@@ -37,6 +37,7 @@ wry = "0.57"
 tao = "0.37"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Devices_Display",
     "Win32_System_Registry",
     "Win32_Graphics_Gdi",

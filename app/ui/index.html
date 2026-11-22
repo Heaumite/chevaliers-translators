@@ -207,6 +207,9 @@ footer .path { overflow-wrap: anywhere; }
 .md ul { margin: 6px 0; padding-left: 20px; }
 .md li + li { margin-top: 5px; }
 .md li::marker { color: var(--or); }
+.md table { border-collapse: collapse; margin: 6px 0; font-size: 12.5px; }
+.md th, .md td { border-bottom: 1px solid var(--filet-doux); padding: 3px 10px 3px 0; text-align: left; }
+.md th { color: var(--or-clair); font-weight: 600; }
 .md b { color: var(--or-clair); font-weight: 600; }
 .md code { font: 12.5px Consolas, "Cascadia Mono", monospace; background: rgba(0, 0, 0, 0.35); padding: 0 4px; border-radius: 2px; overflow-wrap: anywhere; }
 
@@ -610,7 +613,7 @@ function shownModel() {
     || state.modeles.find((m) => m.actif) || state.modeles[0];
 }
 
-// Couleur du modèle (0.16.6) : EuroLLM 1.7B bleu, TranslateGemma 4B jaune, SalamandraTA 7B violet.
+// Couleur du modèle (0.16.6) : EuroLLM 1.7B bleu, MiLMMT-46 4B jaune (TranslateGemma 4B avant la 0.17.1), SalamandraTA 7B violet.
 function tintOf(m) { return "t-" + ((m && m.teinte) || "bleu"); }
 
 // Mémoire vidéo du modèle : celle qu'il prend vraiment s'il est chargé, sinon son empreinte
@@ -810,8 +813,8 @@ function updateProgress() {
 }
 
 // ---- Mise à jour (0.16.1) ---------------------------------------------------------------------
-// Note de version (Markdown de GitHub) : titres, listes (lignes de suite indentées), gras, code ;
-// tout est échappé d'abord, aucun lien ni HTML de la note n'est gardé. La partie après « --- »
+// Note de version (Markdown de GitHub) : titres, listes (lignes de suite indentées), tableaux
+// (0.17.1), gras, code ; tout est échappé d'abord, aucun lien ni HTML de la note n'est gardé. La partie après « --- »
 // (installation à la main, politique de signature) reste sur GitHub.
 function md(src) {
   const text = String(src || "").replace(/\r/g, "").split(/\n-{3,}\s*(\n|$)/)[0];
@@ -822,11 +825,26 @@ function md(src) {
   const out = [];
   let list = null;
   let para = null;
+  let table = null;
   const flush = () => { if (para !== null) { out.push(`<p>${inline(para)}</p>`); para = null; } };
   const close = () => { if (list) { out.push(`<ul>${list.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`); list = null; } };
+  const cells = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  const endTable = () => {
+    if (!table) return;
+    const [head, ...rows] = table;
+    out.push(`<table><tr>${head.map((c) => `<th>${inline(c)}</th>`).join("")}</tr>${rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</table>`);
+    table = null;
+  };
   for (const raw of text.split("\n")) {
     const line = raw.replace(/\s+$/, "");
     let m;
+    if (/^\s*\|.*\|$/.test(line)) {
+      flush();
+      if (!table) close();
+      if (!/^[\s|:-]+$/.test(line)) (table = table || []).push(cells(line));
+      continue;
+    }
+    endTable();
     if (!line) { flush(); continue; }
     if ((m = line.match(/^#{1,6}\s+(.*)$/))) { flush(); close(); out.push(`<h4>${inline(m[1])}</h4>`); continue; }
     if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { flush(); (list = list || []).push(m[1]); continue; }
@@ -834,6 +852,7 @@ function md(src) {
     close();
     para = para === null ? line.trim() : para + " " + line.trim();
   }
+  endTable();
   flush();
   close();
   return out.join("");

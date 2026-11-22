@@ -17,6 +17,8 @@
 -- spécialisation quand elle est connue : la sienne, et celle des joueurs proches ou du groupe,
 -- demandée au jeu par une inspection discrète (hors combat, une à la fois, jamais pendant que la
 -- fenêtre d'inspection est ouverte), gardée pour la session.
+-- 0.17.0 : 60 s de vie, apparition et effacement en fondu de 10 s (dessinés par l'application),
+-- bulles empilées quand elles se chevauchent.
 -- 0.16.6 : une bulle reste 30 s après son apparition, même quand celle du jeu a disparu, puis
 -- l'application l'efface progressivement (transparence). Après la bulle du jeu, elle suit la barre
 -- de nom de celui qui parle si elle est affichée ; sinon elle reste à sa dernière place tant que la
@@ -43,7 +45,7 @@ local BUBBLE_EVENTS = {
 }
 
 local TEXT_MAX = 120    -- octets de texte au plus par bulle dans la trame
-local LIFE = 30         -- secondes : vie d'une bulle depuis son apparition (0.16.6)
+local LIFE = 60         -- secondes : vie d'une bulle depuis son apparition (0.17.0 ; 30 en 0.16.6)
 local TURN = 0.15       -- radians : le joueur a tourné, une bulle figée ne serait plus à sa place
 local STEP = 1.5        -- mètres : le joueur a bougé
 local ZOOM = 0.5        -- zoom de la caméra changé

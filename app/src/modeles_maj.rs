@@ -145,7 +145,9 @@ pub fn available(dir: &Path) -> Vec<Update> {
 pub fn check(dir: &Path) -> Result<Vec<Update>, String> {
     let mut c = load();
     let mut errors = Vec::new();
-    for m in catalog::all().filter(|m| dir.join(m.file).exists()) {
+    // Seuls les fichiers de Hugging Face ont une version publiée à suivre ; le pack Europe
+    // (0.17.1, version « pack-europe-N » du dépôt) change avec l'application.
+    for m in catalog::all().filter(|m| dir.join(m.file).exists() && hf_parts(m.url).is_some()) {
         match remote(m.url) {
             Ok(r) => c[m.file]["remote"] = json!({ "size": r.size, "oid": r.oid, "at": now_secs() }),
             Err(e) => errors.push(format!("{} : {e}", m.name)),

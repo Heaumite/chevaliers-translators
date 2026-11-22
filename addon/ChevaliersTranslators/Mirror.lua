@@ -104,6 +104,8 @@ local function ChatFrames(now)
       frameList[#frameList + 1] = { i = i, cf = cf }
     end
   end
+  -- Onglet temporaire apparu (chuchotement, Battle.net) : ses boutons Trad et Envoyer (0.17.1).
+  if CT.InstallTrad then pcall(CT.InstallTrad) end
   return frameList
 end
 
@@ -630,13 +632,44 @@ local function AnnounceIcons(text, now)
   end
 end
 
+-- Noms Battle.net (0.17.0) : le jeu les cache aux addons (« |Kq12|k ») et le miroir écrivait
+-- « ??? ». Chacun est remplacé par le BattleTag du compte (sans son numéro), lu grâce au lien
+-- « |HBNplayer:|Kq12|k:<compte>:… » de la ligne.
+local bnTags, bnTagsAt = {}, -100
+local function BnTag(id)
+  local now = GetTime()
+  if now - bnTagsAt > 60 then bnTags, bnTagsAt = {}, now end
+  if bnTags[id] ~= nil then return bnTags[id] or nil end
+  local ok, info = pcall(function()
+    return C_BattleNet and C_BattleNet.GetAccountInfoByID and C_BattleNet.GetAccountInfoByID(tonumber(id))
+  end)
+  local tag = ok and type(info) == "table" and info.battleTag
+  if type(tag) ~= "string" or IsSecret(tag) or tag == "" then
+    bnTags[id] = false
+    return nil
+  end
+  tag = tag:gsub("#%d+$", "")
+  bnTags[id] = tag
+  return tag
+end
+
+local function BnNames(text)
+  if not text:find("|K", 1, true) then return text end
+  local map = {}
+  for tok, id in text:gmatch("|HBNplayer:(|K[^|]*|k):(%d+)") do
+    if map[tok] == nil then map[tok] = BnTag(id) or false end
+  end
+  return (text:gsub("|K[^|]*|k", function(tok) return map[tok] or nil end))
+end
+M.BnNames = BnNames
+
 local function SendView(i, cf, now, flags, n, view)
   local maxp = CT.MaxPayload()
   -- Textes d'abord : la description qui les cite arrive ensuite.
   for j = 1, n do
     local e = lines[j]
     if not e.gap then
-      local text = tostring(e.info.message)
+      local text = BnNames(tostring(e.info.message))
       local fresh = M.texts[e.id] ~= text
       if fresh or now - (M.textsAt[e.id] or -100) > TEXT_RESEND then
         M.texts[e.id] = text

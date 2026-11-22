@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.16.7)
+# Chevaliers Translators (v0.17.1)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -12,8 +12,8 @@ Traduction du chat de World of Warcraft entre les langues européennes, **sur le
   le chat traduit par-dessus le jeu (chat miroir) ; Maj+Entrée dans la boîte de saisie envoie ton
   texte traduit.
 
-Règle : tout message dans une autre langue que celle du client est traduit dans la langue du
-client ; les acronymes du jeu passent par le dictionnaire, les noms de lieux, donjons et raids
+Règle : tout message dans une autre langue que celle du joueur est traduit dans sa langue de
+lecture (celle du client de WoW, ou celle de Windows quand WoW n'existe pas dans celle-ci, 0.17.1) ; les acronymes du jeu passent par le dictionnaire, les noms de lieux, donjons et raids
 prennent le nom du client (`app/data/termes.tsv`).
 
 Code source : <https://github.com/Heaumite/chevaliers-translators>, sous licence **GPL-3.0 ou
@@ -117,13 +117,14 @@ proprement : `/chevaliers off`.
 | --- | --- |
 | `/chevaliers` | aide |
 | `/chevaliers on` / `off` | traduction du chat active / coupée (gardé aux connexions suivantes) |
-| `/chevaliers langue auto` / `xx` | langue de l'envoi traduit (aussi le bouton Trad, à droite de la saisie ; en automatique, un clic sur l'acronyme `[DE]` d'un message du chat fixe la langue, 0.16.4) |
+| `/chevaliers langue auto` / `xx` | langue de l'envoi traduit (aussi le bouton Trad, à droite de la saisie ; en automatique, un clic sur l'acronyme `[DE]` d'un message du chat fixe la langue, 0.16.4 ; un clic droit sur le pseudo d'un joueur prend la langue de ses messages, 0.17.0) |
 | `/chevaliers info` | état de l'addon |
 | `/chevaliers diag` | rapport (fenêtres de chat, messages reçus), recopié dans le journal de l'application |
 | `/chevaliers monter` / `non` | accepter / écarter le modèle supérieur proposé sur l'écran (0.14) |
 | `/chevaliers tele auto` / `on` / `off` | dispositif télévision : selon l'écran vu par l'application (par défaut), forcé, coupé (0.14) |
 | `/chevaliers bulles on` / `off` | bulles de dialogue au-dessus des joueurs remplacées par celles de l'application, traduites avec l'acronyme de la langue (0.15 ; 0.16.3 : la bulle de Blizzard est effacée ; actif par défaut) |
 | `/chevaliers guide` | guide d'installation de l'application |
+| `/chevaliers block 1` à `16` | taille des pixels du bandeau de capture (2 par défaut depuis la 0.17.0 ; 1 : un pixel de l'écran ; 4 : taille d'avant, à reprendre si des messages se perdent) |
 | `/chevaliers dev` | liste des outils de développement (test, ping, miroir, perf, essai...) |
 
 Maj+Entrée dans la boîte de saisie — ou **Maj+clic sur le bouton Trad** (0.14.7) : la traduction est collée puis envoyée (Ctrl+V et Entrée
@@ -145,6 +146,99 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.17.1 (22/11/2026)
+
+Comprend aussi la 0.17.0, qui n'a pas été publiée seule.
+
+- **Nouveau modèle de traduction : MiLMMT-46 4B, pack Europe.** Ce modèle de Xiaomi est entraîné à
+  partir de Gemma 3 pour la traduction. Il remplace TranslateGemma 4B : même architecture, mais
+  une meilleure traduction directe entre langues européennes. Banc du 22/11/2026 : 6 directions
+  (de→fr, es→fr, ru→fr, en→fr, pl→de, fr→ru), 192 segments d'actualités (références humaines
+  NTREX) et de chat de jeu, notés par COMET-22 et chrF++ :
+
+  | Modèle | COMET | chrF++ | Taille |
+  | --- | --- | --- | --- |
+  | MiLMMT-46 4B, pack Europe (livré) | 84,2 | 57,6 | 1,97 Go |
+  | MiLMMT-46 4B d'origine (Q4_K_M) | 84,5 | 58,3 | 2,49 Go |
+  | SalamandraTA 7B | 84,1 | 59,2 | 4,85 Go |
+  | TranslateGemma 4B (remplacé) | 82,7 | 53,0 | 2,49 Go |
+
+  Le pack fait jeu égal avec SalamandraTA 7B pour la taille d'un 4B, et dépasse nettement
+  TranslateGemma 4B (+1,5 point, écart significatif).
+
+  Le fichier est préparé pour l'application :
+  - vocabulaire limité aux écritures latine, grecque et cyrillique (180 852 jetons sur 262 208) ;
+    le découpage d'un texte européen ne change pas ;
+  - quantifié en IQ4_XS avec une matrice d'importance calculée sur des traductions entre les
+    22 langues européennes, l'ukrainien et le serbe.
+
+  Il pèse 21 % de moins que le modèle d'origine et écrit 22 % de jetons en plus par seconde
+  (mesuré sur processeur). Écart de qualité avec l'original : −0,24 point COMET, dans la marge
+  d'erreur du banc (intervalle à 95 % de −0,75 à +0,27).
+
+  Le pack est construit par GitHub Actions (workflow « Pack Europe », `outils/pack_europe.py`)
+  et téléchargé depuis la version « pack-europe-1 » du dépôt. L'ancien fichier de TranslateGemma
+  4B est effacé une fois le nouveau en place ; un choix de TranslateGemma 4B passe à MiLMMT.
+- **Un pack par langue de lecture.** Le modèle suit la langue dans laquelle tu lis :
+  - pour les 22 autres langues du projet : MiLMMT-46 4B, le même pour toutes ;
+  - pour l'ukrainien : SalamandraTA 7B reste meilleur vers l'ukrainien (COMET 87,6 contre 82,9).
+    C'est le pack ukrainien, téléchargé et utilisé seulement pour les joueurs qui lisent
+    l'ukrainien. Les autres peuvent l'effacer dans la fenêtre des modèles (« Supprimer »).
+
+  Vers le serbe, MiLMMT écrit en alphabet latin, comme le chat (86,5 contre 78,4).
+- **Langue de lecture.** C'est la langue du client de WoW, sauf quand Windows est réglé dans une
+  langue du projet qui n'existe pas dans WoW (polonais, tchèque, néerlandais, suédois...). Dans
+  ce cas, le joueur joue sur un client en anglais et lit sa langue. Les noms du jeu (donjons,
+  raids, lieux) et le jargon prennent alors les noms anglais de son client.
+- **30 messages par minute au minimum.** Le besoin retenu pour choisir un modèle passe de 12 à 30
+  messages par minute (un toutes les 2 s), en gardant la baisse d'images par seconde sous 5 %.
+  Niveaux : sûr à partir de 45 par minute, probable à partir de 30, limite à partir de 22,5. Sur
+  le PC de référence, au pire (3840x1600, qualité maximale, sans plafond), le pack Europe est
+  prévu à 31 messages par minute sur la carte (TranslateGemma 4B : 24), et il tient en retail à
+  côté des 12 Go de WoW (2,3 Go au lieu de 2,9). Prévision tirée des mesures de TranslateGemma
+  4B, à confirmer en jeu par `/chevaliers essai 4b`.
+- **Trad:AUTO répond à l'interlocuteur étranger.** Un message dans une autre langue que la tienne,
+  de moins de 5 min, donne la langue de ta réponse, même si d'autres ont parlé ta langue
+  entre-temps. Avant, la dernière langue entendue l'emportait et la réponse partait sans
+  traduction.
+- **Boutons Trad et Envoyer dans les onglets de chuchotement et de discussion Battle.net.** Ces
+  onglets temporaires (fenêtres de chat 11 et suivantes) n'avaient pas les boutons.
+- **Anciens messages qui ressortaient dans le chat traduit.** Après un `/reload` ou une
+  reconnexion, les numéros des lignes du chat repartent du début. Une ligne dont le texte
+  n'était pas encore arrivé montrait alors un ancien message de la session précédente (par
+  exemple un ancien message de guilde). Corrigé :
+  - l'addon envoie un numéro de session à chaque chargement ;
+  - l'application oublie alors les lignes de la session d'avant, ainsi que celles qui ne sont plus
+    affichées depuis 30 min.
+
+## 0.17.0 (22/11/2026)
+
+- **Envoi d'un lien d'objet réparé** : sur retail, un message traduit contenant un objet partait
+  cassé (« SendChatMessage(): Invalid escape code in chat message », texte « ||Hitem:… »). Le
+  nouveau code de couleur des objets (« |cnIQ3: ») n'était reconnu ni par l'application ni par
+  l'addon : il restait devant le repère collé et le lien remis perdait sa couleur. Les deux le
+  reconnaissent ; les codes du jeu hors liens ne sont plus collés, et un dernier contrôle avant
+  l'envoi retire tout « | » isolé : le message part toujours.
+- **Noms Battle.net** : le jeu cache aux addons le nom des amis Battle.net ; le miroir écrivait
+  « ??? ». Il écrit maintenant leur BattleTag (sans le numéro), « Battle.net » s'il est illisible.
+- **Une autre application devant le chat la recouvre** : le miroir, le cache du bandeau, les
+  bulles et les panneaux ne sont plus « toujours au premier plan » ; ils sont rangés juste
+  au-dessus de la fenêtre de WoW, et toute fenêtre passée devant WoW passe aussi devant eux.
+- **Rien pendant les écrans de chargement** : l'addon signale l'écran de chargement dès que le
+  personnage quitte le monde ; l'application n'y dessine plus rien (chat, bulles, cache, panneaux)
+  et retire les bulles d'avant.
+- **Bulles** : 60 s de vie, apparition en fondu pendant les 10 premières secondes (lisible tôt :
+  la montée ralentit vers la fin) et effacement pendant les 10 dernières. Plusieurs bulles qui se
+  chevauchent s'empilent, la plus ancienne en bas, les récentes au-dessus ; quand l'une s'en va,
+  celles du dessus redescendent en glissant. Nouveau dessin : plaque sombre en dégradé, ombre
+  douce, liseré fin, barre d'accent aux couleurs de la classe, acronyme de la langue en couleur.
+- **Clic sur un pseudo du chat** : clic droit, la langue des messages de ce joueur devient celle
+  de l'envoi traduit (Trad:AUTO), annoncée sur le jeu ; le menu du jeu s'ouvre comme d'habitude.
+  Clic gauche : le chuchotement, comme dans le jeu.
+- **Pixels du bandeau de capture plus petits** : blocs de 2 pixels au lieu de 4 (deux rangées de
+  2 pixels au ras du bas de l'écran) ; `/chevaliers block 1` pour un pixel de l'écran par bloc,
+  `/chevaliers block 4` pour revenir à l'ancienne taille si des messages se perdent.
 
 ## 0.16.7 (15/11/2026)
 
@@ -548,9 +642,12 @@ chevaliers-translators/
                                   tests-en-jeu, interface, fonts, diagnostic, selftest...
     data/termes.tsv               dictionnaire (noms localisés, jargon, termes gardés)
   outils/lua_harness.py         harnais hors jeu de l'addon (imitation de l'API WoW)
+  outils/pack_europe.py         construction du pack Europe (MiLMMT-46 4B élagué, IQ4_XS)
+  outils/elaguer_vocab.py       élagage du vocabulaire d'un modèle Gemma 3 (GGUF)
+  outils/packs/                 matrice d'importance, empreinte et avis du pack Europe
   outils/paquet.ps1             zip de distribution (addon + application + licence)
   outils/signer.ps1             signature propre au PC (certificat « Chevaliers »)
-  .github/workflows/            compilation, tests, signature SignPath, publication
+  .github/workflows/            compilation, tests, signature SignPath, publication, pack Europe
   signpath/                     configuration d'artefact pour SignPath
   docs/                         plan, bilan et archive de la phase 0
   media/                        logo (512x512) et bannière (1024x256) d'origine, en TGA
@@ -587,15 +684,29 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.16.7.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.17.1.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.16.7)
+## Vérifié avant livraison (0.17.1)
 
-- 140 tests Rust sous Linux : dont, en 0.16.7, la ligne de l'infobulle (fichier en cours, sa
+- Banc d'essai de traduction directe (`outils/pack_europe.py` pour le pack ; banc, notes COMET-22
+  et chrF++ hors dépôt) : MiLMMT-46 4B, son pack Europe, TranslateGemma 4B et SalamandraTA 7B sur
+  6 directions et 192 segments, plus l'ukrainien et le serbe (48 segments) ; empreinte du pack
+  dans `outils/packs/europe.sha256`.
+- Compilation Windows vérifiée depuis Linux (`cargo check --target x86_64-pc-windows-gnu`).
+- 148 tests Rust sous Linux : dont, en 0.17.1, la langue de lecture (client de WoW ou langue de
+  Windows absente de WoW), les noms anglais du jeu pour ces lecteurs, Trad:AUTO qui garde la langue
+  de l'interlocuteur étranger, le modèle retiré remplacé (choix gardé, ancien fichier effacé une
+  fois le nouveau installé), le pack de chaque langue (SalamandraTA 7B pour l'ukrainien
+  seulement), le besoin de 30 messages par minute dans la chaîne et les téléchargements, les lignes
+  du miroir oubliées à chaque nouvelle session de l'addon ; en 0.17.0, les liens d'objets au format retail (« |cnIQ3: »)
+  gardés entiers et les codes du jeu retirés du collage, le nom Battle.net de repli, l'empilement
+  des bulles (la récente au-dessus, redescente en glissant), le fondu entrant et sortant sur 60 s,
+  la barre d'accent aux couleurs de la classe, le clic droit sur un pseudo (langue du joueur pour
+  l'envoi traduit), les bulles retirées à l'écran de chargement ; en 0.16.7, la ligne de l'infobulle (fichier en cours, sa
   taille, son rang) et l'état publié pour la fenêtre, les versions du jeu sans numéro écartées de
   la vérification de l'addon ; en 0.16.6, le téléchargement partagé entre deux processus
   (le second suit le premier, aucun fichier reçu deux fois), le fichier plus grand que prévu
@@ -640,7 +751,7 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   en 0.14 : bridage des téléchargements, mesures, propositions, télévisions, plaques du dispositif
   télévision ; et toujours le `.toc` et `Core.lua` alignés sur l'application, l'icône.
 - Harnais Lua : encodeur identique sous Lua 5.1 et LuaJIT (62 vecteurs) ; trames peintes décodées
-  par `ct-outils` ; valeurs secrètes, verrouillage du chat et relais après le combat ; bandeau
+  par `ct-outils` ; boutons Trad dans un onglet temporaire et numéro de session (0.17.1) ; valeurs secrètes, verrouillage du chat et relais après le combat ; bandeau
   immobile au repos ; valeurs secrètes jamais testées avant contrôle (relecture des sources, et
   absence et instance secrètes en champ de bataille) ; ligne plus haute chez WoW signalée à
   l'application ; toutes les lignes lisibles cachées et envoyées, celles du jeu sans être
@@ -658,6 +769,10 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   guide (0.16.3) ; boîte rouverte quand Entrée répétée la referme avant le collage, Échap qui annule,
   couleur de classe et icône de spécialisation (inspection d'un joueur proche) dans la trame des
   bulles (0.16.4) ; guide avec le texte de présentation et le lien GitHub non modifiable (0.16.5) ;
+  garde-fou avant l'envoi (« ||Hitem » refusé par le jeu), découpe des liens retail, BattleTag à
+  la place des noms Battle.net cachés, écran de chargement signalé puis levé, clic droit sur un
+  pseudo transmis une fois (clic gauche ignoré), bandeau en blocs de 2 pixels et d'un pixel décodé
+  sur un fond de pixels aléatoires (0.17.0) ;
   avis « application pas active » à la connexion, bulle gardée 30 s après celle du jeu (barre de
   nom, ou place figée retirée quand la caméra bouge), bulle expirée jamais reprise (0.16.6) ;
   réglage graphique modifié (trame de vie repeinte, « réglages graphiques de
@@ -681,13 +796,26 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
   erreur JavaScript.
 
-## Test de la 0.16.7 (PowerShell)
+## Test de la 0.17.0 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
-| Version | fenêtre de l'application et `/chevaliers` : 0.16.7 ; GitHub : la compilation de `v0.16.7` passe |
+| Version | fenêtre de l'application et `/chevaliers` : 0.17.1 ; GitHub : le workflow « Pack Europe » publie `pack-europe-1`, puis la compilation de `v0.17.1` passe |
+| Pack Europe | lancement de l'application : bulle « … MiLMMT-46 4B 1,84 Go… » ; fin du téléchargement : journal « [modèles] TranslateGemma 4B (remplacé par MiLMMT-46 4B) : ancien fichier effacé » ; fenêtre des modèles : MiLMMT-46 4B en jaune, SalamandraTA 7B « pour une autre langue » |
+| Pack Europe en jeu | `/chevaliers essai 4b` (hors combat, en ville) : verdict compatible, latence et messages par minute notés ; journal du serveur : `MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf` chargé |
+| Langue de lecture | journal à l'ouverture de WoW : « traduction vers FR (langue du client de WoW) » ; Windows en polonais et WoW en anglais : « vers PL (langue de Windows (absente de WoW)) » |
+| Trad:AUTO et interlocuteur | en guilde, un message en allemand, puis deux en français d'autres joueurs ; ta réponse en Trad:AUTO avec Maj+Entrée : partie en allemand |
+| Onglets temporaires | chuchotement ou discussion Battle.net ouverts dans un nouvel onglet : boutons Trad et Envoyer à côté de la zone de saisie |
+| Après un /reload | `/reload` puis messages de guilde : le chat traduit ne montre plus d'anciens messages ; journal : « [miroir] addon rechargé (/reload ou reconnexion) : lignes de la session précédente oubliées » |
+| Lien d'objet traduit | retail, Maj+Entrée sur « WTS » + un objet lié (Maj+clic) : le message part avec le lien en couleur, sans erreur « Invalid escape code » |
+| Battle.net | chuchotement d'un ami Battle.net : son BattleTag dans le chat redessiné, plus de « ??? » |
+| Application devant le chat | une fenêtre (navigateur, explorateur) posée sur le chat de WoW, même sans être active : elle cache le texte du chat et le cache du bandeau ; retour dans WoW (Alt+Tab) : le chat revient |
+| Écran de chargement | passage par un portail ou /reload : rien de l'application sur l'écran de chargement ; le chat revient en jeu |
+| Bulles 60 s | un joueur qui parle : la bulle apparaît en fondu, reste, s'efface sur ses 10 dernières secondes (60 s en tout) ; plusieurs répliques : empilées, la plus récente au-dessus, redescente quand une s'en va |
+| Clic sur un pseudo | clic droit sur le nom d'un joueur qui a écrit en allemand : annonce « langue d'envoi DE », menu du jeu ouvert ; Maj+Entrée : envoi en allemand ; clic gauche : chuchotement |
+| Bandeau | `/chevaliers info` : « bloc 2 px » ; traduction normale ; `/chevaliers block 1` puis messages : toujours traduits (sinon `/chevaliers block 2`) |
 | Téléchargements réels | supprimer un modèle dans la fenêtre puis relancer l'application : bulle « X Go à télécharger en tout : moteur …, <modèle> 4,52 Go… » ; infobulle de l'icône « 1 sur 1 : <modèle>, N % (… sur 4,52 Go) » ; fenêtre des modèles : même pourcentage et même taille sur la ligne du modèle, « Téléchargé en fond par l'application », total de la série au-dessus de la liste |
 | Lecteur vidéo | fenêtre de l'application : affiche « Lire la vidéo » ; clic : la vidéo se lance dans la fenêtre ; rien ne se lance tout seul à l'ouverture |
 | Ptr / Xptr | au lancement, plus de bulle « Addon à vérifier : WoW Ptr » ni « Xptr » |
@@ -698,7 +826,7 @@ Voir la réponse de livraison pour les commandes à copier-coller. Points à vé
 | Lancer au démarrage | menu de l'icône : « Lancer au démarrage de Windows » décochée ; la cocher, redémarrer la session Windows : médaillon près de l'horloge, sans fenêtre ; la décocher : plus lancée |
 | Avis de modèle | WoW en jeu, changer l'échelle de rendu au maximum : avis discret en haut à droite « Traduction : modèle plus léger » ; hors combat avec de la place : « meilleur modèle » |
 | Mises à jour des modèles | journal (WoW fermé, 3 min après le lancement) : « [modèles] versions publiées vérifiées : tout est à jour » ; fenêtre des modèles : rien à signaler tant que l'éditeur n'a rien publié |
-| Fenêtre des modèles | carrés de couleur devant les noms : EuroLLM 1.7B bleu, TranslateGemma 4B jaune, SalamandraTA 7B violet ; même couleur dans la jauge ; WoW ouvert et modèle chargé : « WoW (en ce moment) » et « <modèle> (en ce moment) » avec les valeurs du Gestionnaire des tâches (Performances > GPU > mémoire dédiée) ; WoW fermé : « WoW (plus haut mesuré en jeu) » ; seuil de saturation 0,6 Go |
+| Fenêtre des modèles | carrés de couleur devant les noms : EuroLLM 1.7B bleu, MiLMMT-46 4B jaune, SalamandraTA 7B violet ; même couleur dans la jauge ; WoW ouvert et modèle chargé : « WoW (en ce moment) » et « <modèle> (en ce moment) » avec les valeurs du Gestionnaire des tâches (Performances > GPU > mémoire dédiée) ; WoW fermé : « WoW (plus haut mesuré en jeu) » ; seuil de saturation 0,6 Go |
 | Délai d'affichage | premiers messages traduits affichés sans longue attente ; `%LOCALAPPDATA%\ChevaliersTranslators\latences.json` créé après une dizaine de traductions |
 | Trad:AUTO | `/dire hello`, puis écrire en français et Maj+Entrée en tenant les touches une seconde : le message part traduit ; journal : « collé et envoyé » puis « parti » |
 | Acronyme cliquable | clic sur `[DE]` d'un message traduit : panneau « Envoi traduit en allemand » ; Maj+Entrée en Trad:AUTO : journal « FR → DE (Trad:AUTO, langue choisie d'un clic…) » |

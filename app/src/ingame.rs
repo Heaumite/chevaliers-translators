@@ -444,6 +444,8 @@ pub fn run(dir: std::path::PathBuf, out: std::path::PathBuf) -> Result<bool, Str
                 }
             }
         }
+        // Panneau rangé juste au-dessus de WoW (0.17.0 : plus « toujours au premier plan »).
+        overlay.restack(crate::capture_win::wow_window(), false);
         overlay.pump();
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -466,7 +468,7 @@ mod tests {
         assert_eq!(split_id("essai 4b"), ("essai 4b", None));
         let o = options(std::path::Path::new("m"), std::path::Path::new("r"), &ON_DEMAND[0], false, false);
         assert!(o.fps && o.court && o.from_game && o.bursts.is_some());
-        assert_eq!(o.model, std::path::Path::new("m").join("translategemma-4b-it.Q4_K_M.gguf"));
+        assert_eq!(o.model, std::path::Path::new("m").join("MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf"));
     }
 
     #[test]
@@ -481,11 +483,11 @@ mod tests {
         assert_eq!((i, st.cpu), (2, false));
         se.record(st, Some(Verdict::Ok), true, "compatible".into());
         let (_, st) = se.next_step(&all).unwrap();
-        assert_eq!(st.model.id, "translategemma-4b");
+        assert_eq!(st.model.id, "milmmt-46-4b");
         se.record(st, Some(Verdict::Crash), true, "a fait planter le jeu".into());
         // Le 4B sur le processeur est tout de même essayé : la carte ne le concerne pas.
         let (_, st) = se.next_step(&all).unwrap();
-        assert_eq!((st.model.id, st.cpu), ("translategemma-4b", true));
+        assert_eq!((st.model.id, st.cpu), ("milmmt-46-4b", true));
         se.record(st, Some(Verdict::Ok), true, "compatible".into());
         assert!(se.next_step(&all).is_none());
         let sum = se.summary();

@@ -300,8 +300,9 @@ impl Session {
         }
     }
 
+    /// Combat, chat verrouillé ou écran de chargement (0.17.0) : rien n'est dessiné sur le jeu.
     fn combat(&self) -> bool {
-        self.live.ctx & (crate::engine::CTX_COMBAT | crate::engine::CTX_LOCKED) != 0
+        self.live.ctx & (crate::engine::CTX_COMBAT | crate::engine::CTX_LOCKED | crate::engine::CTX_LOADING) != 0
     }
 
     /// Cache du bandeau : posé tant que le bandeau est lu, retiré sinon. Une autre fenêtre en
@@ -436,6 +437,10 @@ impl Session {
                 }
             }
         }
+        // Clic droit sur un pseudo dans le chat (0.17.0) : même annonce qu'un clic sur un acronyme.
+        if let Some(l) = self.live.take_lang_toast() {
+            self.show_lang_toast(l, now, fonts);
+        }
         if self.lang_toast_until.is_some_and(|t| now >= t) {
             self.overlay.hide(LANG_TOAST);
             self.lang_toast_until = None;
@@ -444,6 +449,9 @@ impl Session {
             return;
         }
         self.last_tick = now;
+        // Fenêtres du miroir, du cache et des bulles rangées juste au-dessus de WoW (0.17.0) ; à
+        // chaque passage : WoW remis devant (retour par Alt+Tab) les recouvre jusque-là.
+        self.overlay.restack(self.window(), false);
         // Caché dès que l'addon ne donne plus signe de vie (déconnexion, écran de chargement,
         // choix du personnage) ou que WoW est fermé ou réduit ; revient avec lui. Une autre
         // application active ne le cache pas : le chat reste sur WoW, sauf sous sa fenêtre.
@@ -505,7 +513,6 @@ impl Session {
             }
             if in_front {
                 self.over = None;
-                self.overlay.raise_all();
                 self.live.window_over(None, self.overlay.origin());
             } else {
                 self.over = Overlay::window_over(self.window());

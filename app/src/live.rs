@@ -94,6 +94,9 @@ const SHIFT_GRACE: Duration = Duration::from_millis(1500);
 /// Langue d'envoi choisie d'un clic sur un acronyme du chat (0.16.4) : gardée ce temps après le
 /// clic tant qu'aucun envoi ne l'a utilisée, puis ce temps-là après chaque envoi.
 const CLICKED_LANG_FOR: Duration = Duration::from_secs(600);
+/// Trad:AUTO sur un canal (0.17.1) : un message dans une autre langue que celle du joueur, de
+/// moins de 5 min, donne la langue de la réponse même si d'autres ont parlé sa langue depuis.
+const FOREIGN_FOR: f64 = 300.0;
 const CLICKED_LANG_AFTER_SEND: Duration = Duration::from_secs(60);
 /// Les brouillons d'une même boîte se remplacent dans la file du traducteur.
 const DRAFT_GROUP: u64 = 1;
@@ -295,6 +298,11 @@ impl Tr {
         self.clicked = Some((l, now + CLICKED_LANG_FOR));
     }
 
+    /// Langue des messages d'un joueur (« Nom » ou « Nom-Royaume »), si on en a lu.
+    pub fn speaker_lang(&self, who: &str) -> Option<&'static str> {
+        self.speakers.language_of(&player_key(who))
+    }
+
     /// Langue choisie d'un clic, encore valable.
     pub fn clicked_lang(&self, now: Instant) -> Option<&'static str> {
         self.clicked.filter(|(_, until)| now < *until).map(|(l, _)| l)
@@ -315,18 +323,25 @@ impl Tr {
                 return Some(l);
             }
         }
-        self.majority(&channel_codes(chat_type, target), now).or((self.client != "en").then_some("en"))
+        let codes = channel_codes(chat_type, target);
+        // Un interlocuteur étranger de ces 5 dernières minutes l'emporte sur ceux qui parlent la
+        // langue du joueur entre-temps (0.17.1 : « quelqu'un d'autre parle entre deux » faisait
+        // passer la réponse dans la langue du joueur, sans traduction).
+        self.majority(&codes, now, FOREIGN_FOR, true)
+            .or_else(|| self.majority(&codes, now, 900.0, false))
+            .or((self.client != "en").then_some("en"))
     }
 
-    /// Langue majoritaire des messages vus ces 15 dernières minutes sur ces canaux ; les plus
-    /// récents comptent davantage (poids divisé par deux chaque minute, 0.16.4 ; avant toutes les
-    /// 5 min : la langue d'un nouvel interlocuteur mettait longtemps à l'emporter).
-    fn majority(&self, codes: &[u8], now: Instant) -> Option<&'static str> {
+    /// Langue majoritaire des messages vus ces `within` dernières secondes sur ces canaux
+    /// (`foreign` : sans ceux dans la langue du joueur) ; les plus récents comptent davantage
+    /// (poids divisé par deux chaque minute, 0.16.4 ; avant toutes les 5 min : la langue d'un
+    /// nouvel interlocuteur mettait longtemps à l'emporter).
+    fn majority(&self, codes: &[u8], now: Instant, within: f64, foreign: bool) -> Option<&'static str> {
         let mut w: HashMap<&'static str, f64> = HashMap::new();
         for c in codes {
             for (l, t) in self.seen.get(&self.scope(*c)).into_iter().flatten() {
                 let age = now.saturating_duration_since(*t).as_secs_f64();
-                if age < 900.0 {
+                if age < within && !(foreign && *l == self.client) {
                     *w.entry(l).or_default() += 0.5f64.powf(age / 60.0);
                 }
             }
@@ -444,6 +459,8 @@ pub struct Live {
     occluded_said: Option<Instant>,
     /// Dernier signe de vie de l'addon (chat miroir actif) ; `None` : addon sans signe de vie.
     pub last_alive: Option<Instant>,
+    /// Langue choisie par un clic droit sur un pseudo (0.17.0), à annoncer sur le jeu.
+    lang_toast: Option<&'static str>,
     /// Notifications pour le jeu (titre, détail) : changement de modèle (0.16.6).
     pub notices: Vec<(String, String)>,
     /// Modèles déjà prêts dans cette session (le premier n'est pas annoncé sur le jeu).
@@ -452,6 +469,8 @@ pub struct Live {
     pub waiting_at: Option<Instant>,
     /// Messages relayés récents, par numéro : les lignes du miroir les citent (0.12.3).
     bodies: HashMap<u16, (String, Instant)>,
+    /// Session de l'addon (4e octet du signe de vie, addon 0.17.1).
+    addon_session: Option<u8>,
     /// Lignes qui citaient un message jamais arrivé (attendent leur renvoi complet).
     cites_lost: usize,
     icons_seen: usize,
@@ -496,6 +515,7 @@ impl Live {
             occluded: false,
             occluded_said: None,
             last_alive: None,
+            lang_toast: None,
             notices: Vec::new(),
             readies: 0,
             ctx: 0,
@@ -508,6 +528,7 @@ impl Live {
             cmd_nonces: VecDeque::new(),
             waiting_at: None,
             bodies: HashMap::new(),
+            addon_session: None,
             cites_lost: 0,
             icons_seen: 0,
             bubbles_said: None,
@@ -583,6 +604,32 @@ impl Live {
         let (line, text) = m.hit(frame, x, y)?;
         m.mark_copied(line, now);
         Some(text)
+    }
+
+    /// Clic droit sur le pseudo d'un joueur (0.17.0) : la langue de ses messages devient celle de
+    /// l'envoi traduit en Trad:AUTO. Rien si on ne l'a pas encore lu.
+    pub fn lang_of_player(&mut self, who: &str, now: Instant) -> Option<&'static str> {
+        let Some(tr) = self.tr.as_mut() else {
+            crate::say!("[S3] clic droit sur {who} : traduction inactive");
+            return None;
+        };
+        match tr.speaker_lang(who) {
+            Some(l) => {
+                tr.click_lang(l, now);
+                crate::say!("[S3] langue de l'envoi traduit : {} (clic droit sur {who} ; Trad:AUTO la prend jusqu'à 60 s après ton dernier envoi)", l.to_uppercase());
+                Some(l)
+            }
+            None => {
+                crate::say!("[S3] clic droit sur {who} : sa langue n'est pas encore connue (aucun message lu de lui)");
+                None
+            }
+        }
+    }
+
+    /// Langue choisie par un clic droit sur un pseudo, à annoncer sur le jeu (une fois).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn take_lang_toast(&mut self) -> Option<&'static str> {
+        self.lang_toast.take()
     }
 
     /// Clic sur l'acronyme d'une langue (« [DE] ») d'une ligne du chat (0.16.4) : langue de
@@ -793,18 +840,34 @@ impl Live {
                     // bilan du combat attendent la fin du combat.
                     if let Some(&c) = f.payload.get(1) {
                         if c != self.ctx {
-                            crate::say!(
-                                "[contexte] {}",
-                                [(1, "combat"), (2, "instance"), (4, "raid"), (8, "absent"), (16, "chat verrouillé")]
-                                    .iter()
-                                    .filter(|(b, _)| c & b != 0)
-                                    .map(|(_, n)| *n)
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            );
+                            let names = [(1, "combat"), (2, "instance"), (4, "raid"), (8, "absent"), (16, "chat verrouillé"), (32, "écran de chargement")]
+                                .iter()
+                                .filter(|(b, _)| c & b != 0)
+                                .map(|(_, n)| *n)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            crate::say!("[contexte] {}", if names.is_empty() { "en jeu, rien de particulier" } else { names.as_str() });
+                        }
+                        // Écran de chargement (0.17.0) : les bulles d'avant ne sont plus à leur place.
+                        if c & crate::engine::CTX_LOADING != 0 && self.ctx & crate::engine::CTX_LOADING == 0 {
+                            if let Some(m) = self.mirror.as_mut() {
+                                m.bubbles.reset(now);
+                            }
                         }
                         self.ctx = c;
                         crate::engine::set_context_of(self.game, c);
+                    }
+                    // Session de l'addon (0.17.1) : changée à chaque /reload ou reconnexion ;
+                    // les numéros de ligne du miroir et des messages repartent du début.
+                    if let Some(&s) = f.payload.get(3) {
+                        if self.addon_session.is_some_and(|old| old != s) {
+                            crate::say!("[miroir] addon rechargé (/reload ou reconnexion) : lignes de la session précédente oubliées");
+                            if let Some(m) = self.mirror.as_mut() {
+                                m.forget_lines();
+                            }
+                            self.bodies.clear();
+                        }
+                        self.addon_session = Some(s);
                     }
                     // Réglages graphiques de WoW (addon 0.14.2) : numéro changé à chaque réglage
                     // modifié ; le moteur réévalue la place du modèle dans la mémoire vidéo.
@@ -841,6 +904,14 @@ impl Live {
                         "non" => {
                             crate::engine::post(crate::engine::Control::Refuse);
                             self.proposal_answered = true;
+                        }
+                        // Clic droit sur le pseudo d'un joueur dans le chat (addon 0.17.0) : sa
+                        // langue devient celle de l'envoi traduit en Trad:AUTO.
+                        w if w.starts_with("langue ") => {
+                            let who = w["langue ".len()..].trim().to_string();
+                            if let Some(l) = self.lang_of_player(&who, now) {
+                                self.lang_toast = Some(l);
+                            }
                         }
                         _ => {}
                     }
@@ -1636,6 +1707,21 @@ mod tests {
     }
 
     #[test]
+    fn right_click_on_a_name_takes_that_players_language() {
+        // 0.17.0 : clic droit sur le pseudo d'un joueur : sa langue pour l'envoi traduit.
+        let (mut l, _log) = live("fr");
+        let now = Instant::now();
+        assert_eq!(l.lang_of_player("Hans-Ysondre", now), None, "joueur jamais lu");
+        chat(&mut l, 1, 14, "Hans-Ysondre", "Guten Abend zusammen, wer kommt mit nach Schwarzfels?");
+        assert_eq!(l.lang_of_player("Hans-Ysondre", now), Some("de"));
+        assert_eq!(l.take_lang_toast(), None, "annonce seulement pour une demande de l'addon");
+        let tr = l.translation().unwrap();
+        assert_eq!(tr.target("AUTO", "SAY", "", now), Some("de"));
+        // Choix à la main (Trad:ES) : toujours prioritaire.
+        assert_eq!(tr.target("ES", "SAY", "", now), Some("es"));
+    }
+
+    #[test]
     fn foreign_messages_are_translated_into_the_mirror() {
         // --sans-mes-messages : les messages du joueur restent tels quels.
         let (mut l, log) = live_opt("fr", false);
@@ -1782,5 +1868,21 @@ mod tests {
         let tr = l.translation().unwrap();
         assert_eq!(tr.target("AUTO", "CHANNEL", "3", now), Some("en"));
         assert_eq!(tr.target("AUTO", "CHANNEL", "1", now), Some("fr"));
+    }
+
+    #[test]
+    fn auto_answers_the_foreign_speaker_even_if_others_talked_since() {
+        // 0.17.1 : Hans parle allemand en guilde, deux Français répondent, le joueur répond à
+        // Hans en Trad:AUTO : en allemand.
+        let (mut l, _log) = live("fr");
+        chat(&mut l, 1, 10, "Hans-Ysondre", "Hat jemand Lust, heute Abend die Schwarzfelsspitze zu machen?");
+        chat(&mut l, 2, 10, "Pierre", "moi je peux après manger");
+        chat(&mut l, 3, 10, "Paul", "pareil, vers 21 h");
+        let now = Instant::now();
+        let tr = l.translation().unwrap();
+        assert_eq!(tr.target("AUTO", "GUILD", "", now), Some("de"));
+        // 5 minutes plus tard, plus d'interlocuteur étranger : la langue du canal (le français,
+        // rien à traduire).
+        assert_eq!(tr.target("AUTO", "GUILD", "", now + Duration::from_secs(301)), Some("fr"));
     }
 }

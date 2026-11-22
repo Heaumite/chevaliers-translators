@@ -7,7 +7,9 @@ local _, CT = ...
 
 local floor = math.floor
 
-local Banner = { block = 4, cols = 0, widthRatio = 0.25 }
+-- Blocs de 2 pixels par défaut (0.17.0 ; 4 avant) : bandeau quatre fois plus discret, deux
+-- rangées de 2 pixels au ras du bas de l'écran ; « /chevaliers block 1 » : un pixel par bloc.
+local Banner = { block = 2, cols = 0, widthRatio = 0.25 }
 CT.Banner = Banner
 
 -- Niveaux de couleur (0.13.3) : bandeau sombre et discret ; l'application se cale sur les blocs

@@ -305,6 +305,7 @@ function ADD(text, kind, r, g, b)
 end
 LOCKDOWN = false
 ChatFrame1, ChatFrame2 = ChatWindow(true), ChatWindow(true)
+NEW_CHAT_WINDOW = ChatWindow
 ChatFrame3 = { IsShown = function() return false end }
 DEFAULT_CHAT_FRAME = ChatFrame1
 ChatFrame1EditBox = CreateFrame("EditBox", "ChatFrame1EditBox")
@@ -522,6 +523,12 @@ def mock(root, binary):
 
     g.SLASH("test 4 20")
     pump(200, 4)
+    assert g.ChevaliersTranslatorsBanner and lua.eval("CT_TABLE.Banner.block") == 2, "bloc de 2 px par défaut (0.17.0)"
+    # 0.17.0 : blocs d'un pixel (sur un fond de pixels aléatoires) décodés aussi.
+    g.SLASH("block 1")
+    g.SLASH("ping Un pixel par bloc")
+    pump(60, 1)
+    g.SLASH("block 2")
     g.SLASH("ping Bonjour depuis le harnais")
     pump(60, 1)
     g.SLASH("chat on")
@@ -544,6 +551,15 @@ def mock(root, binary):
     assert tb.text == "Trad:FR", f"bouton Trad : {tb.text}"
     tb.scripts["OnClick"](tb, "RightButton")
     assert tb.text == "Trad:AUTO" and g.ChevaliersTranslatorsDB.dest == "AUTO", "clic droit : retour à AUTO"
+    # 0.17.1 : onglet temporaire de chuchotement ou de discussion Battle.net (ChatFrame11) :
+    # boutons posés dès qu'il existe.
+    lua.execute('ChatFrame11 = NEW_CHAT_WINDOW(true); ChatFrame11EditBox = CreateFrame("EditBox", "ChatFrame11EditBox")')
+    g.CT_TABLE.InstallTrad()
+    assert g.ChatFrame11EditBox.ctTrad is not None, "onglet temporaire sans bouton Trad"
+    lua.execute('ChatFrame11, ChatFrame11EditBox = nil, nil')
+    # 0.17.1 : session de l'addon (1 à 255) dans le signe de vie : l'application oublie les lignes
+    # du miroir de la session précédente après un /reload.
+    assert 1 <= g.CT_TABLE.SESSION <= 255, g.CT_TABLE.SESSION
     # Client récent : menu des langues à un seul niveau (Automatique en tête, puis par région).
     g.SETUP_MENU()
     tb.scripts["OnClick"](tb, "LeftButton")
@@ -678,6 +694,28 @@ def mock(root, binary):
     g.SIMULATE_SEND(eb)
     assert list(g.BLIZZ_SENT.values())[-1] == f"WHISPER:Hans Ysondre:[→DE] Je vends {link} pas cher", list(g.BLIZZ_SENT.values())[-1]
     s3_frames.extend(frames_until_idle("s3linksent"))
+    # 0.17.0 : garde-fou avant l'envoi (« | » isolé collé devant un lien remis : refusé par le jeu).
+    CT = g.CT_TABLE
+    fish = "|cnIQ3:|Hitem:242756::::::::90:70:::::::::|h[Roulés de poisson]|h|r"
+    assert CT.SafeChat("|" + fish) == fish, CT.SafeChat("|" + fish)
+    assert CT.SafeChat("||Hitem:1|h[X]|h|r") == "|Hitem:1|h[X]|h|r"
+    assert CT.SafeChat("a|b c||d") == "ab c||d"
+    links = CT.Links("WTS " + fish + " et |cffa335ee|Hitem:19019::::|h[Tonnerre]|h|r")
+    assert links[1] == fish and links[2].startswith("|cffa335ee"), (links[1], links[2])
+    # 0.17.0 : noms Battle.net cachés aux addons (|K…|k) remplacés par le BattleTag.
+    lua.execute('C_BattleNet = { GetAccountInfoByID = function(id) if id == 12 then return { battleTag = "Narniac#2345" } end end }')
+    bn = "|HBNplayer:|Kq12|k:12:345:BN_WHISPER:|Kq12|k|h[|Kq12|k]|h chuchote : salut |Kq99|k"
+    got = CT.Mirror.BnNames(bn)
+    assert got == "|HBNplayer:Narniac:12:345:BN_WHISPER:Narniac|h[Narniac]|h chuchote : salut |Kq99|k", got
+    # 0.17.0 : clic droit sur le pseudo d'un joueur dans le chat : sa langue pour l'envoi traduit.
+    g.FIRE("CHAT_MSG_WHISPER", "Guten Abend, wie geht es dir heute? Ich komme gleich mit", "Hans-Ysondre", "", "", "Hans-Ysondre", "", 0, 0, "", 0, 91, "Player-9")
+    s3_frames.extend(frames_until_idle("rclick-msg"))
+    CT.OnPlayerLink("player:Hans-Ysondre:91:WHISPER:HANS-YSONDRE", "LeftButton")
+    CT.OnPlayerLink("player:Hans-Ysondre:91:WHISPER:HANS-YSONDRE", "RightButton")
+    out = app(frames_until_idle("rclick"))
+    # (Sans traducteur branché dans le harnais : la demande arrive une fois, l'application répond.)
+    assert out.count("[demande] langue Hans-Ysondre") == 1, "clic gauche compté, ou demande en double"
+    assert "clic droit sur Hans-Ysondre" in out, out
     # ---- Brouillon : traduit pendant la frappe ---------------------------------------------
     eb = g.EDITBOX("Merci pour le groupe", "WHISPER", "Hans Ysondre")
     g.ChatFrame1EditBox.hooks["OnTextChanged"](eb, True)
@@ -932,13 +970,13 @@ def mock(root, binary):
     for _ in range(12):
         g.TICK(1 / 60)
     assert lua.execute(count) == 0, ("bulle figée gardée alors que le joueur a tourné", ct.Bubbles.lastError, lua.execute("local t = {} for id, L in pairs(CT_TABLE.Bubbles.live) do t[#t+1] = id .. '=' .. tostring(L.face) .. '/' .. tostring(L.gone) end return table.concat(t, ',')"))
-    # Fin de vie (30 s) : plus rien d'envoyé pour elle.
+    # Fin de vie (60 s depuis 0.17.0) : plus rien d'envoyé pour elle.
     lua.execute("FACING = 1.913; BUBBLE.IsVisible = function() return true end")
-    g.TICK(31)
+    g.TICK(61)
     for _ in range(12):
         g.TICK(1 / 60)
     assert ct.Bubbles.sentSig == "", ct.Bubbles.sentSig
-    assert g.HOLDER.alpha == 1, "bulle du jeu de plus de 30 s laissée effacée"
+    assert g.HOLDER.alpha == 1, "bulle du jeu de plus de 60 s laissée effacée"
     # Sa propre bulle (0.16.1) : le message du joueur lui-même est retrouvé aussi (traduit dans le
     # chat, il l'est dans sa bulle) ; un chuchotement envoyé n'a pas de bulle.
     g.FIRE("CHAT_MSG_SAY", "hello", "Testeur Batonnoir", "Commun", "", "Testeur Batonnoir", "", 0, 0, "", 0, 60, "Player-1-0ABC")
@@ -1075,6 +1113,15 @@ def mock(root, binary):
     g.FIRE("CVAR_UPDATE", "graphicsQuality", "7")
     out = feed(collect("gfx", max_ticks=200, idle=30), os.path.join(work, "gfx"))
     assert "[contexte] réglages graphiques de WoW modifiés" in out, out
+    # 0.17.0 : écran de chargement signalé en priorité ; l'application ne dessine plus rien.
+    g.FIRE("PLAYER_LEAVING_WORLD")
+    assert lua.eval("CT_TABLE.ContextFlags()") & 32 == 32
+    out = feed(collect("chargement", max_ticks=200, idle=30), os.path.join(work, "chargement"))
+    assert "écran de chargement" in out, out
+    g.FIRE("LOADING_SCREEN_DISABLED")
+    assert lua.eval("CT_TABLE.ContextFlags()") & 32 == 0
+    out = feed(collect("charge", max_ticks=200, idle=30), os.path.join(work, "charge"))
+    assert "[contexte]" in out and "écran de chargement" not in out, out
     # 0.14.3 : en champ de bataille, UnitIsAFK et IsInInstance rendent des valeurs secrètes : ni
     # testées ni comptées (seule l'instance lisible compte).
     lua.execute('UnitIsAFK = function() return SECRET end; IsInInstance = function() return true, SECRET end')
@@ -1128,7 +1175,7 @@ def mock(root, binary):
     g.SLASH("diag")
     out = feed(collect("diag"), os.path.join(work, "diag"))
     assert "[addon] diag : client 1.60.1.70790" in out and "[addon] diag : ChatFrame1" in out, "diagnostic"
-    assert "[addon] diag : messages reçus (total/secrets) :" in out and "WHISPER 1/1" in out, out
+    assert "[addon] diag : messages reçus (total/secrets) :" in out and "WHISPER 2/1" in out, out  # (2 : le chuchotement du test du clic droit, 0.17.0)
     # ---- Connexion : traduction active d'office si l'application tourne ---------------------
     first = list(g.LOG.values())
     assert any("l'application Chevaliers Translators n'est pas lancée" in m for m in first[:12]), "connexion sans l'application"
@@ -1228,7 +1275,7 @@ def mock(root, binary):
     gf = g.ChevaliersTranslatorsGuide
     assert gf is not None and gf.shown, "guide non affiché"
     assert "toutes les versions de World of Warcraft" in gf.about.text, "texte du guide"
-    assert gf.music.url == "https://www.youtube.com/watch?v=KzwXwlVVSvE" and gf.music.text == gf.music.url, "lien de la musique"
+    assert gf.music.url == "https://www.youtube.com/watch?v=KzwXwlVVSvE" and gf.music.text == gf.music.url, "Guide d'inqtallation"
     assert gf.repo.url == "https://github.com/Heaumite/chevaliers-translators", "lien du dépôt"
     assert gf.warnings == 1, "addon incompatible absent du guide"
     assert g.ChevaliersTranslatorsDB.guideSeen == 4

@@ -59,6 +59,9 @@ pub struct Model {
     pub quality: u8,
     /// Assez léger pour tourner sur le processeur (8 cœurs) si la carte ne convient pas.
     pub cpu_ok: bool,
+    /// Langues de lecture dont ce modèle est le pack (0.17.1) ; vide : toutes. Un modèle réservé
+    /// à d'autres langues n'est ni utilisé ni téléchargé pour ce joueur.
+    pub only_for: &'static [&'static str],
 }
 
 /// Pack low : téléchargé chez tous les joueurs, modèle par défaut et repli.
@@ -72,22 +75,39 @@ pub static LOW_PACK: Model = Model {
     license: "Apache 2.0",
     quality: 1,
     cpu_ok: true,
+    only_for: &[],
 };
+
+/// Taille exacte du pack Europe (SHA-256 dans outils/packs/europe.sha256) et qualité retenue :
+/// COMET 84,5 au banc du 22/11/2026, comme SalamandraTA 7B (84,1), au-dessus de TranslateGemma 4B
+/// (82,7).
+pub const PACK_EUROPE_SIZE: u64 = 1_970_906_400;
+pub const PACK_EUROPE_QUALITY: u8 = 3;
+
+/// Adresse du pack Europe (0.17.1) : fichier de la version « pack-europe-1 » du dépôt, construit
+/// par GitHub Actions (workflow « Pack Europe », outils/pack_europe.py).
+pub const PACK_EUROPE_URL: &str =
+    "https://github.com/Heaumite/chevaliers-translators/releases/download/pack-europe-1/MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf";
 
 /// Modèles 23 langues, téléchargés sur demande, du plus léger au plus lourd.
 /// TranslateGemma 12B retiré le 09/11/2026 : peu de PC le font tourner à côté de WoW.
+/// TranslateGemma 4B remplacé le 22/11/2026 par MiLMMT-46 4B (pack Europe, voir `RETIRED`).
 pub static ON_DEMAND: [Model; 2] = [
     Model {
-        id: "translategemma-4b",
-        name: "TranslateGemma 4B",
-        file: "translategemma-4b-it.Q4_K_M.gguf",
-        url: "https://huggingface.co/mradermacher/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it.Q4_K_M.gguf",
-        size: 2_489_909_760,
+        id: "milmmt-46-4b",
+        name: "MiLMMT-46 4B",
+        file: "MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf",
+        url: PACK_EUROPE_URL,
+        size: PACK_EUROPE_SIZE,
         langs: Langs::All,
         license: "conditions Gemma",
-        quality: 2,
+        quality: PACK_EUROPE_QUALITY,
         cpu_ok: true,
+        only_for: &[],
     },
+    // Pack ukrainien (0.17.1) : vers l'ukrainien, SalamandraTA 7B reste le meilleur (COMET 87,6
+    // contre 82,9 pour MiLMMT-46 4B au banc du 22/11/2026) ; vers les autres langues, MiLMMT fait
+    // aussi bien avec deux fois moins de mémoire : SalamandraTA ne sert qu'aux lecteurs ukrainiens.
     Model {
         id: "salamandrata-7b",
         name: "SalamandraTA 7B v3",
@@ -98,6 +118,7 @@ pub static ON_DEMAND: [Model; 2] = [
         license: "GPL-3.0",
         quality: 3,
         cpu_ok: false,
+        only_for: &["uk"],
     },
 ];
 
@@ -120,6 +141,90 @@ pub fn tint(m: &Model) -> &'static str {
 /// Modèle du catalogue correspondant à un nom de fichier.
 pub fn by_file(name: &str) -> Option<&'static Model> {
     all().find(|m| m.file.eq_ignore_ascii_case(name))
+}
+
+/// Modèle retiré du catalogue, et celui qui le remplace.
+#[derive(Debug)]
+pub struct Retired {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub file: &'static str,
+    pub by: &'static str,
+}
+
+/// Modèles retirés (0.17.1) : TranslateGemma 4B laisse sa place à MiLMMT-46 4B (même taille,
+/// même architecture Gemma 3, mieux entraîné à traduire ; banc du 22/11/2026).
+pub static RETIRED: &[Retired] = &[Retired {
+    id: "translategemma-4b",
+    name: "TranslateGemma 4B",
+    file: "translategemma-4b-it.Q4_K_M.gguf",
+    by: "milmmt-46-4b",
+}];
+
+/// Langue de lecture retenue pour choisir les modèles (0.17.1) : celle notée à l'ouverture du
+/// dernier WoW (langue du client, ou de Windows quand WoW n'existe pas dans celle-ci), sinon
+/// celle de Windows.
+pub fn reader() -> Option<&'static str> {
+    #[cfg(test)]
+    if let Some(r) = TEST_READER.with(|c| c.get()) {
+        return Some(r);
+    }
+    std::fs::read_to_string(reader_file())
+        .ok()
+        .and_then(|s| crate::lang::LANGS.iter().find(|l| **l == s.trim()).copied())
+        .or_else(crate::lang::windows_lang)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Langue de lecture imposée par un test (fil de test courant).
+    pub static TEST_READER: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+fn reader_file() -> PathBuf {
+    crate::fonts::cache_root().join("langue-lecture.txt")
+}
+
+/// Note la langue de lecture du WoW ouvert.
+pub fn set_reader(lang: &str) {
+    let p = reader_file();
+    if std::fs::read_to_string(&p).ok().as_deref().map(str::trim) != Some(lang) {
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let _ = std::fs::write(&p, lang);
+    }
+}
+
+/// Modèle utile à ce lecteur : un pack réservé à d'autres langues ne l'est pas (lecteur inconnu :
+/// seuls les modèles de toutes les langues).
+pub fn serves(m: &Model, reader: Option<&str>) -> bool {
+    m.only_for.is_empty() || reader.is_some_and(|r| m.only_for.contains(&r))
+}
+
+/// Rang d'un modèle pour un lecteur : sa qualité, puis, à qualité égale, le pack de sa langue
+/// avant les modèles de toutes les langues.
+pub fn rank(m: &Model, reader: Option<&str>) -> (u8, bool) {
+    (m.quality, !m.only_for.is_empty() && serves(m, reader))
+}
+
+/// Identifiant à jour : celui du remplaçant pour un modèle retiré (choix du joueur gardé).
+pub fn current_id(id: &str) -> &str {
+    RETIRED.iter().find(|r| r.id == id).map_or(id, |r| r.by)
+}
+
+/// Fichiers des modèles retirés effacés une fois leur remplaçant installé (au lancement, ou WoW
+/// fermé : un fichier encore ouvert par un serveur reste, réessayé plus tard). Les noms effacés.
+pub fn remove_retired(dir: &Path) -> Vec<String> {
+    let mut done = Vec::new();
+    for r in RETIRED {
+        let old = dir.join(r.file);
+        let Some(by) = by_id(r.by) else { continue };
+        if old.exists() && installed_in(dir, by) && std::fs::remove_file(&old).is_ok() {
+            done.push(format!("{} (remplacé par {})", r.name, by.name));
+        }
+    }
+    done
 }
 
 /// Mémoire vidéo comptée pour WoW en jeu, d'après le PC de référence (Radeon RX 6950 XT 16 Go,
@@ -198,6 +303,9 @@ pub fn reference_footprint(file: &str) -> Option<u64> {
     Some(match file {
         "EuroLLM-1.7B-Instruct.Q4_K_M.gguf" => 1_165_373_440,
         "translategemma-4b-it.Q4_K_M.gguf" => 2_857_320_448,
+        // Pack Europe (0.17.1) : même architecture que TranslateGemma 4B, donc mêmes contexte et
+        // tampons de calcul (0,37 Go au-delà du fichier) ; estimé, à mesurer.
+        "MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf" => PACK_EUROPE_SIZE + (2_857_320_448 - 2_489_909_760),
         "salamandraTA_7B_v3_q4_k_m.gguf" => 4_618_977_280,
         _ => return None,
     })
@@ -546,9 +654,27 @@ pub fn offer_with(
         }
     }
     let trial = |m: &Model, p: Place| trials.get(&(m.file.to_lowercase(), p)).cloned();
+    let reader = reader();
     let mut entries: Vec<Entry> = all()
         .map(|m| {
             let (fp, mes) = footprint(m, measured);
+            // Pack d'une autre langue (0.17.1) : montré, jamais proposé.
+            if !serves(m, reader) {
+                let names: Vec<String> = m.only_for.iter().map(|l| crate::bench::french_name(l)).collect();
+                return Entry {
+                    model: m,
+                    footprint: fp,
+                    measured: mes,
+                    place: None,
+                    reason: format!(
+                        "pack des joueurs qui lisent l'{} : pour les autres langues, MiLMMT-46 4B traduit aussi bien avec deux fois moins de mémoire",
+                        names.join(", l'")
+                    ),
+                    trial: None,
+                    gpu_failed: None,
+                    installed: installed(m),
+                };
+            }
             let gpu_trial = trial(m, Place::Gpu);
             // Manque de mémoire vidéo constaté : plus un échec (0.14.2), la place se gère en jeu.
             let gpu_failed = gpu_trial.clone().filter(|t| t.failed() && t.verdict != Verdict::Memory);
@@ -631,7 +757,7 @@ pub fn offer_with(
     let high = entries
         .iter()
         .filter(|e| e.model.id != LOW_PACK.id && e.eligible())
-        .max_by_key(|e| (e.model.quality, e.place == Some(Place::Gpu)))
+        .max_by_key(|e| (rank(e.model, reader), e.place == Some(Place::Gpu)))
         .map(|e| e.model.id);
     let low = &entries[0];
     if low.place.is_none() {
@@ -676,7 +802,7 @@ pub fn read_loaded() -> Option<&'static Model> {
 }
 
 pub fn read_active() -> Option<String> {
-    std::fs::read_to_string(active_file()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    std::fs::read_to_string(active_file()).ok().map(|s| current_id(s.trim()).to_string()).filter(|s| !s.is_empty())
 }
 
 pub fn set_active(id: &str) -> Result<(), String> {
@@ -1148,7 +1274,7 @@ pub fn notice(o: &Offer, dir: &Path, free_disk: Option<u64>, runtime_present: bo
             m.license,
             gib(e.footprint),
             if e.measured { "mesurée" } else { "estimée" },
-            e.place.map_or("ne tourne pas sur ce PC", |p| p.label()),
+            e.place.map_or(if e.reason.starts_with("pack des joueurs") { "pour une autre langue" } else { "ne tourne pas sur ce PC" }, |p| p.label()),
             e.reason,
             e.trial.as_ref().filter(|t| !e.reason.contains(&t.summary())).map_or(
                 if e.trial.is_some() || e.place.is_none() { String::new() } else { " ; pas encore testé en jeu".to_string() },
@@ -1281,6 +1407,8 @@ mod tests {
 
     #[test]
     fn sorted_by_video_memory_with_relative_high() {
+        // Lecteur ukrainien : SalamandraTA 7B est son pack (0.17.1).
+        TEST_READER.with(|c| c.set(Some("uk")));
         // PC de référence, WoW en jeu : 16 Go, 6,9 Go utilisés dont 5,6 par WoW, 9,1 Go libres.
         let h = pc(16 * GIB, Some(69 * GIB / 10), Some(56 * GIB / 10), 40 * GIB, true);
         let o = offer_with(&h, &|_| false, &none, &Trials::new());
@@ -1288,7 +1416,7 @@ mod tests {
             ids(&o),
             vec![
                 ("eurollm-1.7b", Some(Place::Gpu)),
-                ("translategemma-4b", Some(Place::Gpu)),
+                ("milmmt-46-4b", Some(Place::Gpu)),
                 ("salamandrata-7b", Some(Place::Gpu))
             ]
         );
@@ -1332,7 +1460,7 @@ mod tests {
             ids(&o),
             vec![
                 ("eurollm-1.7b", Some(Place::Gpu)),
-                ("translategemma-4b", Some(Place::Gpu)),
+                ("milmmt-46-4b", Some(Place::Gpu)),
                 ("salamandrata-7b", Some(Place::Gpu))
             ]
         );
@@ -1355,6 +1483,8 @@ mod tests {
 
     #[test]
     fn failed_trials_exclude_and_fall_back() {
+        // Lecteur ukrainien : SalamandraTA 7B est son pack (0.17.1).
+        TEST_READER.with(|c| c.set(Some("uk")));
         let h = pc(16 * GIB, Some(69 * GIB / 10), Some(56 * GIB / 10), 40 * GIB, true);
         let mut t = Trials::new();
         let crash = Trial { verdict: Verdict::Crash, when: 1, drop: Some(0.186), detail: "pilote réinitialisé 3 fois".into() };
@@ -1362,17 +1492,17 @@ mod tests {
         let o = offer_with(&h, &|_| false, &none, &t);
         let e = o.entry("salamandrata-7b").unwrap();
         assert!(!e.eligible() && e.reason.contains("a fait planter le jeu (pilote réinitialisé 3 fois)"), "{}", e.reason);
-        assert_eq!(o.high, Some("translategemma-4b"));
+        assert_eq!(o.high, Some("milmmt-46-4b"));
         // Le pack low plante sur la carte : il passe sur le processeur.
         t.insert(("eurollm-1.7b-instruct.q4_k_m.gguf".into(), Place::Gpu), crash.clone());
-        t.insert(("translategemma-4b-it.q4_k_m.gguf".into(), Place::Gpu), crash.clone());
+        t.insert(("milmmt-46-4b-v1.0-europe.iq4_xs.gguf".into(), Place::Gpu), crash.clone());
         let o = offer_with(&h, &|_| false, &none, &t);
         assert_eq!(o.entries[0].place, Some(Place::Cpu));
         assert!(o.entries[0].gpu_failed.is_some());
-        assert_eq!(o.entry("translategemma-4b").unwrap().place, Some(Place::Cpu));
+        assert_eq!(o.entry("milmmt-46-4b").unwrap().place, Some(Place::Cpu));
         // Échec aussi sur le processeur : le 4B n'est plus proposé, seul le low reste.
         t.insert(
-            ("translategemma-4b-it.q4_k_m.gguf".into(), Place::Cpu),
+            ("milmmt-46-4b-v1.0-europe.iq4_xs.gguf".into(), Place::Cpu),
             Trial { verdict: Verdict::Heavy, when: 2, drop: Some(0.09), detail: "baisse 9 %".into() },
         );
         let o = offer_with(&h, &|_| false, &none, &t);
@@ -1386,6 +1516,8 @@ mod tests {
 
     #[test]
     fn measured_footprint_replaces_estimate() {
+        // Lecteur ukrainien : SalamandraTA 7B est son pack (0.17.1).
+        TEST_READER.with(|c| c.set(Some("uk")));
         // 7,7 Go libres (WoW compté 7 Go) ; 7B estimé 5,7 Go, mesuré 4,3 Go : passe dans les deux cas.
         let h = pc(16 * GIB, Some(69 * GIB / 10), Some(56 * GIB / 10), 40 * GIB, true);
         let measured = |f: &str| (f == "salamandraTA_7B_v3_q4_k_m.gguf").then_some(43 * GIB / 10);
@@ -1406,25 +1538,27 @@ mod tests {
 
     #[test]
     fn active_model_falls_back_to_low() {
+        // Lecteur ukrainien : SalamandraTA 7B est son pack (0.17.1).
+        TEST_READER.with(|c| c.set(Some("uk")));
         let h = pc(16 * GIB, Some(69 * GIB / 10), Some(56 * GIB / 10), 40 * GIB, true);
         let inst = |m: &Model| m.id != "salamandrata-7b";
         let mut t = Trials::new();
         let o = offer_with(&h, &inst, &none, &t);
         assert_eq!(effective_active(None, &o).0.model.id, "eurollm-1.7b");
-        assert_eq!(effective_active(Some("translategemma-4b"), &o).0.model.id, "translategemma-4b");
+        assert_eq!(effective_active(Some("milmmt-46-4b"), &o).0.model.id, "milmmt-46-4b");
         let (e, why) = effective_active(Some("salamandrata-7b"), &o);
         assert_eq!(e.model.id, "eurollm-1.7b");
         assert!(why.unwrap().contains("pas installé"));
         t.insert(
-            ("translategemma-4b-it.q4_k_m.gguf".into(), Place::Gpu),
+            ("milmmt-46-4b-v1.0-europe.iq4_xs.gguf".into(), Place::Gpu),
             Trial { verdict: Verdict::Crash, when: 1, drop: None, detail: String::new() },
         );
         t.insert(
-            ("translategemma-4b-it.q4_k_m.gguf".into(), Place::Cpu),
+            ("milmmt-46-4b-v1.0-europe.iq4_xs.gguf".into(), Place::Cpu),
             Trial { verdict: Verdict::Heavy, when: 1, drop: None, detail: String::new() },
         );
         let o = offer_with(&h, &inst, &none, &t);
-        let (e, why) = effective_active(Some("translategemma-4b"), &o);
+        let (e, why) = effective_active(Some("milmmt-46-4b"), &o);
         assert_eq!(e.model.id, "eurollm-1.7b");
         assert!(why.unwrap().contains("planter"));
     }
@@ -1458,6 +1592,7 @@ mod tests {
             license: "test",
             quality: 1,
             cpu_ok: true,
+            only_for: &[],
         };
         // 400, 800 (coupure), 1200 : complet au 3e essai.
         let cancel = AtomicBool::new(false);
@@ -1517,17 +1652,19 @@ mod tests {
         let o = offer_with(&h, &|m| installed_in(&dir, m), &none, &Trials::new());
         let n = notice(&o, &dir, Some(500 * GIB), false, None);
         assert!(n.contains("★☆☆ EuroLLM 1.7B - LOW (par défaut, repli) - à télécharger, 0,97 Go - ACTIF"), "{n}");
-        assert!(n.contains("★★★ SalamandraTA 7B v3 - HIGH (le meilleur pour ce PC)"), "{n}");
-        assert!(n.contains("★★☆ TranslateGemma 4B - sur demande"), "{n}");
+        // Lecteur inconnu (0.17.1) : SalamandraTA 7B, pack ukrainien, n'est pas proposé.
+        assert!(n.contains("★★★ MiLMMT-46 4B - HIGH (le meilleur pour ce PC) - à télécharger, 1,84 Go"), "{n}");
+        assert!(n.contains("★★★ SalamandraTA 7B v3 - sur demande - non proposé"), "{n}");
+        assert!(n.contains("pour une autre langue") && n.contains("lisent l'ukrainien"), "{n}");
         // Pack low (0,97 Go) + moteur Vulkan (0,03 Go).
         assert!(n.contains("Moteur llama.cpp (vulkan) et pack low : 1,01 Go"), "{n}");
         // Pack low présent (taille exacte) et moteur présent : plus rien d'office.
         let f = std::fs::File::create(dir.join(LOW_PACK.file)).unwrap();
         f.set_len(LOW_PACK.size).unwrap();
         let o = offer_with(&h, &|m| installed_in(&dir, m), &none, &Trials::new());
-        let n = notice(&o, &dir, Some(500 * GIB), true, Some("salamandrata-7b"));
+        let n = notice(&o, &dir, Some(500 * GIB), true, Some("milmmt-46-4b"));
         assert!(n.contains("déjà présents") && n.contains("EuroLLM 1.7B - LOW (par défaut, repli) - installé - ACTIF"), "{n}");
-        assert!(n.contains("Repli sur le pack low : SalamandraTA 7B v3 n'est pas installé"), "{n}");
+        assert!(n.contains("Repli sur le pack low : MiLMMT-46 4B n'est pas installé"), "{n}");
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -1544,5 +1681,46 @@ mod tests {
         assert!(runtime_build(&dir, "hip-radeon").unwrap().ends_with("llama-b12211-bin-win-hip-radeon-x64"));
         assert!(runtime_build(&dir, "cpu").is_none());
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn retired_model_is_replaced_then_its_file_removed() {
+        // 0.17.1 : TranslateGemma 4B remplacé par MiLMMT-46 4B ; le choix du joueur suit.
+        assert_eq!(current_id("translategemma-4b"), "milmmt-46-4b");
+        assert_eq!(current_id("salamandrata-7b"), "salamandrata-7b");
+        assert!(by_id("translategemma-4b").is_none());
+        let dir = std::env::temp_dir().join(format!("ct-retraite-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("translategemma-4b-it.Q4_K_M.gguf"), b"ancien").unwrap();
+        // Remplaçant pas encore installé : l'ancien fichier reste (la traduction continue avec).
+        assert!(remove_retired(&dir).is_empty());
+        assert!(dir.join("translategemma-4b-it.Q4_K_M.gguf").exists());
+        // Remplaçant installé (taille exacte) : l'ancien est effacé.
+        let new = by_id("milmmt-46-4b").unwrap();
+        std::fs::File::create(dir.join(new.file)).unwrap().set_len(new.size).unwrap();
+        assert_eq!(remove_retired(&dir), ["TranslateGemma 4B (remplacé par MiLMMT-46 4B)"]);
+        assert!(!dir.join("translategemma-4b-it.Q4_K_M.gguf").exists());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn reader_gets_the_pack_of_its_language() {
+        // 0.17.1 : lecteur français, PC de référence : SalamandraTA 7B (pack ukrainien) montré mais
+        // pas proposé ; MiLMMT-46 4B est le meilleur.
+        TEST_READER.with(|c| c.set(Some("fr")));
+        let h = pc(16 * GIB, Some(69 * GIB / 10), Some(56 * GIB / 10), 40 * GIB, true);
+        let o = offer_with(&h, &|_| false, &none, &Trials::new());
+        assert_eq!(
+            ids(&o),
+            vec![("eurollm-1.7b", Some(Place::Gpu)), ("milmmt-46-4b", Some(Place::Gpu)), ("salamandrata-7b", None)]
+        );
+        assert_eq!(o.high, Some("milmmt-46-4b"));
+        assert!(o.entry("salamandrata-7b").unwrap().reason.contains("lisent l'ukrainien"), "{}", o.entry("salamandrata-7b").unwrap().reason);
+        // Lecteur ukrainien : SalamandraTA d'abord (même qualité, pack de sa langue).
+        TEST_READER.with(|c| c.set(Some("uk")));
+        let o = offer_with(&h, &|_| false, &none, &Trials::new());
+        assert_eq!(o.high, Some("salamandrata-7b"));
+        assert!(serves(&ON_DEMAND[1], Some("uk")) && !serves(&ON_DEMAND[1], Some("pl")) && !serves(&ON_DEMAND[1], None));
+        assert!(serves(&ON_DEMAND[0], None));
     }
 }

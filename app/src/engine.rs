@@ -126,6 +126,8 @@ pub const CTX_INSTANCE: u8 = 2;
 pub const CTX_RAID: u8 = 4;
 pub const CTX_AFK: u8 = 8;
 pub const CTX_LOCKED: u8 = 16;
+/// Écran de chargement (addon 0.17.0) : rien n'est dessiné sur le jeu jusqu'à sa fin.
+pub const CTX_LOADING: u8 = 32;
 
 /// Contexte reçu de l'addon : combat, instance, raid, absence, chat verrouillé. Reçu une fois :
 /// le joueur est en jeu (le premier modèle est choisi d'après la mémoire vidéo d'alors).

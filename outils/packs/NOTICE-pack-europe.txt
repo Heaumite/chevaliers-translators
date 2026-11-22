@@ -1,0 +1,26 @@
+Chevaliers Translators - Pack Europe 1
+======================================
+
+File: MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf
+
+Gemma is provided under and subject to the Gemma Terms of Use found at
+ai.google.dev/gemma/terms
+
+This file is a Model Derivative of Gemma 3:
+  - base model: Gemma 3 4B (Google);
+  - MiLMMT-46-4B-v1.0 (Xiaomi), a translation model trained from Gemma 3, published under the
+    Gemma Terms of Use: https://huggingface.co/xiaomi-research/MiLMMT-46-4B-v1.0;
+  - GGUF conversion by mradermacher (MiLMMT-46-4B-v1.0.Q8_0.gguf);
+  - modified by the Chevaliers Translators project: vocabulary restricted to European scripts
+    (Latin, Greek, Cyrillic, punctuation, symbols, emoji; 180,852 of 262,208 tokens), then
+    re-quantized to IQ4_XS with an importance matrix (llama.cpp b12211). The tools are in
+    https://github.com/Heaumite/chevaliers-translators (outils/pack_europe.py).
+
+Use of this file is subject to the use restrictions of the Gemma Terms of Use (section 3.2) and
+the Gemma Prohibited Use Policy (ai.google.dev/gemma/prohibited_use_policy). Anyone receiving
+this file is subject to those terms.
+
+---
+Ce fichier est un dérivé de Gemma 3, fourni selon les conditions d'utilisation de Gemma
+(ai.google.dev/gemma/terms), restrictions d'usage comprises. Modifié par Chevaliers Translators :
+vocabulaire limité aux écritures européennes, puis quantifié en IQ4_XS.

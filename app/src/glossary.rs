@@ -18,6 +18,12 @@ impl Entry {
     fn names_in(&self, lang: &str) -> Option<&Vec<String>> {
         self.names.iter().find(|(l, v)| l == lang && !v.is_empty()).map(|(_, v)| v)
     }
+
+    /// Écritures pour un lecteur (0.17.1) : sa langue, ou l'anglais quand WoW n'existe pas dans
+    /// sa langue (polonais, tchèque...) : son client affiche les noms anglais.
+    fn names_for(&self, reader: &str) -> Option<&Vec<String>> {
+        self.names_in(reader).or_else(|| (crate::lang::game_names_lang(reader) != reader).then(|| self.names_in("en")).flatten())
+    }
 }
 
 pub struct Glossary {
@@ -207,7 +213,7 @@ pub fn protect(text: &str, src: &str, tgt: &str) -> Protected {
         let len = written(name).len();
         while let Some(at) = find_form(&out, name, from) {
             let original = out[at..at + len].to_string();
-            let shown = e.names_in(tgt).map_or(original, |v| written(&v[0]).to_string());
+            let shown = e.names_for(tgt).map_or(original, |v| written(&v[0]).to_string());
             p.slots.push(Slot { restore: shown, essential: false, fit_case: true });
             let mark = format!("[{}]", p.slots.len());
             out.replace_range(at..at + len, &mark);
@@ -233,7 +239,7 @@ pub fn protect(text: &str, src: &str, tgt: &str) -> Protected {
         let len = written(word).len();
         while let Some(at) = find_form(&out, word, from) {
             let original = out[at..at + len].to_string();
-            let shown = e.names_in(tgt).map_or(original, |v| written(&v[0]).to_string());
+            let shown = e.names_for(tgt).map_or(original, |v| written(&v[0]).to_string());
             p.slots.push(Slot { restore: shown, essential: false, fit_case: true });
             let mark = format!("[{}]", p.slots.len());
             out.replace_range(at..at + len, &mark);
@@ -354,6 +360,10 @@ mod tests {
         // Nom inconnu dans la langue du lecteur : l'original reste.
         let p = protect("Quelqu'un pour Repaire d'Onyxia ?", "fr", "it");
         assert_eq!(restore("Qualcuno per [1]?", &p), "Qualcuno per Repaire d'Onyxia?");
+        // Lecteur polonais (WoW n'existe pas en polonais, 0.17.1) : les noms anglais de son
+        // client, et le jargon anglais (« MP » français devient « PST »).
+        let p = protect("MP moi pour Cœur du Magma", "fr", "pl");
+        assert_eq!(restore("[2] mnie na [1]", &p), "PST mnie na Molten Core");
         // Mots entiers seulement : « tanker » ou « Mortemines » dans un mot plus long ne bougent pas.
         assert_eq!(protect("je vais tanker", "fr", "en").text, "je vais tanker");
         // Icônes et marques de raid.

@@ -305,7 +305,9 @@ pub fn parse_markup(text: &str, base: Rgb) -> Vec<Item> {
                     continue;
                 }
                 'K' => {
-                    for q in "???".chars() {
+                    // Nom Battle.net que le jeu cache aux addons ; l'addon met le BattleTag à la
+                    // place quand il le peut (0.17.0), sinon : « Battle.net ».
+                    for q in "Battle.net".chars() {
                         out.push(Item::Char(q, cur));
                     }
                     i = find(i + 2, '|', 'k').map_or(ch.len(), |j| j + 2);
@@ -1381,6 +1383,16 @@ impl Mirror {
         true
     }
 
+    /// Nouvelle session de l'addon (/reload, reconnexion ; 0.17.1) : ses numéros de ligne
+    /// repartent du début. Les textes de la session d'avant sont oubliés : une ligne dont le
+    /// texte n'était pas encore arrivé (trame manquée) montrait sinon un ancien message qui avait
+    /// le même numéro (« mes anciens messages de guilde ressortent »).
+    pub fn forget_lines(&mut self) {
+        self.lines.clear();
+        self.line_first.clear();
+        self.dirty_all();
+    }
+
     /// Tout est à redessiner, et à remontrer (fenêtres cachées entre-temps).
     #[cfg_attr(not(windows), allow(dead_code))]
     pub fn redraw_all(&mut self) {
@@ -1632,6 +1644,12 @@ impl Mirror {
             self.copied = None;
             self.dirty_all();
         }
+        // Lignes qu'aucune fenêtre ne montre plus, arrivées il y a plus de 30 min : oubliées
+        // (0.17.1 ; elles restaient tant que l'application tournait).
+        let shown: std::collections::HashSet<u16> = self.frames.values().flat_map(|f| f.view.lines.iter().map(|(l, _)| *l)).collect();
+        self.line_first.retain(|id, t| shown.contains(id) || now.saturating_duration_since(*t) < Duration::from_secs(1800));
+        let first = &self.line_first;
+        self.lines.retain(|id, _| first.contains_key(id) || shown.contains(id));
         let known: Vec<u16> = self.lines.keys().copied().collect();
         self.line_first.retain(|id, _| known.contains(id));
         let mut ups = Vec::new();
@@ -1804,7 +1822,7 @@ pub mod tests {
         assert_eq!(items[2], Item::Char('[', [0xa3, 0x35, 0xee]));
         assert_eq!(items[13], Item::Char('b', w));
         assert_eq!(s(&parse_markup("x |TInterface\\Icon:0|t y || z|nw", w)), "x # y | z/w");
-        assert_eq!(s(&parse_markup("|Kq12|k dit", w)), "??? dit");
+        assert_eq!(s(&parse_markup("|Kq12|k dit", w)), "Battle.net dit");
         assert_eq!(s(&parse_markup("3 |4objet:objets; |cnGREEN_FONT_COLOR:ok|r", w)), "3 objet ok");
         assert_eq!(parse_markup("|cnGREEN_FONT_COLOR:o|r", w)[0], Item::Char('o', [25, 255, 25]));
         // Retail : qualité des objets et couleurs de classe nommées (0.12.3).
@@ -1890,6 +1908,27 @@ pub mod tests {
         m.on_view(parse_view(&[1, 0], t0).unwrap());
         let ups = m.tick(t0);
         assert!(ups.len() == 1 && ups[0].canvas.is_none());
+    }
+
+    #[test]
+    fn new_addon_session_and_old_hidden_lines_are_forgotten() {
+        // 0.17.1 : après un /reload, les numéros de ligne repartent du début ; la ligne 1 de la
+        // session d'avant ne doit plus pouvoir s'afficher à la place de la nouvelle.
+        let t0 = Instant::now();
+        let mut m = Mirror::new();
+        m.on_line(1, "FFFFFF\u{1F}[Guilde] Narniac : ancien message");
+        m.on_line(2, "FFFFFF\u{1F}[Guilde] Hans : Hallo");
+        assert!(m.lines.contains_key(&1));
+        m.forget_lines();
+        assert!(m.lines.is_empty() && m.line_first.is_empty());
+        // Lignes plus montrées par aucune fenêtre depuis 30 min : oubliées ; une ligne encore
+        // montrée reste.
+        m.on_line(3, "FFFFFF\u{1F}vieille ligne");
+        m.on_line(4, "FFFFFF\u{1F}ligne affichée");
+        let p = view_payload(1, FLAG_VISIBLE, [10, 20, 300, 80], "fonts/arialn.ttf", &[(4, 0)]);
+        m.on_view(parse_view(&p, t0).unwrap());
+        m.tick(t0 + Duration::from_secs(1801));
+        assert!(!m.lines.contains_key(&3) && m.lines.contains_key(&4));
     }
 
     #[test]

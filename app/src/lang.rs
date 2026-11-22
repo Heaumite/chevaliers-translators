@@ -426,6 +426,62 @@ pub fn from_locale(locale: &str) -> Option<&'static str> {
     LANGS.iter().find(|l| **l == code).copied()
 }
 
+/// Langues du projet dans lesquelles WoW existe (choix du client : texte du jeu, noms des
+/// donjons et des lieux). Les 16 autres langues du projet jouent sur un client en anglais (ou
+/// dans une langue voisine).
+pub const WOW_LANGS: &[&str] = &["en", "fr", "de", "es", "it", "ru", "pt"];
+
+/// Code de langue à partir d'un nom de langue Windows (BCP 47 : « pl-PL », « sr-Latn-RS »,
+/// « nb-NO »). Le norvégien bokmål et le nynorsk comptent pour le norvégien.
+pub fn from_bcp47(name: &str) -> Option<&'static str> {
+    let head = name.split(['-', '_']).next()?.to_lowercase();
+    let code = match head.as_str() {
+        "nb" | "nn" => "no",
+        h => h,
+    };
+    LANGS.iter().find(|l| **l == code).copied()
+}
+
+/// Langue de lecture du joueur (0.17.1) : celle du client de WoW, sauf si Windows est réglé
+/// dans une langue du projet qui n'existe pas dans WoW (polonais, néerlandais, tchèque...) : le
+/// joueur joue alors faute de mieux sur un client en anglais, et lit sa langue. Rend la langue
+/// et d'où elle vient.
+pub fn reader_lang(client_locale: &str, windows: Option<&'static str>) -> (&'static str, &'static str) {
+    let wow = from_locale(client_locale);
+    match windows {
+        Some(w) if !WOW_LANGS.contains(&w) && wow != Some(w) => (w, "langue de Windows (absente de WoW)"),
+        _ => (wow.unwrap_or("en"), "langue du client de WoW"),
+    }
+}
+
+/// Langue des noms du jeu pour un lecteur : la sienne quand WoW existe dans sa langue, sinon
+/// l'anglais (son client affiche les noms anglais).
+pub fn game_names_lang(reader: &str) -> &str {
+    if WOW_LANGS.contains(&reader) {
+        reader
+    } else {
+        "en"
+    }
+}
+
+/// Langue d'affichage de Windows (celle des menus), si c'est une langue du projet.
+#[cfg(windows)]
+pub fn windows_lang() -> Option<&'static str> {
+    use windows_sys::Win32::Globalization::{GetUserDefaultUILanguage, LCIDToLocaleName};
+    let mut buf = [0u16; 85];
+    // SAFETY : tampon de 85 caractères (LOCALE_NAME_MAX_LENGTH), longueur passée.
+    let n = unsafe { LCIDToLocaleName(GetUserDefaultUILanguage() as u32, buf.as_mut_ptr(), buf.len() as i32, 0) };
+    if n <= 1 {
+        return None;
+    }
+    from_bcp47(&String::from_utf16_lossy(&buf[..(n - 1) as usize]))
+}
+
+#[cfg(not(windows))]
+pub fn windows_lang() -> Option<&'static str> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,6 +564,29 @@ mod tests {
         assert_eq!(from_locale("frFR"), Some("fr"));
         assert_eq!(from_locale("enGB"), Some("en"));
         assert_eq!(from_locale("zhCN"), None);
+    }
+
+    /// Langue de lecture : le client de WoW, sauf une langue de Windows absente de WoW.
+    #[test]
+    fn reader_language_from_wow_client_or_windows() {
+        assert_eq!(from_bcp47("pl-PL"), Some("pl"));
+        assert_eq!(from_bcp47("sr-Latn-RS"), Some("sr"));
+        assert_eq!(from_bcp47("nb-NO"), Some("no"));
+        assert_eq!(from_bcp47("nn-NO"), Some("no"));
+        assert_eq!(from_bcp47("ja-JP"), None);
+        // Windows polonais, WoW en anglais : polonais.
+        assert_eq!(reader_lang("enUS", Some("pl")).0, "pl");
+        // Windows polonais, WoW en allemand : polonais (le polonais n'existe pas dans WoW).
+        assert_eq!(reader_lang("deDE", Some("pl")).0, "pl");
+        // Windows en anglais, WoW en français : français.
+        assert_eq!(reader_lang("frFR", Some("en")).0, "fr");
+        // Windows en allemand, WoW en français : le client choisi dans WoW l'emporte.
+        assert_eq!(reader_lang("frFR", Some("de")).0, "fr");
+        // Windows japonais (hors projet) ou inconnu : le client de WoW.
+        assert_eq!(reader_lang("esES", None).0, "es");
+        assert_eq!(reader_lang("koKR", None).0, "en");
+        assert_eq!(game_names_lang("pl"), "en");
+        assert_eq!(game_names_lang("ru"), "ru");
     }
 }
 #[cfg(test)]

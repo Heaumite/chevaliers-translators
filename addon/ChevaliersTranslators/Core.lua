@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.16.7"
+CT.VERSION = "0.17.1"
 
 local floor = math.floor
 local format = string.format
@@ -58,6 +58,8 @@ local function ContextFlags()
   local okA, afk = pcall(function() return UnitIsAFK and UnitIsAFK("player") end)
   if okA and Truthy(afk) then f = f + 8 end
   if InLockdown() then f = f + 16 end
+  -- Écran de chargement (0.17.0) : l'application ne dessine plus rien sur le jeu.
+  if CT.loading then f = f + 32 end
   return f
 end
 CT.ContextFlags = ContextFlags
@@ -119,6 +121,19 @@ function CT.SendCommand(cmd)
   local text = cmd .. "\t" .. floor(GetTime() * 1000) % 100000000
   local p = { string.byte(text, 1, math.min(#text, CT.MaxPayload())) }
   for _ = 1, 3 do CT.Enqueue(CT.FRAME_CMD, p, #p) end
+end
+
+-- Clic droit sur le pseudo d'un joueur dans le chat (0.17.0) : l'application prend la langue de
+-- ses messages pour l'envoi traduit (Trad:AUTO). Le menu du jeu s'ouvre comme d'habitude ; le
+-- clic gauche ouvre le chuchotement, comme toujours.
+function CT.OnPlayerLink(link, button)
+  if button ~= "RightButton" or type(link) ~= "string" then return end
+  if issecretvalue and issecretvalue(link) then return end
+  local name = link:match("^player:([^:]+)")
+  if name and name ~= "" and chatOn then CT.SendCommand("langue " .. name) end
+end
+if hooksecurefunc and type(SetItemRef) == "function" then
+  hooksecurefunc("SetItemRef", function(link, _, button) pcall(CT.OnPlayerLink, link, button) end)
 end
 
 -- Addons incompatibles avec Chevaliers Translators (0.16.3), signalés à la connexion et dans le
@@ -255,7 +270,12 @@ end
 -- Partagés avec Mirror.lua et Bubbles.lua.
 CT.Print, CT.InLockdown, CT.MaxPayload, CT.Enqueue = Print, InLockdown, MaxPayload, Enqueue
 
-local aliveBuf, waitBuf = { 1, 0, 0 }, { 0 }
+-- Session (0.17.1) : un nombre de 1 à 255 tiré à chaque chargement de l'interface (/reload,
+-- connexion) ; l'application oublie alors les lignes du miroir de la session précédente, dont les
+-- numéros repartent du début.
+local SESSION = (floor(GetTime() * 1000) + floor((time and time() or 0) * 7)) % 255 + 1
+CT.SESSION = SESSION
+local aliveBuf, waitBuf = { 1, 0, 0, SESSION }, { 0 }
 -- Bandeau immobile quand il n'y a rien à envoyer (0.13.3) : la dernière trame de vie reste à
 -- l'écran au lieu de clignoter ; l'application la voit toujours, c'est son signe de vie.
 -- -1 : rien d'immobile ; -2 : signal d'attente ; sinon les drapeaux de la trame de vie affichée.
@@ -343,7 +363,7 @@ local function IdleItem()
     aliveBuf[2] = f
     aliveBuf[3] = gfxGen
     rollingSeq = (rollingSeq + 1) % 65536
-    return { t = CT.FRAME_ALIVE, seq = rollingSeq, p = aliveBuf, n = 3 }
+    return { t = CT.FRAME_ALIVE, seq = rollingSeq, p = aliveBuf, n = 4 }
   end
   if not chatOn and CT.waiting then
     if idleShown == -2 then return nil end
@@ -355,6 +375,29 @@ local function IdleItem()
   CT.Banner:Hide()
   return nil
 end
+
+-- Écran de chargement (0.17.0) : signalé en priorité dès que le personnage quitte le monde
+-- (avant que l'écran de chargement recouvre le jeu), levé à sa fin. Deux trames : une trame ne
+-- reste que quelques images à l'écran.
+local function SendContextNow()
+  local p = { 1, ContextFlags(), gfxGen, SESSION }
+  EnqueuePrio(CT.FRAME_ALIVE, p, 4)
+  EnqueuePrio(CT.FRAME_ALIVE, p, 4)
+  idleShown = -1
+end
+local loadWatch = CreateFrame("Frame")
+for _, ev in ipairs({ "PLAYER_LEAVING_WORLD", "LOADING_SCREEN_ENABLED", "LOADING_SCREEN_DISABLED", "PLAYER_ENTERING_WORLD" }) do
+  pcall(loadWatch.RegisterEvent, loadWatch, ev)
+end
+loadWatch:SetScript("OnEvent", function(_, event)
+  local was = CT.loading
+  if event == "PLAYER_LEAVING_WORLD" or event == "LOADING_SCREEN_ENABLED" then
+    CT.loading = true
+  elseif event == "LOADING_SCREEN_DISABLED" then
+    CT.loading = false
+  end
+  if CT.loading ~= was and chatOn then SendContextNow() end
+end)
 
 local driver = CreateFrame("Frame")
 driver:SetScript("OnUpdate", function()
@@ -681,6 +724,16 @@ local function SendRequest(id, kind, langId, chatType, target, text)
   CT.ChatFragments(id, 0, meta, text, MaxPayload(), function(p, len) EnqueuePrio(CT.FRAME_SEND, p, len) end)
 end
 
+-- Début du code de couleur collé devant un lien qui commence en `i` : « |cAARRGGBB » ou, sur
+-- les clients récents, « |cnIQ4: » (0.17.0 : ce format n'était pas reconnu, le lien remis avant
+-- l'envoi perdait sa couleur et partait cassé : « Invalid escape code in chat message »).
+local function ColorStart(text, i)
+  local from = math.max(1, i - 48)
+  local pre = text:sub(from, i - 1)
+  local p = pre:find("|cn[%w_]+:$") or pre:find("|c%x%x%x%x%x%x%x%x$")
+  return p and (from + p - 1) or i
+end
+
 -- Liens d'objets, de sorts, de quêtes d'un message, dans l'ordre (même découpe que l'application).
 local function Links(text)
   local out, from = {}, 1
@@ -691,8 +744,7 @@ local function Links(text)
     if not a then break end
     local b = text:find("|h", a + 2, true)
     if not b then break end
-    local start = i
-    if i > 10 and text:sub(i - 10, i - 9) == "|c" and text:sub(i - 8, i - 1):match("^%x+$") then start = i - 10 end
+    local start = math.max(ColorStart(text, i), from)
     local stop = b + 1
     if text:sub(stop + 1, stop + 2) == "|r" then stop = stop + 2 end
     out[#out + 1] = text:sub(start, stop)
@@ -701,6 +753,32 @@ local function Links(text)
   return out
 end
 CT.Links = Links
+
+-- Garde-fou avant l'envoi (0.17.0) : « | » isolé collé devant un lien (« ||Hitem » refusé par le
+-- jeu), ou suivi d'un caractère qui n'ouvre aucun code : retiré. Le message part toujours.
+function CT.SafeChat(text)
+  text = text:gsub("|+(|[cH])", "%1")
+  local out, i, n = {}, 1, #text
+  while i <= n do
+    local c = text:sub(i, i)
+    if c == "|" then
+      local d = text:sub(i + 1, i + 1)
+      if d == "|" then
+        out[#out + 1] = "||"
+        i = i + 2
+      elseif d ~= "" and ("cCrRhHtTaAnNkK"):find(d, 1, true) then
+        out[#out + 1] = c
+        i = i + 1
+      else
+        i = i + 1
+      end
+    else
+      out[#out + 1] = c
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
 
 -- Deux fois : une trame ne reste que quelques images à l'écran.
 local function SendState(kind, id)
@@ -819,6 +897,7 @@ local function OnPreSend(editBox)
       if text:find("{%d+}") then
         local links = Links(s.text)
         local out = text:gsub("{(%d+)}", function(n) return links[tonumber(n)] end)
+        out = CT.SafeChat(out)
         if out ~= text then editBox:SetText(out) end
       end
       awaiting = nil
@@ -1116,11 +1195,24 @@ local function AddTradButton(eb, cf)
   eb.ctSend = s
 end
 
+-- Fenêtres de chat, temporaires comprises (0.17.1) : les chuchotements et les discussions
+-- Battle.net ouverts dans un nouvel onglet (ChatFrame11 et suivantes) n'avaient pas les boutons.
 local function InstallTrad()
-  for i = 1, (NUM_CHAT_WINDOWS or 10) do
-    local ok, err = pcall(AddTradButton, _G["ChatFrame" .. i .. "EditBox"], _G["ChatFrame" .. i])
-    if not ok then Print("|cffff4040Bouton Trad : " .. tostring(err) .. "|r") return end
+  local C = Constants and Constants.ChatFrameConstants
+  local count = (C and C.MaxChatWindows or NUM_CHAT_WINDOWS or 10) + 20
+  for i = 1, count do
+    local eb, cf = _G["ChatFrame" .. i .. "EditBox"], _G["ChatFrame" .. i]
+    if eb and cf then
+      local ok, err = pcall(AddTradButton, eb, cf)
+      if not ok then Print("|cffff4040Bouton Trad : " .. tostring(err) .. "|r") return end
+    end
   end
+end
+CT.InstallTrad = InstallTrad
+
+-- Nouvel onglet de chuchotement ou de discussion Battle.net : ses boutons aussitôt.
+if hooksecurefunc and type(FCF_OpenTemporaryWindow) == "function" then
+  hooksecurefunc("FCF_OpenTemporaryWindow", function() pcall(InstallTrad) end)
 end
 
 -- Police et position du chat (mesures pour le chat miroir) -------------------
@@ -1388,7 +1480,7 @@ SlashCmdList.CHEVALIERS = function(msg)
     if not ok then Print("|cffff4040Erreur diag : " .. tostring(err) .. "|r") end
   elseif cmd == "block" then
     local B = tonumber(a)
-    if not B or B < 2 or B > 16 then Print("Taille de bloc entre 2 et 16 px.") return end
+    if not B or B < 1 or B > 16 or B ~= floor(B) then Print("Taille de bloc entre 1 et 16 px (2 par défaut).") return end
     ChevaliersTranslatorsDB.block = B
     CT.Banner.block = B
     CT.Banner:Layout()
@@ -1457,7 +1549,7 @@ boot:SetScript("OnEvent", function(self, event)
     -- Trad commence toujours en automatique.
     InstallS3()
     InstallTrad()
-    if not CT.Banner:Init(ChevaliersTranslatorsDB.block or 4) then
+    if not CT.Banner:Init(ChevaliersTranslatorsDB.block or 2) then
       Print("|cffff4040Bandeau indisponible : " .. tostring(CT.Banner.error) .. "|r")
       return
     end

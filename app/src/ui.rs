@@ -831,43 +831,43 @@ mod tests {
         assert_eq!(code, 200);
         assert!(page.contains("const JETON = \"jeton\""));
         assert_eq!(get(port, "/api/etat", "evil.example:80", None, "GET").0, 403);
-        // État : 4B = HIGH (7B a fait planter le jeu sur la carte), low actif par défaut.
+        // État : 4B = HIGH (le 7B est le pack des lecteurs ukrainiens, 0.17.1), low actif par défaut.
         let (_, body) = get(port, "/api/etat", &host, None, "GET");
         let v: Value = serde_json::from_str(&body).unwrap();
         let ids: Vec<&str> = v["modeles"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["eurollm-1.7b", "translategemma-4b", "salamandrata-7b"]);
+        assert_eq!(ids, ["eurollm-1.7b", "milmmt-46-4b", "salamandrata-7b"]);
         assert_eq!(v["modeles"][1]["high"], true);
         // Estimation : 4B conseillé et premier de la chaîne, sur la carte puis sur le
         // processeur, puis le pack low.
         assert_eq!(v["modeles"][1]["conseille"], true);
         assert_eq!(v["modeles"][1]["rang"], 1);
-        assert_eq!(v["modeles"][1]["estimation"]["niveau"], "sûr");
-        assert_eq!(v["estimation"]["chaine"][1], "TranslateGemma 4B sur le processeur");
+        assert_eq!(v["modeles"][1]["estimation"]["niveau"], "probable");
+        assert_eq!(v["estimation"]["chaine"][1], "MiLMMT-46 4B sur le processeur");
         assert!(v["estimation"]["chaine"][2].as_str().unwrap().starts_with("EuroLLM 1.7B"));
         assert_eq!(v["modeles"][2]["conseille"], false);
         assert_eq!(v["modeles"][0]["actif"], true);
         assert_eq!(v["modeles"][2]["lieu"], Value::Null);
-        assert!(v["modeles"][2]["raison"].as_str().unwrap().contains("a fait planter le jeu"));
+        assert!(v["modeles"][2]["raison"].as_str().unwrap().contains("lisent l'ukrainien"));
         // Action sans jeton : refusée ; modèle non proposé : erreur expliquée.
-        assert_eq!(get(port, "/api/telecharger?id=translategemma-4b", &host, None, "POST").0, 403);
+        assert_eq!(get(port, "/api/telecharger?id=milmmt-46-4b", &host, None, "POST").0, 403);
         let (code, err) = get(port, "/api/telecharger?id=salamandrata-7b", &host, Some("jeton"), "POST");
         assert_eq!(code, 400);
         assert!(err.contains("n'est pas proposé"));
         // Activer avant téléchargement : refusé ; télécharger puis activer.
-        assert_eq!(get(port, "/api/activer?id=translategemma-4b", &host, Some("jeton"), "POST").0, 400);
-        assert_eq!(get(port, "/api/telecharger?id=translategemma-4b", &host, Some("jeton"), "POST").0, 200);
+        assert_eq!(get(port, "/api/activer?id=milmmt-46-4b", &host, Some("jeton"), "POST").0, 400);
+        assert_eq!(get(port, "/api/telecharger?id=milmmt-46-4b", &host, Some("jeton"), "POST").0, 200);
         let t0 = Instant::now();
-        while !state.lock().unwrap().demo_installed.contains("translategemma-4b") {
+        while !state.lock().unwrap().demo_installed.contains("milmmt-46-4b") {
             assert!(t0.elapsed() < Duration::from_secs(60));
             std::thread::sleep(Duration::from_millis(100));
         }
-        assert_eq!(get(port, "/api/activer?id=translategemma-4b", &host, Some("jeton"), "POST").0, 200);
+        assert_eq!(get(port, "/api/activer?id=milmmt-46-4b", &host, Some("jeton"), "POST").0, 200);
         let (_, body) = get(port, "/api/etat", &host, None, "GET");
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["modeles"][1]["actif"], true);
         assert_eq!(v["modeles"][0]["actif"], false);
         // Supprimer le modèle actif : retour au pack low ; le pack low ne se supprime pas.
-        assert_eq!(get(port, "/api/supprimer?id=translategemma-4b", &host, Some("jeton"), "POST").0, 200);
+        assert_eq!(get(port, "/api/supprimer?id=milmmt-46-4b", &host, Some("jeton"), "POST").0, 200);
         assert_eq!(get(port, "/api/supprimer?id=eurollm-1.7b", &host, Some("jeton"), "POST").0, 400);
         let (_, body) = get(port, "/api/etat", &host, None, "GET");
         let v: Value = serde_json::from_str(&body).unwrap();

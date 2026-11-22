@@ -197,6 +197,9 @@ mod app {
         for name in ct::modeles_maj::apply_pending(&catalog::models_dir()) {
             ct::say!("[modèles] nouvelle version de {name} mise en place");
         }
+        for name in catalog::remove_retired(&catalog::models_dir()) {
+            ct::say!("[modèles] {name} : ancien fichier effacé");
+        }
         ct::modeles_maj::start_checker(catalog::models_dir(), || !capture_win::wow_windows().is_empty());
         let tray = match Tray::new("En attente de World of Warcraft") {
             Ok(t) => t,
@@ -488,11 +491,15 @@ mod app {
                     ensure_addon(tray, &root, &flavor);
                 }
                 let locale = fonts::client_locale_of(&root, &flavor);
-                let client = lang::from_locale(&locale).unwrap_or("en");
+                // Langue de lecture (0.17.1) : le client de WoW, ou la langue de Windows quand
+                // WoW n'existe pas dans celle-ci (polonais, tchèque, néerlandais...).
+                let (client, from) = lang::reader_lang(&locale, lang::windows_lang());
+                // Retenue pour choisir les modèles (pack de sa langue) au prochain plan.
+                catalog::set_reader(client);
                 let label = flavor_label(&flavor);
                 if seen.insert(h as isize) {
                     ct::say!(
-                        "{} WoW {label} ouvert ({}, client {locale}) : traduction vers {}",
+                        "{} WoW {label} ouvert ({}, client {locale}) : traduction vers {} ({from})",
                         journal::clock(),
                         root.display(),
                         client.to_uppercase()
@@ -584,6 +591,9 @@ mod app {
                 for name in ct::modeles_maj::apply_pending(&catalog::models_dir()) {
                     ct::say!("[modèles] nouvelle version de {name} mise en place");
                     tray.notify("Modèle mis à jour", &format!("Nouvelle version de {name} en place : elle servira à la prochaine partie."), false);
+                }
+                for name in catalog::remove_retired(&catalog::models_dir()) {
+                    ct::say!("[modèles] {name} : ancien fichier effacé");
                 }
                 *last_error = None;
             }

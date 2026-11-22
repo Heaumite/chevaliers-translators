@@ -131,6 +131,9 @@ pub enum Format {
     Salamandra,
     /// Modèle EuroLLM : consigne du modèle, gabarit de discussion du fichier GGUF.
     EuroLlm,
+    /// Modèle MiLMMT-46 (Xiaomi, 0.17.1) : consigne de sa fiche, en complétion simple (sans
+    /// gabarit de discussion), une ligne de réponse.
+    Milmmt,
     /// Autre modèle de discussion : consigne générique.
     Chat,
 }
@@ -144,6 +147,8 @@ impl Format {
             Format::Salamandra
         } else if n.contains("eurollm") {
             Format::EuroLlm
+        } else if n.contains("milmmt") {
+            Format::Milmmt
         } else {
             Format::Chat
         }
@@ -153,6 +158,7 @@ impl Format {
             Format::TranslateGemma => "TranslateGemma",
             Format::Salamandra => "SalamandraTA",
             Format::EuroLlm => "EuroLLM",
+            Format::Milmmt => "MiLMMT-46",
             Format::Chat => "discussion générique",
         }
     }
@@ -186,6 +192,15 @@ pub fn request(format: Format, c: &Case) -> (&'static str, Value) {
             (
                 "/v1/chat/completions",
                 json!({ "messages": [{ "role": "user", "content": user }], "max_tokens": 200, "temperature": 0.0, "cache_prompt": true }),
+            )
+        }
+        Format::Milmmt => {
+            // Message d'une ligne : la réponse s'arrête au retour à la ligne.
+            let text = c.text.replace(['\n', '\r'], " ");
+            let prompt = format!("Translate this from {s} to {t}:\n{s}: {text}\n{t}:");
+            (
+                "/completion",
+                json!({ "prompt": prompt, "n_predict": 200, "temperature": 0.0, "stop": ["\n"], "cache_prompt": true }),
             )
         }
         Format::Chat => {
@@ -1508,6 +1523,12 @@ mod tests {
             b["messages"][0]["content"],
             "Translate the following German source text to Polish:\nGerman: Danke!\nPolish: "
         );
+        // MiLMMT-46 (0.17.1) : consigne de sa fiche, complétion simple, une ligne.
+        assert_eq!(Format::guess(Path::new("MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf")), Format::Milmmt);
+        let (p, b) = request(Format::Milmmt, &c);
+        assert_eq!(p, "/completion");
+        assert_eq!(b["prompt"], "Translate this from German to Polish:\nGerman: Danke!\nPolish:");
+        assert_eq!(b["stop"][0], "\n");
     }
 
     #[test]

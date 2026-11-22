@@ -57,14 +57,17 @@ pub fn propose(
     if obs.minutes < MIN_MINUTES {
         return None;
     }
-    let q0 = active.map_or(0, |a| a.model.quality);
+    // Rang pour la langue de lecture (0.17.1) : à qualité égale, le pack de sa langue d'abord.
+    let reader = plan.conditions.reader;
+    let rank = |m: &Model| catalog::rank(m, reader);
+    let q0 = active.map(|a| rank(a.model));
     let in_chain = |c: &Candidate| plan.chain.iter().any(|&i| std::ptr::eq(&plan.candidates[i], c));
     let mut list: Vec<&Candidate> = plan
         .candidates
         .iter()
-        .filter(|c| c.model.quality > q0 && c.possible && !in_chain(c))
+        .filter(|c| Some(rank(c.model)) > q0 && c.possible && !in_chain(c))
         .collect();
-    list.sort_by(|a, b| b.model.quality.cmp(&a.model.quality).then((a.place != Place::Gpu).cmp(&(b.place != Place::Gpu))));
+    list.sort_by(|a, b| rank(b.model).cmp(&rank(a.model)).then((a.place != Place::Gpu).cmp(&(b.place != Place::Gpu))));
     for c in list {
         let key = format!("{}:{}", c.model.id, c.place.code());
         if refused(&key) {
@@ -177,7 +180,8 @@ fn write_lines(path: &Path, header: &str, rows: &[Vec<String>]) {
 /// Modèle choisi par le joueur (proposition acceptée) pour ces conditions.
 pub fn choice_in(path: &Path, key: &str) -> Option<(&'static Model, Place)> {
     lines(path).into_iter().find(|r| r.len() >= 3 && r[0] == key).and_then(|r| {
-        let m = catalog::by_id(&r[1])?;
+        // Modèle retiré depuis (0.17.1) : le choix passe à son remplaçant.
+        let m = catalog::by_id(catalog::current_id(&r[1]))?;
         let p = if r[2] == "cpu" { Place::Cpu } else { Place::Gpu };
         Some((m, p))
     })
@@ -248,49 +252,57 @@ mod tests {
 
     #[test]
     fn measured_room_unlocks_a_better_model() {
-        // RTX 3060 12 Go : le 7B ne tient pas à côté de WoW compté 7 Go (pas dans la chaîne).
+        // RTX 3060 12 Go, WoW sans plafond : le 4B ne suivrait que 17 messages par minute (il en
+        // faut 30, 0.17.1) : pack low. Le chat réellement vu (10 messages par minute au plus) et la
+        // place mesurée en jeu le rendent possible.
         let h = crate::plan::tests_support::pc("NVIDIA GeForce RTX 3060", 0x10DE, 12, 6);
         let none = |_: &str| None;
         let p = estimate(&h, &none, &Trials::new(), Conditions::worst());
         let active = p.best();
-        assert_eq!(active.unwrap().model.id, "translategemma-4b");
+        assert_eq!(active.unwrap().model.id, "eurollm-1.7b");
         let all = |_: &Model| true;
         let no = |_: &str| false;
         // Trop peu de jeu observé : rien.
         assert!(propose(&p, active, &obs(10.0, 9 * GIB, 0.0, 4 * GIB), &no, &all).is_none());
-        // 7B hors de la chaîne (trop peu de chat suivi d'après l'estimation). 45 min, dont 15 en
-        // instance, WoW léger : 5,2 Go de place au pire moment ; le 7B prend 4,3 Go, plus le seuil
-        // de saturation (0,5 Go) et la marge des mesures (0,25 Go) -> il tient.
-        let pr = propose(&p, active, &obs(45.0, 52 * GIB / 10, 15.0, 3 * GIB), &no, &all).expect("proposition");
-        assert_eq!((pr.model.id, pr.place), ("salamandrata-7b", Place::Gpu));
+        // 45 min, dont 15 en instance, WoW léger : 3,2 Go de place au pire moment ; le 4B prend
+        // 2,2 Go, plus le seuil de saturation (0,5 Go) et la marge des mesures (0,25 Go) -> il tient.
+        let pr = propose(&p, active, &obs(45.0, 32 * GIB / 10, 15.0, 3 * GIB), &no, &all).expect("proposition");
+        assert_eq!((pr.model.id, pr.place), ("milmmt-46-4b", Place::Gpu));
         assert!(pr.reason.contains("45 min de jeu, dont 15 min en instance"), "{}", pr.reason);
         assert!(pr.warning.contains("plantages"), "{}", pr.warning);
         assert!(pr.download.is_none());
         // Sans instance vue : marge des mesures de 1 Go, il ne tient plus.
-        let calm = propose(&p, active, &obs(45.0, 52 * GIB / 10, 0.0, 3 * GIB), &no, &all);
+        let calm = propose(&p, active, &obs(45.0, 32 * GIB / 10, 0.0, 3 * GIB), &no, &all);
         assert!(calm.is_none(), "{:?}", calm.map(|c| (c.model.id, c.place, c.footprint, c.reason)));
         // Refusé : plus proposé ; pas sur le PC : taille à télécharger.
-        let refused = |k: &str| k == "salamandrata-7b:gpu";
-        assert!(propose(&p, active, &obs(45.0, 52 * GIB / 10, 15.0, 3 * GIB), &refused, &all).is_none());
-        let missing = |m: &Model| m.id != "salamandrata-7b";
-        let pr = propose(&p, active, &obs(45.0, 52 * GIB / 10, 15.0, 3 * GIB), &no, &missing).unwrap();
+        let refused = |k: &str| k == "milmmt-46-4b:gpu";
+        assert!(propose(&p, active, &obs(45.0, 32 * GIB / 10, 15.0, 3 * GIB), &refused, &all).is_none());
+        let missing = |m: &Model| m.id != "milmmt-46-4b";
+        let pr = propose(&p, active, &obs(45.0, 32 * GIB / 10, 15.0, 3 * GIB), &no, &missing).unwrap();
         assert!(pr.download.is_some());
         let rows = panel_rows(&pr);
         assert!(rows.iter().any(|r| r.text.contains("/chevaliers monter")));
         assert!(rows.iter().any(|r| r.text.starts_with("Téléchargement de")));
+        // Lecteur ukrainien, assez de place pour le 7B : son pack passe avant le 4B.
+        let uk = estimate(&h, &none, &Trials::new(), Conditions { reader: Some("uk"), ..Conditions::worst() });
+        let pr = propose(&uk, uk.best(), &obs(45.0, 52 * GIB / 10, 15.0, 3 * GIB), &no, &all).unwrap();
+        assert_eq!((pr.model.id, pr.place), ("salamandrata-7b", Place::Gpu));
     }
 
     #[test]
     fn choices_and_refusals_are_kept_per_conditions() {
         let dir = std::env::temp_dir().join(format!("ct-conseil-{}", std::process::id()));
         let (c, r) = (dir.join("choix.tsv"), dir.join("refus.tsv"));
-        let m = catalog::by_id("translategemma-4b").unwrap();
+        let m = catalog::by_id("milmmt-46-4b").unwrap();
         set_choice_in(&c, "_retail_ 3840x1600", Some((m, Place::Gpu)));
         set_choice_in(&c, "_forever_ 3840x1600", Some((m, Place::Cpu)));
-        assert_eq!(choice_in(&c, "_retail_ 3840x1600").map(|(m, p)| (m.id, p)), Some(("translategemma-4b", Place::Gpu)));
+        assert_eq!(choice_in(&c, "_retail_ 3840x1600").map(|(m, p)| (m.id, p)), Some(("milmmt-46-4b", Place::Gpu)));
         set_choice_in(&c, "_retail_ 3840x1600", None);
         assert!(choice_in(&c, "_retail_ 3840x1600").is_none());
         assert_eq!(choice_in(&c, "_forever_ 3840x1600").map(|(_, p)| p), Some(Place::Cpu));
+        // Choix d'un modèle retiré depuis (TranslateGemma 4B, 0.17.1) : passe à son remplaçant.
+        std::fs::write(&c, "_retail_ 1920x1080\ttranslategemma-4b\tgpu\t1\n").unwrap();
+        assert_eq!(choice_in(&c, "_retail_ 1920x1080").map(|(m, p)| (m.id, p)), Some(("milmmt-46-4b", Place::Gpu)));
         refuse_in(&r, "_retail_ 3840x1600", "salamandrata-7b:gpu");
         refuse_in(&r, "_retail_ 3840x1600", "salamandrata-7b:gpu");
         assert!(refused_in(&r, "_retail_ 3840x1600", "salamandrata-7b:gpu"));
@@ -304,11 +316,11 @@ mod tests {
         let h = crate::plan::tests_support::pc("NVIDIA GeForce RTX 3060", 0x10DE, 12, 6);
         let none = |_: &str| None;
         let mut p = estimate(&h, &none, &Trials::new(), Conditions::worst());
-        let m7 = catalog::by_id("salamandrata-7b").unwrap();
-        assert!(apply_choice(&mut p, Some((m7, Place::Gpu))));
-        assert_eq!(p.best().unwrap().model.id, "salamandrata-7b");
+        let m4 = catalog::by_id("milmmt-46-4b").unwrap();
+        assert!(apply_choice(&mut p, Some((m4, Place::Gpu))));
+        assert_eq!(p.best().unwrap().model.id, "milmmt-46-4b");
         // Puis la chaîne de la règle, en repli.
-        assert_eq!(p.step(1).unwrap().model.id, "translategemma-4b");
+        assert_eq!(p.step(1).unwrap().model.id, "eurollm-1.7b");
         assert!(!apply_choice(&mut p, None));
     }
 }

@@ -1,8 +1,10 @@
-//! Fenêtres du chat miroir (Windows) : une fenêtre transparente par fenêtre de chat, toujours au
-//! premier plan (WoW en « fenêtré plein écran » l'est souvent aussi : un miroir qui ne l'était pas
-//! restait dessous, essai du 09/11/2026 en 0.12.0), traversée par la souris, absente de la barre des
-//! tâches, jamais active. Une autre application passée devant WoW : rien n'est dessiné sous elle
-//! (rectangle de la fenêtre active, `window_over_wow`). Son contenu est une image BGRA prémultipliée (UpdateLayeredWindow).
+//! Fenêtres du chat miroir (Windows) : une fenêtre transparente par fenêtre de chat, rangée juste
+//! au-dessus de la fenêtre de WoW dans l'ordre des fenêtres (0.17.0, `restack` ; avant : toujours
+//! au premier plan, et une autre application passée devant le chat laissait voir le miroir et le
+//! cache du bandeau par-dessus elle). Traversée par la souris, absente de la barre des tâches,
+//! jamais active. Une autre application passée devant WoW la recouvre comme elle recouvre le jeu ;
+//! sous la fenêtre active, rien n'est dessiné non plus (`window_over_wow`). Son contenu est une
+//! image BGRA prémultipliée (UpdateLayeredWindow).
 //! WoW doit être en mode « Fenêtré (plein écran) » : le plein écran exclusif masque
 //! toute fenêtre posée au-dessus.
 //!
@@ -30,7 +32,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     IDC_HAND, MA_NOACTIVATE, PM_REMOVE, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_LBUTTONDBLCLK,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WNDCLASSEXW,
     WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, SetWindowPos,
-    GetWindow, GetWindowRect, GW_HWNDNEXT, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+    GetWindow, GetWindowLongPtrW, GetWindowRect, GWL_EXSTYLE, GW_HWNDNEXT, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOP,
+    HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
 };
 
 use crate::mirror::{Canvas, Hit};
@@ -80,11 +83,13 @@ struct Win {
     shown: bool,
     /// Fenêtre des icônes : coin haut-gauche dans l'image de la fenêtre de chat.
     off: (i32, i32),
+    /// Montrée depuis le dernier rangement au-dessus de WoW (0.17.0).
+    fresh: bool,
 }
 
 impl Win {
     fn new(hwnd: HWND) -> Win {
-        Win { hwnd, mem_dc: null_mut(), bmp: null_mut(), old: null_mut(), bits: null_mut(), w: 0, h: 0, shown: false, off: (0, 0) }
+        Win { hwnd, mem_dc: null_mut(), bmp: null_mut(), old: null_mut(), bits: null_mut(), w: 0, h: 0, shown: false, off: (0, 0), fresh: false }
     }
 
     fn free_surface(&mut self) {
@@ -154,18 +159,10 @@ impl Win {
             if !self.shown {
                 ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
                 self.shown = true;
-                self.place();
+                self.fresh = true;
             }
         }
         Ok(())
-    }
-
-    /// Repasse en tête des fenêtres « toujours au premier plan » (un WoW qui l'est aussi passe
-    /// devant quand il redevient actif).
-    fn place(&self) {
-        unsafe {
-            SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-        }
     }
 
     fn hide(&mut self) {
@@ -190,6 +187,8 @@ pub struct Overlay {
     origin: (i32, i32),
     /// Fenêtres exclues des captures d'écran (cache du bandeau).
     covers: Vec<u8>,
+    /// Fenêtre de WoW sous laquelle les nôtres sont rangées (0.17.0).
+    wow: HWND,
 }
 
 /// Windows 10 version 2004 (build 19041) ou suivant : WDA_EXCLUDEFROMCAPTURE existe (avant, la
@@ -244,6 +243,7 @@ impl Overlay {
                 screen_h: GetSystemMetrics(SM_CYSCREEN),
                 origin: (0, GetSystemMetrics(SM_CYSCREEN)),
                 covers: Vec::new(),
+                wow: null_mut(),
             })
         }
     }
@@ -277,7 +277,7 @@ impl Overlay {
             let hwnd = Self::create(
                 &self.class,
                 &format!("CT miroir {frame}"),
-                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             )?;
             self.wins.insert(frame, Win::new(hwnd));
         }
@@ -290,7 +290,7 @@ impl Overlay {
             let hwnd = Self::create(
                 &self.click_class,
                 &format!("CT copie {frame}"),
-                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             )?;
             self.clicks.insert(frame, Win::new(hwnd));
         }
@@ -300,6 +300,12 @@ impl Overlay {
     /// Affiche l'image d'une fenêtre de chat ; `left`, `bottom` en pixels depuis le bas à gauche.
     /// `hits` : icônes de copie cliquables (pixels de l'image).
     pub fn show(&mut self, frame: u8, left: i32, bottom: i32, cv: &Canvas, hits: &[Hit]) -> Result<(), String> {
+        let r = self.show_inner(frame, left, bottom, cv, hits);
+        self.settle();
+        r
+    }
+
+    fn show_inner(&mut self, frame: u8, left: i32, bottom: i32, cv: &Canvas, hits: &[Hit]) -> Result<(), String> {
         let top = self.origin.1 - bottom - cv.h as i32;
         let left = self.origin.0 + left;
         self.window(frame)?.present(left, top, cv.w, cv.h, &cv.px)?;
@@ -347,7 +353,79 @@ impl Overlay {
         if let Some(c) = self.clicks.get_mut(&frame) {
             c.hide();
         }
+        self.settle();
         Ok(())
+    }
+
+    /// Une fenêtre vient d'apparaître : rangée tout de suite au-dessus de WoW (sinon elle passerait
+    /// une fraction de seconde devant une autre application).
+    fn settle(&mut self) {
+        if self.wins.values().chain(self.clicks.values()).any(|w| w.fresh) {
+            let wow = if self.wow.is_null() { crate::capture_win::wow_window() } else { self.wow };
+            self.restack(wow, true);
+        }
+    }
+
+    /// Range les fenêtres affichées juste au-dessus de WoW dans l'ordre des fenêtres (0.17.0) :
+    /// une autre application passée devant WoW les recouvre comme elle recouvre le jeu. WoW
+    /// « toujours au premier plan » (certains modes plein écran fenêtré) : les nôtres aussi, juste
+    /// au-dessus de lui. Rien n'est touché si elles y sont déjà.
+    // Poignée de fenêtre transmise à Windows, jamais lue par le programme.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn restack(&mut self, wow: HWND, force: bool) {
+        if wow.is_null() {
+            return;
+        }
+        self.wow = wow;
+        let ours: Vec<HWND> = self.wins.values().chain(self.clicks.values()).filter(|w| w.shown).map(|w| w.hwnd).collect();
+        if ours.is_empty() {
+            return;
+        }
+        unsafe {
+            let topmost = (GetWindowLongPtrW(wow, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0;
+            let mismatch = ours.iter().any(|&w| ((GetWindowLongPtrW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0) != topmost);
+            // Déjà en place : les nôtres sont les fenêtres juste au-dessus de WoW.
+            if !force && !mismatch {
+                let mut h = wow;
+                let mut placed = true;
+                for _ in 0..ours.len() {
+                    h = GetWindow(h, GW_HWNDPREV);
+                    if h.is_null() || !ours.contains(&h) {
+                        placed = false;
+                        break;
+                    }
+                }
+                if placed {
+                    return;
+                }
+            }
+            // Première fenêtre au-dessus de WoW qui n'est pas des nôtres : les nôtres se glissent
+            // entre elle et WoW. WoW ordinaire sous une fenêtre « toujours au premier plan » : en
+            // tête des fenêtres ordinaires.
+            let mut above = GetWindow(wow, GW_HWNDPREV);
+            while !above.is_null() && ours.contains(&above) {
+                above = GetWindow(above, GW_HWNDPREV);
+            }
+            let above_topmost = !above.is_null() && (GetWindowLongPtrW(above, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0;
+            let mut after: HWND = if above.is_null() {
+                if topmost { HWND_TOPMOST } else { HWND_TOP }
+            } else if above_topmost && !topmost {
+                HWND_TOP
+            } else {
+                above
+            };
+            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+            for &w in &ours {
+                if !topmost && (GetWindowLongPtrW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0 {
+                    SetWindowPos(w, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+                }
+                SetWindowPos(w, after, 0, 0, 0, 0, flags);
+                after = w;
+            }
+        }
+        for w in self.wins.values_mut().chain(self.clicks.values_mut()) {
+            w.fresh = false;
+        }
     }
 
     /// Cache du bandeau (0.15) : image posée sur le bandeau, vue par le joueur mais absente des
@@ -366,7 +444,9 @@ impl Overlay {
             }
             self.covers.push(frame);
         }
-        self.window(frame)?.present(left, top, cv.w, cv.h, &cv.px)
+        self.window(frame)?.present(left, top, cv.w, cv.h, &cv.px)?;
+        self.settle();
+        Ok(())
     }
 
     pub fn hide(&mut self, frame: u8) {
@@ -437,14 +517,6 @@ impl Overlay {
         self.screen_h
     }
 
-    /// WoW actif : les fenêtres affichées repassent devant lui (un clic dans WoW le met devant).
-    pub fn raise_all(&self) {
-        for w in self.wins.values().chain(self.clicks.values()) {
-            if w.shown {
-                w.place();
-            }
-        }
-    }
 
     pub fn hide_all(&mut self) {
         for w in self.wins.values_mut().chain(self.clicks.values_mut()) {

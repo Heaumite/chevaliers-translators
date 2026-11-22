@@ -210,3 +210,16 @@ l'installation.
 taille ; fenêtre des modèles : téléchargements de fond de l'application en cours et en attente,
 total de la série), lecteur vidéo intégré à la fenêtre (chargé au clic), fausse alerte Ptr/Xptr
 supprimée.
+
+**0.17.0 (22/11)** : envoi des liens d'objets retail réparé (« Invalid escape code »), noms
+Battle.net (BattleTag), fenêtres de l'application rangées juste au-dessus de WoW (une autre
+application devant le chat les recouvre), rien pendant les écrans de chargement, bulles de 60 s
+avec fondus de 10 s, empilées, nouveau dessin, clic droit sur un pseudo pour sa langue, blocs du
+bandeau de 2 pixels (1 possible). Étude des modèles par paire de langues : document à part.
+
+**0.17.1 (22/11)** : nouveau modèle MiLMMT-46 4B en pack Europe (vocabulaire élagué, IQ4_XS,
+1,97 Go), au niveau de SalamandraTA 7B et au-dessus de TranslateGemma 4B, qu'il remplace ; pack par
+langue de lecture (SalamandraTA 7B pour l'ukrainien seulement) ; langue de lecture tirée de Windows
+quand WoW n'existe pas dans celle-ci ; besoin porté à 30 messages par minute ; Trad:AUTO qui garde
+l'interlocuteur étranger, boutons des onglets de chuchotement et Battle.net, anciennes lignes du
+miroir oubliées après un `/reload`.

@@ -1,0 +1,50 @@
+# Pack Europe de Chevaliers Translators (0.17.1) : MiLMMT-46 4B (Xiaomi, conditions Gemma),
+# vocabulaire élagué aux langues européennes, quantifié en IQ4_XS. Construit ici depuis le fichier
+# publié sur Hugging Face, avec les outils du dépôt (outils/pack_europe.py), et publié comme
+# fichier de la version « pack-europe-1 » : l'application le télécharge depuis cette adresse.
+#
+# À lancer une fois à la main (Actions > Pack Europe > Run workflow, ou
+# « gh workflow run pack.yml »). Le résultat doit avoir l'empreinte de outils/packs/europe.sha256
+# (celle annoncée par l'application) : sinon rien n'est publié.
+name: Pack Europe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    name: Construction et publication du pack Europe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Outils Python (mêmes versions que pour l'empreinte de référence)
+        run: pip install gguf==0.19.0 numpy==2.5.5
+      - name: llama.cpp b12211 (même version que l'application)
+        run: |
+          curl -sSfL -o llama.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b12211/llama-b12211-bin-ubuntu-x64.tar.gz
+          mkdir llama && tar -xzf llama.tar.gz -C llama
+          ls llama/llama-b12211
+      - name: Construction (téléchargement, élagage, quantification, empreinte vérifiée)
+        run: python outils/pack_europe.py travail llama/llama-b12211 --sans-source
+      - name: Fichiers de la version
+        run: |
+          mkdir publie
+          mv travail/MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf publie/
+          cp outils/packs/NOTICE-pack-europe.txt publie/NOTICE.txt
+          (cd publie && sha256sum MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf > MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf.sha256)
+          ls -l publie
+      # Jamais « dernière version » : la mise à jour de l'application lit la dernière version vX.Y.Z.
+      - name: Publication
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pack-europe-1
+          name: Pack Europe 1 (MiLMMT-46 4B)
+          make_latest: "false"
+          body_path: outils/packs/NOTE-pack-europe.md
+          files: publie/*

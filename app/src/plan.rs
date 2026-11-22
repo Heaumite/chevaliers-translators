@@ -36,8 +36,9 @@ pub const REF_PIXELS: f64 = 3840.0 * 1600.0;
 pub const REF_FPS: f64 = 41.5;
 /// Rythme des tests en jeu : une traduction toutes les 3 s.
 pub const TEST_RATE: f64 = 20.0;
-/// Besoin retenu : un message à traduire toutes les 5 s (chat très animé).
-pub const DESIGN_RATE: f64 = 12.0;
+/// Besoin retenu : 30 messages par minute, un toutes les 2 s (0.17.1, demande du 22/11/2026 ;
+/// 12 avant, un toutes les 5 s).
+pub const DESIGN_RATE: f64 = 30.0;
 /// Fils de calcul des tests sur le processeur de référence (Ryzen 7 5800X3D, 8 cœurs).
 pub const REF_CPU_THREADS: f64 = 4.0;
 
@@ -69,15 +70,19 @@ pub static REFERENCES: [Reference; 3] = [
         cpu: Some((0.95, 0.006)),
         cpu_note: "mesuré le 09/11/2026",
     },
+    // MiLMMT-46 4B, pack Europe (0.17.1) : même architecture que TranslateGemma 4B (Gemma 3 4B),
+    // mesuré le 09/11/2026 à 1,42 s, −4,1 % sur la carte et 2,88 s sur le processeur. Chaque jeton
+    // relit tout le fichier (la matrice des jetons sert aussi de sortie) : valeurs de
+    // TranslateGemma rapportées à la taille du fichier (1,97 Go au lieu de 2,49 : ×0,79) et au nombre
+    // de jetons écrits par message (23,9 au lieu de 24,8 au banc du 22/11/2026 : ×0,96), sans
+    // compter sa consigne plus courte. À remplacer par la mesure (/chevaliers essai 4b).
     Reference {
-        id: "translategemma-4b",
-        gpu_latency: 1.42,
-        gpu_drop: 0.041,
-        gpu_note: "mesuré le 09/11/2026",
-        // Aucune baisse mesurable sur le processeur (−1,2 %, dans le bruit) : 0,7 % retenu,
-        // comme le pack low.
-        cpu: Some((2.88, 0.007)),
-        cpu_note: "mesuré le 09/11/2026",
+        id: "milmmt-46-4b",
+        gpu_latency: 1.08,
+        gpu_drop: 0.0313,
+        gpu_note: "estimé le 22/11/2026 d'après TranslateGemma 4B",
+        cpu: Some((2.20, 0.007)),
+        cpu_note: "estimé le 22/11/2026 d'après TranslateGemma 4B",
     },
     Reference {
         id: "salamandrata-7b",
@@ -278,6 +283,9 @@ pub struct Conditions {
     pub source: String,
     /// Version du jeu (« _retail_ », « _forever_ »...), si connue.
     pub flavor: Option<String>,
+    /// Langue de lecture du joueur (0.17.1) : un pack réservé à d'autres langues (SalamandraTA 7B,
+    /// pack ukrainien) n'est pas pris. `None` : inconnue, seuls les modèles de toutes les langues.
+    pub reader: Option<&'static str>,
 }
 
 impl Conditions {
@@ -291,6 +299,7 @@ impl Conditions {
             measured_fps: None,
             source: "pire cas (WoW occupe toute la carte)".into(),
             flavor: None,
+            reader: None,
         }
     }
 
@@ -397,7 +406,7 @@ pub fn conditions_from_config(cfg: &HashMap<String, String>, monitor: Option<(u3
         let hz = monitor.map_or(60.0, |(_, _, hz)| if hz >= 30 { hz as f64 } else { 60.0 });
         cap = Some(cap.map_or(hz, |c| c.min(hz)));
     }
-    Conditions { size, render_scale, quality, cap, measured_fps: None, source: source.into(), flavor: None }
+    Conditions { size, render_scale, quality, cap, measured_fps: None, source: source.into(), flavor: None, reader: None }
 }
 
 /// Champ « clé=valeur » du détail d'un essai.
@@ -433,6 +442,7 @@ pub fn conditions_from_trials(trials: &Trials) -> Option<Conditions> {
         measured_fps: field(&t.detail, "ref").and_then(|v| v.parse().ok()),
         source: format!("mesurées au test en jeu du {}", date(t.when)),
         flavor: catalog::trial_version(&t.detail).map(String::from),
+        reader: None,
     })
 }
 
@@ -730,7 +740,8 @@ pub fn estimate(hw: &Hw, measured: &dyn Fn(&str) -> Option<u64>, trials: &Trials
     }
 
     let mut candidates = Vec::new();
-    for m in catalog::all() {
+    // Packs par langue (0.17.1) : seulement les modèles utiles à la langue de lecture.
+    for m in catalog::all().filter(|m| catalog::serves(m, cond.reader)) {
         let Some(r) = reference(m.id) else { continue };
         let (fp, _) = catalog::footprint(m, measured);
         // Sur la carte.
@@ -815,7 +826,7 @@ pub fn estimate(hw: &Hw, measured: &dyn Fn(&str) -> Option<u64>, trials: &Trials
     let mut chain: Vec<usize> = (0..candidates.len()).filter(|&i| candidates[i].level >= Level::Likely).collect();
     chain.sort_by(|&a, &b| {
         let (a, b) = (&candidates[a], &candidates[b]);
-        b.model.quality.cmp(&a.model.quality).then(a.latency.total_cmp(&b.latency))
+        catalog::rank(b.model, cond.reader).cmp(&catalog::rank(a.model, cond.reader)).then(a.latency.total_cmp(&b.latency))
     });
     // Toujours un repli : le pack low, même limite, s'il n'est pas déjà là.
     if !chain.iter().any(|&i| candidates[i].model.id == LOW_PACK.id) {
@@ -839,8 +850,8 @@ pub fn estimate(hw: &Hw, measured: &dyn Fn(&str) -> Option<u64>, trials: &Trials
     for &i in &chain {
         add(candidates[i].model);
     }
-    let mut rest: Vec<&'static Model> = catalog::all().collect();
-    rest.sort_by_key(|m| std::cmp::Reverse(m.quality));
+    let mut rest: Vec<&'static Model> = catalog::all().filter(|m| catalog::serves(m, cond.reader)).collect();
+    rest.sort_by_key(|m| std::cmp::Reverse(catalog::rank(m, cond.reader)));
     for m in rest {
         add(m);
     }
@@ -915,6 +926,7 @@ pub fn for_this_pc(hw: &Hw, wow: Option<&Path>) -> Plan {
     if flavor.is_some() {
         cond.flavor = flavor;
     }
+    cond.reader = catalog::reader();
     estimate(hw, &catalog::measured_footprint, &trials, cond)
 }
 
@@ -1128,102 +1140,114 @@ mod tests {
     }
 
     #[test]
-    fn reference_pc_at_max_quality_gets_the_7b_with_a_progressive_fallback() {
+    fn reference_pc_at_max_quality_gets_milmmt_with_a_progressive_fallback() {
         let h = pc("AMD Radeon RX 6950 XT", 0x1002, 16, 8);
         let cond = Conditions { size: Some((3840, 1600)), ..Conditions::worst() };
-        let p = estimate(&h, &none, &Trials::new(), cond);
-        assert_eq!(
-            chain(&p),
-            ["salamandrata-7b/gpu", "translategemma-4b/gpu", "translategemma-4b/cpu", "eurollm-1.7b/gpu", "eurollm-1.7b/cpu"]
-        );
-        assert_eq!(p.best().unwrap().level, Level::Likely);
-        // 0.14 : tout ce qui peut tourner est téléchargé, pack low d'abord, puis la chaîne.
-        assert_eq!(dl(&p), ["eurollm-1.7b", "salamandrata-7b", "translategemma-4b"]);
-        assert_eq!(p.high().unwrap().id, "salamandrata-7b");
-        // 4B sur le processeur : 2,88 s, probable.
-        assert_eq!(p.candidate("translategemma-4b", Place::Cpu).unwrap().level, Level::Likely);
-        // Repli en jeu : le 7B plante sur la carte -> 4B, plus léger, toujours sur la carte ;
-        // le 4B plante sur la carte -> le 4B sur le processeur (plante sur la carte, pas sur
-        // le processeur) ; puis le pack low sur la carte, puis sur le processeur.
+        let p = estimate(&h, &none, &Trials::new(), cond.clone());
+        // 0.17.1 : MiLMMT-46 4B (pack Europe) sur la carte, 31 messages par minute sous 5 % (il en
+        // faut 30) ; puis sur le processeur (sûr) ; puis le pack low.
+        assert_eq!(chain(&p), ["milmmt-46-4b/gpu", "milmmt-46-4b/cpu", "eurollm-1.7b/gpu", "eurollm-1.7b/cpu"]);
+        let best = p.best().unwrap();
+        assert_eq!((best.model.id, best.level), ("milmmt-46-4b", Level::Likely));
+        assert!(best.why.contains("1,11 s par message, jusqu'à 31 messages par minute"), "{}", best.why);
+        assert_eq!(p.candidate("milmmt-46-4b", Place::Cpu).unwrap().level, Level::Sure);
+        // Tout ce qui peut tourner est téléchargé (0.14), pack low d'abord ; pas SalamandraTA 7B,
+        // pack ukrainien (lecteur inconnu).
+        assert_eq!(dl(&p), ["eurollm-1.7b", "milmmt-46-4b"]);
+        assert_eq!(p.high().unwrap().id, "milmmt-46-4b");
+        // Repli en jeu : le 4B plante sur la carte -> le 4B sur le processeur (plante sur la carte,
+        // pas sur le processeur) ; puis le pack low sur la carte, puis sur le processeur.
         assert_eq!(p.fallback(0, Failure::Crash), Some(1));
         assert_eq!(p.fallback(1, Failure::Crash), Some(2));
         assert_eq!(p.fallback(2, Failure::Crash), Some(3));
-        assert_eq!(p.fallback(3, Failure::Crash), Some(4));
-        // Le 4B trop lourd pour le jeu sur la carte : le 4B sur le processeur ne charge pas la carte.
-        assert_eq!(p.fallback(1, Failure::Heavy), Some(2));
-        // Trop lent : le prochain plus rapide (4B, 1,42 s, est plus lent que le 7B : sauté).
-        assert_eq!(p.fallback(0, Failure::Slow), Some(3));
-        assert!(p.fallback(4, Failure::Heavy).is_none());
-        // Classe B, calculée à 560 Go/s : le 4B est sûr sur la carte (1,46 s, 24 par minute).
+        // Trop lourd pour le jeu sur la carte : le 4B sur le processeur ne charge pas la carte.
+        assert_eq!(p.fallback(0, Failure::Heavy), Some(1));
+        // Trop lent : le prochain plus rapide (le 4B sur le processeur, plus lent, est sauté).
+        assert_eq!(p.fallback(0, Failure::Slow), Some(2));
+        assert!(p.fallback(3, Failure::Heavy).is_none());
         assert_eq!(p.class.unwrap().name, "B");
-        assert_eq!(p.candidate("translategemma-4b", Place::Gpu).unwrap().level, Level::Sure);
-        // Espacement pour le 7B : environ 3,8 s entre deux messages.
-        assert!((p.best().unwrap().min_gap() - 3.77).abs() < 0.05);
+        // Espacement : environ 1,9 s entre deux messages.
+        assert!((best.min_gap() - 1.93).abs() < 0.05, "{}", best.min_gap());
+        // Lecteur ukrainien : SalamandraTA 7B, son pack, suit trop peu de chat ici (16 messages
+        // par minute) : téléchargé, hors de la chaîne.
+        let uk = estimate(&h, &none, &Trials::new(), Conditions { reader: Some("uk"), ..cond });
+        assert_eq!(chain(&uk), chain(&p));
+        assert_eq!(dl(&uk), ["eurollm-1.7b", "milmmt-46-4b", "salamandrata-7b"]);
+        let c7 = uk.candidate("salamandrata-7b", Place::Gpu).unwrap();
+        assert!(c7.level == Level::No && c7.why.contains("16 messages par minute sous 5 % de baisse (il en faut 30)"), "{}", c7.why);
     }
 
     #[test]
     fn same_pc_at_1080p_capped_is_comfortable() {
         let h = pc("AMD Radeon RX 6950 XT", 0x1002, 16, 8);
         let cond = Conditions { size: Some((1920, 1080)), cap: Some(75.0), ..Conditions::worst() };
-        let p = estimate(&h, &none, &Trials::new(), cond);
+        let p = estimate(&h, &none, &Trials::new(), cond.clone());
         let best = p.best().unwrap();
-        assert_eq!((best.model.id, best.level), ("salamandrata-7b", Level::Sure));
-        // 7B sûr : le 4B, hors de la chaîne, est téléchargé aussi (il peut tourner ici).
-        assert_eq!(dl(&p), ["eurollm-1.7b", "salamandrata-7b", "translategemma-4b"]);
+        assert_eq!((best.model.id, best.level), ("milmmt-46-4b", Level::Sure));
+        assert_eq!(dl(&p), ["eurollm-1.7b", "milmmt-46-4b"]);
+        // Lecteur ukrainien : son pack, SalamandraTA 7B, passe devant (39 messages par minute).
+        let uk = estimate(&h, &none, &Trials::new(), Conditions { reader: Some("uk"), ..cond });
+        assert_eq!(chain(&uk)[..2], ["salamandrata-7b/gpu", "milmmt-46-4b/gpu"]);
+        assert_eq!(uk.best().unwrap().level, Level::Likely);
+        assert_eq!(dl(&uk), ["eurollm-1.7b", "salamandrata-7b", "milmmt-46-4b"]);
     }
 
     #[test]
     fn smaller_cards() {
-        // RTX 3060 12 Go (classe D, 300 Go/s), sans plafond : le 7B ne tient pas à côté de WoW
-        // (7 Go) ; le 4B tient tout juste et passe sous le seuil unique de 3 s (2,73 s,
-        // 13 messages par minute) : 23 langues ; puis le pack low, aussi rapide sur le
-        // processeur (6 cœurs) que sur cette carte.
+        // RTX 3060 12 Go (classe D, 300 Go/s), sans plafond : le 4B tient à côté de WoW mais ne
+        // suit que 17 messages par minute sous 5 % (il en faut 30, 0.17.1) : pack low, aussi rapide
+        // sur le processeur (6 cœurs) que sur cette carte. Le 4B est téléchargé (il peut tourner :
+        // WoW plafonné, il revient dans la chaîne).
         let p = estimate(&pc("NVIDIA GeForce RTX 3060", 0x10DE, 12, 6), &none, &Trials::new(), Conditions::worst());
         assert_eq!(p.class.unwrap().name, "D");
-        assert_eq!(chain(&p), ["translategemma-4b/gpu", "eurollm-1.7b/cpu", "eurollm-1.7b/gpu"]);
-        let c4 = p.candidate("translategemma-4b", Place::Gpu).unwrap();
-        assert_eq!(c4.level, Level::Likely);
-        assert!(c4.why.contains("2,73 s par message, jusqu'à 13 messages"), "{}", c4.why);
-        // Le 7B tient à côté d'un WoW léger mais suit trop peu de chat sur cette carte (9 messages
-        // par minute) : téléchargé, hors de la chaîne.
-        assert_eq!(dl(&p), ["eurollm-1.7b", "translategemma-4b", "salamandrata-7b"]);
-        let c7 = p.candidate("salamandrata-7b", Place::Gpu).unwrap();
-        assert!(c7.why.contains("9 messages par minute") && c7.possible && c7.banned.is_none(), "{}", c7.why);
+        assert_eq!(chain(&p), ["eurollm-1.7b/cpu", "eurollm-1.7b/gpu"]);
+        let c4 = p.candidate("milmmt-46-4b", Place::Gpu).unwrap();
+        assert_eq!(c4.level, Level::No);
+        assert!(c4.why.contains("17 messages par minute sous 5 % de baisse (il en faut 30)") && c4.possible, "{}", c4.why);
+        assert_eq!(dl(&p), ["eurollm-1.7b", "milmmt-46-4b"]);
         // Même classe, même prévision : l'Arc B580 (456 Go/s, rendement 70 %) est calculé comme
         // la RTX 3060.
         let b = estimate(&pc("Intel(R) Arc(TM) B580 Graphics", 0x8086, 12, 6), &none, &Trials::new(), Conditions::worst());
         assert_eq!(b.class.unwrap().name, "D");
         assert_eq!(chain(&b), chain(&p));
-        // RTX 4070 Super (classe C, 420 Go/s) : 4B sur la carte (1,95 s) avant le 4B sur le
-        // processeur (2,88 s), plus lent ; le 7B ne tient pas dans 12 Go à côté de WoW.
+        // RTX 4070 Super (classe C, 420 Go/s) : le 4B sur la carte suit 23 messages par minute
+        // (limite) ; sur le processeur (8 cœurs), il est sûr et passe en tête.
         let p = estimate(&pc("NVIDIA GeForce RTX 4070 SUPER", 0x10DE, 12, 8), &none, &Trials::new(), Conditions::worst());
         assert_eq!(p.class.unwrap().name, "C");
-        assert_eq!(chain(&p)[..2], ["translategemma-4b/gpu", "translategemma-4b/cpu"]);
-        // RTX 4060 Ti 16 Go (classe E) : le 4B serait trop lent (3,7 s) : pack low.
+        assert_eq!(chain(&p)[..2], ["milmmt-46-4b/cpu", "eurollm-1.7b/gpu"]);
+        assert_eq!(p.candidate("milmmt-46-4b", Place::Gpu).unwrap().level, Level::Borderline);
+        // RTX 4060 Ti 16 Go (classe E) : le 4B ne suivrait que 12 messages par minute : pack low.
         let p = estimate(&pc("NVIDIA GeForce RTX 4060 Ti", 0x10DE, 16, 6), &none, &Trials::new(), Conditions::worst());
         assert_eq!(p.class.unwrap().name, "E");
-        assert_eq!(p.candidate("translategemma-4b", Place::Gpu).unwrap().level, Level::Borderline);
-        assert_eq!(dl(&p), ["eurollm-1.7b", "salamandrata-7b", "translategemma-4b"]);
-        // RTX 4090 : le 7B est sûr.
-        let p = estimate(&pc("NVIDIA GeForce RTX 4090", 0x10DE, 24, 8), &none, &Trials::new(), Conditions::worst());
-        assert_eq!((p.best().unwrap().model.id, p.best().unwrap().level), ("salamandrata-7b", Level::Sure));
-        // 8 Go : pack low sur le processeur d'abord (plus rapide que sur cette carte), puis sur
-        // la carte quand WoW laisse la place (0.14.2 : plus de réserve, gouverneur en jeu).
+        assert_eq!(p.candidate("milmmt-46-4b", Place::Gpu).unwrap().level, Level::No);
+        assert_eq!(chain(&p), ["eurollm-1.7b/cpu"]);
+        assert_eq!(dl(&p), ["eurollm-1.7b", "milmmt-46-4b"]);
+        // RTX 4090 : le 4B est sûr (55 messages par minute) ; pour un lecteur ukrainien, son pack
+        // (SalamandraTA 7B) n'en suit que 28 : limite, hors de la chaîne.
+        let h = pc("NVIDIA GeForce RTX 4090", 0x10DE, 24, 8);
+        let p = estimate(&h, &none, &Trials::new(), Conditions::worst());
+        assert_eq!((p.best().unwrap().model.id, p.best().unwrap().level), ("milmmt-46-4b", Level::Sure));
+        let uk = estimate(&h, &none, &Trials::new(), Conditions { reader: Some("uk"), ..Conditions::worst() });
+        assert_eq!(uk.candidate("salamandrata-7b", Place::Gpu).unwrap().level, Level::Borderline);
+        assert_eq!(uk.best().unwrap().model.id, "milmmt-46-4b");
+        // 8 Go : pack low sur le processeur (sur cette carte, 24 messages par minute : limite).
         let p = estimate(&pc("AMD Radeon RX 6600", 0x1002, 8, 6), &none, &Trials::new(), Conditions::worst());
-        assert_eq!(chain(&p), ["eurollm-1.7b/cpu", "eurollm-1.7b/gpu"]);
-        assert!(p.candidate("eurollm-1.7b", Place::Gpu).unwrap().why.contains("pris quand la place est là"));
-        // 8 Go, 6 cœurs : 4B et 7B tiennent à côté d'un WoW réglé au plus bas : téléchargés.
-        assert_eq!(dl(&p), ["eurollm-1.7b", "salamandrata-7b", "translategemma-4b"]);
-        assert!(p.candidate("salamandrata-7b", Place::Gpu).unwrap().possible);
+        assert_eq!(chain(&p), ["eurollm-1.7b/cpu"]);
+        assert_eq!(p.candidate("eurollm-1.7b", Place::Gpu).unwrap().level, Level::Borderline);
+        // 8 Go, 6 cœurs : le 4B tient à côté d'un WoW réglé au plus bas : téléchargé ; le 7B aussi
+        // pour un lecteur ukrainien.
+        assert_eq!(dl(&p), ["eurollm-1.7b", "milmmt-46-4b"]);
+        let uk = estimate(&pc("AMD Radeon RX 6600", 0x1002, 8, 6), &none, &Trials::new(), Conditions { reader: Some("uk"), ..Conditions::worst() });
+        assert!(uk.candidate("salamandrata-7b", Place::Gpu).unwrap().possible);
         // 6 Go : le 7B ne tiendra jamais (ni la carte, ni le processeur).
-        let p = estimate(&pc("NVIDIA GeForce RTX 2060", 0x10DE, 6, 6), &none, &Trials::new(), Conditions::worst());
-        assert!(!p.candidate("salamandrata-7b", Place::Gpu).unwrap().possible);
-        assert!(!dl(&p).contains(&"salamandrata-7b"));
-        // Processeur à 16 cœurs : le 4B sur le processeur est sûr (8 fils : 2,0 s).
+        let uk = estimate(&pc("NVIDIA GeForce RTX 2060", 0x10DE, 6, 6), &none, &Trials::new(), Conditions { reader: Some("uk"), ..Conditions::worst() });
+        assert!(!uk.candidate("salamandrata-7b", Place::Gpu).unwrap().possible);
+        assert!(!dl(&uk).contains(&"salamandrata-7b"));
+        // Processeur à 16 cœurs : le 4B sur le processeur est sûr (8 fils : 1,6 s).
         let mut h = pc("AMD Radeon RX 6600", 0x1002, 8, 16);
         h.ram_avail = 40 * GIB;
         let p = estimate(&h, &none, &Trials::new(), Conditions::worst());
-        assert_eq!(chain(&p), ["translategemma-4b/cpu", "eurollm-1.7b/cpu", "eurollm-1.7b/gpu"]);
+        assert_eq!(chain(&p), ["milmmt-46-4b/cpu", "eurollm-1.7b/cpu"]);
     }
 
     #[test]
@@ -1233,23 +1257,23 @@ mod tests {
         assert!(cond.label().starts_with("version _retail_"));
         let p = estimate(&h, &none, &Trials::new(), cond.clone());
         // Retail au maximum : WoW compté 12 Go (11,7 mesurés le 09/11/2026) : 2,7 Go libres estimés.
-        // Plus de réserve (0.14.2) : 7B et 4B restent en tête de la chaîne, pris en jeu quand la
-        // place est là ; près de la saturation, la traduction redescend d'un cran.
-        assert_eq!(chain(&p)[..2], ["salamandrata-7b/gpu", "translategemma-4b/gpu"]);
-        assert!(p.candidate("salamandrata-7b", Place::Gpu).unwrap().why.contains("pris quand la place est là"));
-        assert!(p.candidate("translategemma-4b", Place::Gpu).unwrap().why.contains("2,7 Go libres estimés"));
-        // Série du 09/11/2026 sur retail : 4B sur le processeur trop lourd (baisse de 15 %) ; le
-        // pack low sur la carte passe avant le pack low sur le processeur.
+        // Le pack Europe (2,3 Go, 0.17.1) y tient, pris en jeu quand la place est là ; près de la
+        // saturation, la traduction redescend d'un cran (TranslateGemma 4B, 2,9 Go, n'y tenait pas).
+        assert_eq!(chain(&p)[..2], ["milmmt-46-4b/gpu", "milmmt-46-4b/cpu"]);
+        let c4 = p.candidate("milmmt-46-4b", Place::Gpu).unwrap();
+        assert!(c4.why.contains("2,7 Go libres estimés") && c4.why.contains("pris quand la place est là"), "{}", c4.why);
+        // Série du 09/11/2026 sur retail : le pack low sur la carte passe avant le pack low sur le
+        // processeur ; l'essai de TranslateGemma 4B (retiré) ne compte plus.
         let series = "translategemma-4b-it.Q4_K_M.gguf\tcpu\tlourd\t1794265782\t0.1496\tbaisse moyenne d'images par seconde 15.0 % à 19 messages par minute ; 4 fils;espacement=3;latence=2.98;ecran=3840x1600;version=_retail_;ref=41.9;plafond=non\n\
             EuroLLM-1.7B-Instruct.Q4_K_M.gguf\tgpu\tok\t1794265521\t0.0187\tprio=basse;latence=0.39;ecran=3840x1600;version=_retail_;ref=41.9;plafond=non\n\
             EuroLLM-1.7B-Instruct.Q4_K_M.gguf\tcpu\tok\t1794265282\t0.0807\t4 fils;latence=0.92;ecran=3840x1600;version=_retail_;ref=41.8;plafond=non\n";
-        let p = estimate(&h, &none, &catalog::parse_trials_for(series, Some("_retail_")), cond);
-        assert_eq!(chain(&p), ["salamandrata-7b/gpu", "translategemma-4b/gpu", "eurollm-1.7b/gpu", "eurollm-1.7b/cpu"]);
+        let p = estimate(&h, &none, &catalog::parse_trials_for(series, Some("_retail_")), cond.clone());
+        assert_eq!(chain(&p), ["milmmt-46-4b/gpu", "milmmt-46-4b/cpu", "eurollm-1.7b/gpu", "eurollm-1.7b/cpu"]);
         // Manque de mémoire vidéo constaté en jeu : plus une interdiction (0.14.2).
-        let memory = format!("{series}salamandraTA_7B_v3_q4_k_m.gguf\tgpu\tmemoire\t1794247908\t\ten jeu : plus que 0,6 Go de mémoire vidéo libre;ecran=3840x1600\n");
-        let p = estimate(&h, &none, &catalog::parse_trials_for(&memory, Some("_retail_")), Conditions { size: Some((3840, 1600)), flavor: Some("_retail_".into()), ..Conditions::worst() });
-        assert_eq!(chain(&p)[0], "salamandrata-7b/gpu");
-        assert!(p.candidate("salamandrata-7b", Place::Gpu).unwrap().banned.is_none());
+        let memory = format!("{series}MiLMMT-46-4B-v1.0-europe.IQ4_XS.gguf\tgpu\tmemoire\t1794247908\t\ten jeu : plus que 0,6 Go de mémoire vidéo libre;ecran=3840x1600\n");
+        let p = estimate(&h, &none, &catalog::parse_trials_for(&memory, Some("_retail_")), cond);
+        assert_eq!(chain(&p)[0], "milmmt-46-4b/gpu");
+        assert!(p.candidate("milmmt-46-4b", Place::Gpu).unwrap().banned.is_none());
         // Plafonné : une image de retail coûte plus qu'une image de Forever.
         let capped = |f: Option<&str>| Conditions { size: Some((1920, 1080)), cap: Some(60.0), flavor: f.map(String::from), ..Conditions::worst() };
         assert!(capped(Some("_retail_")).occupancy(560.0) > capped(Some("_forever_")).occupancy(560.0));
@@ -1264,7 +1288,7 @@ mod tests {
     #[test]
     fn tests_on_this_pc_override_the_estimate() {
         let h = pc("AMD Radeon RX 6950 XT", 0x1002, 16, 8);
-        let cond = Conditions { size: Some((3840, 1600)), ..Conditions::worst() };
+        let cond = Conditions { size: Some((3840, 1600)), reader: Some("uk"), ..Conditions::worst() };
         let mut trials = Trials::new();
         // Le 7B a fait planter le jeu sur la carte : interdit sur la carte (et rien de plus lourd).
         trials.insert(
@@ -1278,18 +1302,18 @@ mod tests {
         );
         let p = estimate(&h, &none, &trials, cond.clone());
         // Le 4B reste possible sur le processeur : la carte ne le concerne pas.
-        assert_eq!(chain(&p), ["translategemma-4b/cpu", "eurollm-1.7b/gpu", "eurollm-1.7b/cpu"]);
+        assert_eq!(chain(&p), ["milmmt-46-4b/cpu", "eurollm-1.7b/gpu", "eurollm-1.7b/cpu"]);
         assert!(p.candidate("salamandrata-7b", Place::Gpu).unwrap().why.contains("interdit"));
-        assert_eq!(p.candidate("translategemma-4b", Place::Gpu).unwrap().level, Level::No);
-        // Un « trop lourd » d'avant le seuil unique (1,95 s, seuil de 1,5 s à l'époque) est
-        // rejugé : il passe ; un « trop lourd » pour à-coups reste un échec.
+        assert_eq!(p.candidate("milmmt-46-4b", Place::Gpu).unwrap().level, Level::No);
+        // Un « trop lourd » d'avant le seuil unique (1,05 s, seuil de 1 s à l'époque, 20 messages
+        // par minute à 2,5 %) est rejugé : il passe ; un « trop lourd » pour à-coups reste un échec.
         let mut t2 = trials.clone();
         let k4 = (crate::catalog::ON_DEMAND[0].file.to_lowercase(), Place::Gpu);
-        t2.insert(k4.clone(), Trial { verdict: Verdict::Heavy, when: 3, drop: Some(0.05), detail: "latence médiane 1.95 s (seuil 1.5 s) ; ecran=3840x1600".into() });
-        assert!(estimate(&h, &none, &t2, cond.clone()).candidate("translategemma-4b", Place::Gpu).unwrap().level >= Level::Likely);
+        t2.insert(k4.clone(), Trial { verdict: Verdict::Heavy, when: 3, drop: Some(0.025), detail: "latence médiane 1.05 s (seuil 1 s) ; ecran=3840x1600".into() });
+        assert!(estimate(&h, &none, &t2, cond.clone()).candidate("milmmt-46-4b", Place::Gpu).unwrap().level >= Level::Likely);
         t2.insert(k4, Trial { verdict: Verdict::Heavy, when: 4, drop: Some(0.02), detail: "à-coups de 180 ms pendant les traductions (seuil 100 ms) ; latence=1.30;ecran=3840x1600".into() });
         let c = estimate(&h, &none, &t2, cond.clone());
-        let c = c.candidate("translategemma-4b", Place::Gpu).unwrap();
+        let c = c.candidate("milmmt-46-4b", Place::Gpu).unwrap();
         assert_eq!(c.level, Level::No);
         assert!(c.why.contains("à-coups"), "{}", c.why);
         // Un essai d'un autre écran ne vaut pas mesure : la prévision reste.
@@ -1299,7 +1323,7 @@ mod tests {
             Trial { verdict: Verdict::Heavy, when: 2, drop: Some(0.05), detail: "latence médiane 1.95 s ; ecran=1920x1080".into() },
         );
         let p = estimate(&h, &none, &trials, cond);
-        assert_eq!(p.candidate("translategemma-4b", Place::Gpu).unwrap().level, Level::Sure);
+        assert_eq!(p.candidate("milmmt-46-4b", Place::Gpu).unwrap().level, Level::Likely);
     }
 
     #[test]
