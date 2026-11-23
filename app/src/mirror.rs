@@ -64,6 +64,9 @@ pub struct View {
     pub ui_k: f32,
     /// Écart de chaque ligne à sa hauteur théorique chez WoW, en pixels (`None` : inconnu).
     pub height_delta: Vec<Option<f32>>,
+    /// Bas réel de certaines lignes (pixels depuis le bas de la fenêtre ; addon 0.17.6) : celles
+    /// posées sur une ligne laissée à WoW, dont la hauteur est souvent inconnue en raid.
+    pub line_bottom: Vec<Option<f32>>,
 }
 
 impl View {
@@ -111,6 +114,7 @@ pub fn parse_view(p: &[u8], received: Instant) -> Result<View, String> {
         received,
         ui_k: 0.0,
         height_delta: Vec::new(),
+        line_bottom: Vec::new(),
     };
     if v.flags & FLAG_VISIBLE == 0 {
         return Ok(v);
@@ -155,6 +159,20 @@ pub fn parse_view(p: &[u8], received: Instant) -> Result<View, String> {
     }
     if v.flags & FLAG_HEIGHTS != 0 && p.len() >= k + 2 + n {
         v.height_delta = p[k + 2..k + 2 + n].iter().map(|&b| (b != 0x80).then_some(b as i8 as f32 / 4.0)).collect();
+        // Bas réels (0.17.6) : « P », nombre, puis (indice, bas en quarts de pixel).
+        let q = k + 2 + n;
+        if p.len() >= q + 2 && p[q] == b'P' {
+            v.line_bottom = vec![None; n];
+            for e in 0..p[q + 1] as usize {
+                let o = q + 2 + 3 * e;
+                if p.len() < o + 3 {
+                    break;
+                }
+                if let Some(slot) = v.line_bottom.get_mut(p[o] as usize) {
+                    *slot = Some(u16_at(o + 1) as f32 / 4.0);
+                }
+            }
+        }
     }
     Ok(v)
 }
@@ -977,6 +995,11 @@ pub fn render(
             bottom -= wow_height(li, slot.max(1)) + v.spacing;
             continue;
         }
+        // Bas réel connu (0.17.6) : la ligne reprend exactement sa place chez WoW, quelle que soit
+        // la hauteur des lignes laissées à WoW en dessous.
+        if let Some(b) = v.line_bottom.get(li).copied().flatten() {
+            bottom = h as f32 - b;
+        }
         let Some((mut rows, color)) = laid[li].clone() else { continue };
         if mixed {
             match plan[li] {
@@ -1173,6 +1196,51 @@ struct FrameState {
     /// Dernier dessin (0.15 : l'effacement progressif des lignes est redessiné 15 fois par
     /// seconde au plus, au lieu de 30 : moitié moins d'images envoyées à Windows).
     drawn_at: Option<Instant>,
+    /// Empreinte de la dernière image envoyée à Windows (place, taille, pixels, zones cliquables) :
+    /// une image identique n'est jamais renvoyée (0.17.4).
+    posted: Option<u64>,
+}
+
+/// Empreinte d'une image du miroir à sa place (FNV-1a 64 bits sur les mots de 32 bits).
+fn picture_sig(left: i32, bottom: i32, cv: &Canvas, hits: &[Hit]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |v: u32| {
+        h ^= v as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    for v in [left as u32, bottom as u32, cv.w as u32, cv.h as u32] {
+        eat(v);
+    }
+    for &p in &cv.px {
+        eat(p);
+    }
+    for t in hits {
+        for v in [t.line as u32, t.x as u32, t.y as u32, t.w as u32, t.h as u32] {
+            eat(v);
+        }
+    }
+    h
+}
+
+/// Deux descriptions d'une fenêtre donnent-elles la même image (0.17.4) ? L'addon renvoie la
+/// description toutes les 15 s et à chaque changement de zone : sans changement réel, rien n'est
+/// redessiné. Les âges des lignes comptent à 0,5 s près (même moment d'arrivée), les places de
+/// WoW (numéro 0) et les âges plafonnés (409,5 s) sans comparaison.
+pub fn same_picture(a: &View, b: &View) -> bool {
+    let dt = b.received.saturating_duration_since(a.received).as_secs_f32();
+    a.frame == b.frame
+        && a.flags == b.flags
+        && (a.left, a.bottom, a.width, a.height) == (b.left, b.bottom, b.width, b.height)
+        && (a.font_px, a.line_h, a.spacing, a.shadow, a.font_flags) == (b.font_px, b.line_h, b.spacing, b.shadow, b.font_flags)
+        && (a.time_visible, a.fade, a.ui_k) == (b.time_visible, b.fade, b.ui_k)
+        && a.font_path == b.font_path
+        && a.rows == b.rows
+        && a.height_delta == b.height_delta
+        && a.line_bottom == b.line_bottom
+        && a.lines.len() == b.lines.len()
+        && a.lines.iter().zip(&b.lines).all(|((ia, aa), (ib, ab))| {
+            ia == ib && (*ia == 0 || (aa + dt - ab).abs() <= 0.5 || (*ab >= 409.4 && aa + dt >= 409.4))
+        })
 }
 
 /// Pas de l'effacement progressif des lignes.
@@ -1288,6 +1356,10 @@ impl Mirror {
     pub fn on_view(&mut self, v: View) -> Option<View> {
         self.views_seen += 1;
         let frame = v.frame;
+        // Même image qu'avant (rappel périodique de l'addon) : rien à redessiner (0.17.4).
+        if self.frames.get(&frame).is_some_and(|f| same_picture(&f.view, &v)) {
+            return None;
+        }
         let report = match self.frames.get(&frame) {
             None => v.flags & FLAG_VISIBLE != 0,
             Some(old) => {
@@ -1303,6 +1375,7 @@ impl Mirror {
             shown: self.frames.get(&frame).is_some_and(|f| f.shown),
             hits: self.frames.get(&frame).map(|f| f.hits.clone()).unwrap_or_default(),
             drawn_at: None,
+            posted: self.frames.get(&frame).and_then(|f| f.posted),
         };
         self.frames.insert(frame, st);
         report.then_some(v)
@@ -1731,12 +1804,20 @@ impl Mirror {
             let mut occ = self.occluders.clone();
             occ.extend(self.window_occ);
             mask(&mut canvas, &mut hits, &view, &occ);
+            let picture = picture_sig(view.left, view.bottom, &canvas, &hits);
             let f = self.frames.get_mut(&fid).unwrap();
+            let unchanged = f.shown && f.posted == Some(picture);
             f.dirty = false;
             f.alpha_sig = sig;
             f.shown = true;
             f.drawn_at = Some(now);
             f.hits = hits.clone();
+            f.posted = Some(picture);
+            // Image identique à celle déjà affichée : rien n'est renvoyé à Windows (0.17.4 : pas
+            // de redessin sans changement).
+            if unchanged {
+                continue;
+            }
             ups.push(Update {
                 frame: fid,
                 left: view.left,
@@ -1911,6 +1992,53 @@ pub mod tests {
     }
 
     #[test]
+    fn same_picture_ignores_the_ages_of_a_resent_description() {
+        let t0 = Instant::now();
+        let geo = [10, 20, 300, 80];
+        let path = "Fonts\\ARIALN.TTF";
+        let at = |lines: &[(u16, u16)], secs: u64| parse_view(&view_payload(1, FLAG_VISIBLE | FLAG_FADE, geo, path, lines), t0 + Duration::from_secs(secs)).unwrap();
+        // Rappel 15 s plus tard : les lignes ont 15 s de plus, place de WoW (0) sans âge.
+        assert!(same_picture(&at(&[(0, 0), (5, 100)], 0), &at(&[(0, 0), (5, 250)], 15)));
+        // Même numéro arrivé 3 s plus tard (autre message) : autre image.
+        assert!(!same_picture(&at(&[(0, 0), (5, 100)], 0), &at(&[(0, 0), (5, 280)], 15)));
+        // Âges plafonnés (409,5 s) : identiques.
+        assert!(same_picture(&at(&[(5, 4095)], 0), &at(&[(5, 4095)], 60)));
+        // Une ligne de plus, ou une fenêtre déplacée : autre image.
+        assert!(!same_picture(&at(&[(5, 100)], 0), &at(&[(6, 0), (5, 250)], 15)));
+        let moved = parse_view(&view_payload(1, FLAG_VISIBLE | FLAG_FADE, [12, 20, 300, 80], path, &[(5, 250)]), t0 + Duration::from_secs(15)).unwrap();
+        assert!(!same_picture(&at(&[(5, 100)], 0), &moved));
+    }
+
+    #[test]
+    fn nothing_is_sent_to_windows_without_a_real_change() {
+        // 0.17.4 : le chat traduit n'est redessiné que si ce qu'il montre change.
+        let Some(font) = test_font() else { return };
+        let t0 = Instant::now();
+        let mut m = Mirror::new();
+        m.book.set_primary("Fonts\\ARIALN.TTF", Some(font)).unwrap();
+        m.on_line(1, "FFFFFF\u{1F}Bonjour à tous");
+        let geo = [10, 20, 300, 80];
+        m.on_view(parse_view(&view_payload(1, FLAG_VISIBLE, geo, "fonts/arialn.ttf", &[(1, 0)]), t0).unwrap());
+        // Ligne neuve : affichée passé son court délai d'attente.
+        assert_eq!(m.tick(t0 + GRACE + Duration::from_secs(2)).len(), 1);
+        // Rappel de l'addon 15 s plus tard, texte renvoyé à l'identique : rien n'est redessiné.
+        let t1 = t0 + Duration::from_secs(15);
+        assert!(m.on_view(parse_view(&view_payload(1, FLAG_VISIBLE, geo, "fonts/arialn.ttf", &[(1, 150)]), t1).unwrap()).is_none());
+        assert!(!m.on_line(1, "FFFFFF\u{1F}Bonjour à tous"));
+        assert!(m.tick(t1).is_empty());
+        // Message d'une autre fenêtre : toutes sont revues, la nôtre ne change pas, rien d'envoyé.
+        m.note_chat("autre chose", "Olga", t1);
+        assert!(m.tick(t1).is_empty());
+        // Vrai changement (texte de la ligne) : une image.
+        m.on_line(1, "FFFFFF\u{1F}Salut");
+        assert_eq!(m.tick(t1).len(), 1);
+        // Fenêtres cachées entre-temps (combat, écran de chargement) : renvoyée même identique.
+        m.redraw_all();
+        assert_eq!(m.tick(t1).len(), 1);
+        assert!(m.tick(t1).is_empty());
+    }
+
+    #[test]
     fn new_addon_session_and_old_hidden_lines_are_forgotten() {
         // 0.17.1 : après un /reload, les numéros de ligne repartent du début ; la ligne 1 de la
         // session d'avant ne doit plus pouvoir s'afficher à la place de la nouvelle.
@@ -1981,6 +2109,39 @@ pub mod tests {
         p.extend_from_slice(&1000u16.to_be_bytes());
         p.push(0x80);
         assert_eq!(parse_view(&p, t0).unwrap().height_delta, vec![None]);
+    }
+
+    #[test]
+    fn lines_over_a_secret_wow_line_take_their_real_place() {
+        // 0.17.6 (raid, 23/11) : ligne secrète laissée à WoW, sur deux lignes chez WoW mais
+        // comptée pour une (hauteur secrète) ; la ligne du dessus était dessinée sur elle.
+        let Some(font) = test_font() else { return };
+        let t0 = Instant::now();
+        let mut m = Mirror::new();
+        m.book.set_primary("Fonts\\ARIALN.TTF", Some(font)).unwrap();
+        m.on_line(1, "FFFFFF\u{1F}Bonjour");
+        m.on_line(2, "FFFFFF\u{1F}Salut");
+        let mut p = view_payload(1, FLAG_VISIBLE | FLAG_ROWS | FLAG_HEIGHTS, [10, 20, 300, 80], "Fonts\\ARIALN.TTF", &[(1, 4096), (0, 4096), (2, 4096)]);
+        p.extend_from_slice(&1000u16.to_be_bytes());
+        p.extend_from_slice(&[0, 0x80, 0]);
+        // Bas réel de la ligne 2 (indice 2) : 48 px au-dessus du bas de la fenêtre.
+        p.extend_from_slice(&[b'P', 1, 2]);
+        p.extend_from_slice(&(48u16 * 4).to_be_bytes());
+        let v = parse_view(&p, t0).unwrap();
+        assert_eq!(v.line_bottom, vec![None, None, Some(48.0)]);
+        m.on_view(v);
+        let ups = m.tick(Instant::now() + GRACE + Duration::from_secs(1));
+        let cv = ups[0].canvas.as_ref().unwrap();
+        let ink: Vec<usize> = (0..cv.h).filter(|y| (0..cv.w).any(|x| cv.px[y * cv.w + x] >> 24 > 128)).collect();
+        // « Salut » entre 16 et 32 (sous le haut de la fenêtre), « Bonjour » entre 64 et 80 ; rien
+        // sur la ligne de WoW (32..64).
+        assert!(ink.iter().any(|&y| (14..=32).contains(&y)), "{ink:?}");
+        assert!(ink.iter().all(|&y| !(34..=62).contains(&y)), "{ink:?}");
+        // Sans bas réel (ancien addon) : la ligne 2 tombait sur la ligne de WoW.
+        let mut p = view_payload(1, FLAG_VISIBLE | FLAG_ROWS | FLAG_HEIGHTS, [10, 20, 300, 80], "Fonts\\ARIALN.TTF", &[(1, 4096), (0, 4096), (2, 4096)]);
+        p.extend_from_slice(&1000u16.to_be_bytes());
+        p.extend_from_slice(&[0, 0x80, 0]);
+        assert!(parse_view(&p, t0).unwrap().line_bottom.is_empty());
     }
 
     #[test]

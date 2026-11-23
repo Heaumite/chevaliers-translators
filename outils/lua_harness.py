@@ -1095,6 +1095,20 @@ def mock(root, binary):
     # Au plus le rappel de la description du chat (toutes les 15 s) : avant, une trame de vie
     # toutes les 0,4 s faisait clignoter le bandeau (7 peintures en 3 s).
     assert (banner.paints or 0) - before <= 3, f"bandeau repeint au repos : {(banner.paints or 0) - before} fois en 3 s"
+    # 0.17.4 : chaque trame reste au moins 3 images à l'écran, même à 30 images par seconde (la
+    # capture ne tombe jamais sur une image en train de changer).
+    for i in range(8):
+        g.FIRE("CHAT_MSG_SAY", f"Message numero {i} pour la cadence du bandeau", "Gorrak-Hyjal", "Commun", "", "", "", 0, 0, "", 0, 900 + i, "Player-1-0")
+    p0, last, gaps = banner.paints or 0, None, []
+    for k in range(60):
+        before = banner.paints or 0
+        g.TICK(1 / 30)
+        if (banner.paints or 0) != before:
+            if last is not None:
+                gaps.append(k - last)
+            last = k
+    assert gaps and min(gaps) >= 3, f"trame changée après moins de 3 images : {gaps}"
+    collect("cadence", max_ticks=900, idle=40)
     # Contexte changé (entrée en combat) : une nouvelle trame de vie.
     before = banner.paints or 0
     g.IN_COMBAT = True
@@ -1130,6 +1144,29 @@ def mock(root, binary):
     g.FIRE("PLAYER_ENTERING_WORLD")
     assert lua.eval("CT_TABLE.ContextFlags()") & 32 == 0, "chargement resté levé sans LOADING_SCREEN_DISABLED"
     out = feed(collect("liberation", max_ticks=200, idle=30), os.path.join(work, "liberation"))
+    assert "écran de chargement" not in out, out
+    # 0.17.3 : fin d'un écran de chargement -> textes des lignes affichées renvoyés (ceux peints
+    # pendant le chargement n'ont pas été vus par l'application).
+    lines0 = lua.eval("CT_TABLE.Mirror.stats.lines")
+    g.FIRE("PLAYER_LEAVING_WORLD")
+    g.FIRE("LOADING_SCREEN_DISABLED")
+    feed(collect("recharge", max_ticks=300, idle=30), os.path.join(work, "recharge"))
+    assert lua.eval("CT_TABLE.Mirror.stats.lines") > lines0, "textes non renvoyés après l'écran de chargement"
+    # 0.17.3 : changement de zone sans écran de chargement -> contexte et chat redécrits tout de
+    # suite, au plus toutes les 2 s (les sous-zones changent souvent en ville).
+    z0 = lua.eval("CT_TABLE.zoneRefreshes or 0")
+    p0 = banner.paints or 0
+    g.FIRE("ZONE_CHANGED_NEW_AREA")
+    g.FIRE("ZONE_CHANGED")
+    assert lua.eval("CT_TABLE.zoneRefreshes or 0") == z0 + 1, "deux remises à niveau en moins de 2 s"
+    for _ in range(60):
+        g.TICK(1 / 60)
+    assert (banner.paints or 0) > p0, "changement de zone : rien de renvoyé à l'application"
+    for _ in range(130):
+        g.TICK(1 / 60)
+    g.FIRE("PLAYER_ALIVE")
+    assert lua.eval("CT_TABLE.zoneRefreshes or 0") == z0 + 2, "résurrection : chat non redécrit"
+    out = feed(collect("zone", max_ticks=200, idle=30), os.path.join(work, "zone"))
     assert "écran de chargement" not in out, out
     # 0.17.1 : un changement de contexte part en priorité (vérifié 4 fois par seconde), même avec
     # une file pleine.
@@ -1292,7 +1329,7 @@ def mock(root, binary):
     gf = g.ChevaliersTranslatorsGuide
     assert gf is not None and gf.shown, "guide non affiché"
     assert "toutes les versions de World of Warcraft" in gf.about.text, "texte du guide"
-    assert gf.music.url == "https://www.youtube.com/watch?v=KzwXwlVVSvE" and gf.music.text == gf.music.url, "lien de la musique"
+    assert gf.music.url == "https://www.youtube.com/watch?v=yvU-hxWE3VA" and gf.music.text == gf.music.url, "lien de la musique"
     assert gf.repo.url == "https://github.com/Heaumite/chevaliers-translators", "lien du dépôt"
     assert gf.warnings == 1, "addon incompatible absent du guide"
     assert g.ChevaliersTranslatorsDB.guideSeen == 4

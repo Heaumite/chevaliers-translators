@@ -48,6 +48,7 @@ pub mod selftest;
 pub mod sha256;
 pub mod ttf;
 pub mod ui;
+pub mod veille;
 #[cfg(windows)]
 pub mod capture_win;
 #[cfg(windows)]

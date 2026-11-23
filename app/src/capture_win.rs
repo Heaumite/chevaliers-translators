@@ -84,6 +84,20 @@ pub fn title_of(h: HWND) -> String {
     }
 }
 
+/// État d'une fenêtre de WoW que la traduction ne trouve plus (journal, 0.17.3) : fermée, ou
+/// encore là mais cachée ou sous un autre titre.
+pub fn window_state(h: isize) -> String {
+    let h = h as HWND;
+    unsafe {
+        if h.is_null() || IsWindow(h) == 0 {
+            return "fenêtre détruite".into();
+        }
+        let title = title_of(h);
+        let shown = if IsWindowVisible(h) != 0 { "visible" } else { "cachée" };
+        format!("fenêtre encore là, {shown}, titre « {title} »")
+    }
+}
+
 /// Version du jeu ouverte (« _retail_ », « _forever_ »...) : dossier de son exécutable.
 pub fn wow_flavor() -> Option<String> {
     wow_game().map(|(_, flavor)| flavor)

@@ -535,7 +535,8 @@ mod app {
         let r = live_games::run_games(
             0,
             48,
-            // Capture rapide toutes les 8 ms quand le bandeau change, 40 ms au repos (0.15).
+            // Capture rapide toutes les 8 ms quand le bandeau change, 20 ms au repos (0.17.4 ; 40 ms
+            // depuis la 0.15) : toujours au moins deux fois plus vite que l'addon n'écrit.
             8,
             false,
             // Calage du 08/11/2026 (Forever, Arial Narrow 16 px) : texte du miroir 1 px à gauche.

@@ -1,4 +1,4 @@
-# Chevaliers Translators (v0.17.2)
+# Chevaliers Translators (v0.17.6)
 
 ![Chevaliers Translators](media/banniere.png)
 
@@ -137,7 +137,10 @@ L'application écrit toutes les 2 s un petit addon, `ChevaliersTranslators_Live`
 À la connexion, l'addon compare les deux : la présence est jugée au moment de la lecture, quelle
 que soit la durée de l'écran de chargement qui suit (plus d'une minute parfois sur retail : en
 0.13.0, l'addon la croyait périmée et demandait un `/reload` alors que l'application tournait).
-L'application écrit cette présence dès son lancement, WoW ouvert ou non.
+L'application écrit cette présence dès son lancement, WoW ouvert ou non. Pendant la traduction,
+c'est un fil de surveillance à part qui l'écrit (0.17.3) : une boucle occupée, une capture relancée
+ou une fenêtre de WoW perdue un instant ne la rendent plus périmée ; elle cesse seulement si
+l'application ne répond plus depuis 60 s.
 
 ### Fichiers
 
@@ -146,6 +149,92 @@ L'application écrit cette présence dès son lancement, WoW ouvert ou non.
 `traduction-serveur.log`, `phrases.tsv` (traductions gardées), `mesures.tsv` (mesures prises
 pendant le jeu), `choix.tsv` (modèle accepté), `propositions-refusees.tsv`, polices et icônes du
 jeu en cache.
+
+## 0.17.6 (23/11/2026)
+
+Reprend les 0.17.3, 0.17.4 et 0.17.5.
+
+- **Plus de lignes qui se chevauchent ni de trous en raid.** En instance, WoW cache aux addons
+  certains messages (lignes secrètes) : ils restent dessinés par WoW, et leur hauteur est souvent
+  secrète aussi. L'application la comptait à sa hauteur théorique : quand la ligne secrète était
+  plus haute (icône, texte sur deux lignes), les lignes redessinées au-dessus tombaient sur elle.
+  L'addon envoie maintenant la place réelle des lignes posées sur une ligne secrète, et
+  l'application les y dessine. Toutes les lignes lisibles sont redessinées ; seules celles dans
+  une autre langue que celle du client sont traduites. Les lignes secrètes ne peuvent être lues
+  par aucun addon : elles restent à WoW, à leur place.
+- **Langue que le modèle actif ne sait pas traduire : bascule automatique.** EuroLLM 1.7B (le
+  pack de base) ne traduit que 6 langues. Un message dans une autre (polonais, tchèque...) fait
+  charger le premier modèle installé qui la traduit et qui tient (MiLMMT-46 4B sur la carte, sinon
+  sur le processeur), hors combat ; le modèle d'avant revient une minute après le dernier message
+  dans une telle langue. Un modèle qui ne se charge pas n'est pas réessayé avant 10 minutes.
+  Journal : « [traduction] PL -> FR : … ne traduit pas cette langue ; bascule sur … ».
+- Bulles traduites comme avant.
+
+## 0.17.5 (23/11/2026)
+
+Reprend les 0.17.3 et 0.17.4.
+
+- **Fenêtres « toujours au premier plan ».** Le chat traduit, les bulles, le cache du bandeau et
+  les panneaux restent au-dessus des surcouches d'autres programmes posées juste au-dessus du jeu
+  (avant, ils se rangeaient juste au-dessus de WoW, donc sous elles). Ils repassent en tête une
+  fois quand WoW revient devant. Une application active devant WoW n'est pas recouverte : rien
+  n'est dessiné sous sa fenêtre. Une fenêtre inactive posée sur le chat, elle, passe dessous.
+- **Toutes les fenêtres de l'application exclues des captures d'écran**, une seule fois à leur
+  création (Windows 10 2004 et suivants ; avant, seul le cache du bandeau l'était) : la lecture du
+  bandeau ne les voit jamais, même posées dessus. Les captures d'écran de WoW (touche du jeu) ne
+  changent pas ; une capture de tout l'écran (outil Capture, enregistrement ou partage de l'écran
+  entier) ne montre plus le chat traduit.
+- **Mises à jour calées sur l'écran** : une fois par passage, juste avant la première mise à
+  jour, l'application attend la fin de la composition en cours (`DwmFlush`) ; toutes les
+  fenêtres changées tombent ensemble au début du rafraîchissement suivant.
+
+## 0.17.4 (23/11/2026)
+
+Reprend la 0.17.3 (présence fiable, capture bloquée relancée, journal de surveillance), sans son
+redessin du chat toutes les 30 s.
+
+- **Plus aucun redessin sans changement.** Le chat traduit n'est envoyé à Windows que si ce qu'il
+  montre change. Avant, plusieurs choses le redessinaient à l'identique :
+  - la description du chat renvoyée par l'addon toutes les 15 s (et à chaque changement de zone) ;
+  - chaque message reçu, qui faisait redessiner toutes les fenêtres de chat, même celles où il
+    n'apparaît pas ;
+  - le cache du bandeau, reposé 5 fois par seconde avec la même image ;
+  - le redessin complet toutes les 30 s ajouté en 0.17.3, retiré.
+
+  Chaque image est comparée à la dernière envoyée (place, taille, pixels, icônes cliquables) :
+  identique, rien ne part. Le chat revient toujours après un écran de chargement, un combat ou un
+  retour dans WoW.
+- **Bandeau lu sans risque d'image en train de changer.** Chaque trame reste au moins 50 ms et au
+  moins 3 images à l'écran (avant 2 images). L'application lit le bandeau au repos toutes les
+  20 ms au lieu de 40 : toujours au moins deux fois plus vite que l'addon n'écrit (8 ms quand il
+  change). Chaque trame porte son numéro et un CRC-32 : une lecture prise pendant un changement
+  est refusée, et une même trame n'est traitée qu'une fois.
+- Dessin inchangé : une fenêtre à couches mise à jour d'un seul coup (`UpdateLayeredWindow`, image
+  préparée à part), jamais effacée puis redessinée.
+
+## 0.17.3 (23/11/2026)
+
+- **Le chat traduit ne peut plus rester absent après un changement de zone.** Plusieurs garde-fous :
+  - toutes les 30 s, et 1 s puis 5 s après chaque écran de chargement, l'application redessine
+    entièrement le chat traduit et le remet juste au-dessus de WoW ; une fenêtre du chat que
+    Windows aurait cachée (changement de mode d'affichage, écran de chargement) est remontrée
+    (retiré en 0.17.4 : la cause était un autre programme qui cachait les fenêtres) ;
+  - l'addon redécrit le chat à chaque changement de zone sans écran de chargement et à chaque
+    résurrection (au plus toutes les 2 s : les sous-zones changent souvent en ville) ;
+  - après un écran de chargement, l'addon renvoie aussi le texte des lignes affichées : celles
+    envoyées pendant le chargement n'avaient pas été vues par l'application ;
+  - une capture du bandeau qui ne donne plus signe de vie pendant 10 s est relancée (le chat
+    restait caché faute d'image du bandeau).
+- **Plus de « Chevaliers Translators n'est pas actif » quand l'application tourne.** La présence
+  relue par l'addon à chaque connexion et `/reload` est écrite par un fil à part, toutes les 2 s,
+  même si la boucle de traduction est occupée, et encore 60 s après une capture relancée ou une
+  fenêtre de WoW perdue un instant. Une application réellement bloquée depuis plus de 60 s ne
+  l'écrit plus : le chat officiel revient alors au `/reload`.
+- **Journal plus parlant** pour ces deux problèmes : « [miroir] chat traduit caché : bandeau
+  absent de l'image (écran de chargement) » puis « réaffiché », « [surveillance] l'application ne
+  répond plus depuis N s (étape : …) » puis « répond de nouveau », « capture du bandeau bloquée
+  depuis N s : relancée », et pour une fenêtre de WoW perdue, son état (détruite, ou encore là,
+  visible ou cachée, avec son titre).
 
 ## 0.17.2 (22/11/2026)
 
@@ -703,14 +792,31 @@ cargo build --release --target-dir target-win
 powershell -ExecutionPolicy Bypass -File ..\outils\signer.ps1            # signature « Chevaliers » (ce PC)
 .\target-win\release\ChevaliersTranslators.exe          # l'application
 .\target-win\release\ct-outils.exe live --wow $wow --flavor _retail_   # ancien `ct-spike live`, avec console
-powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.17.2.zip
+powershell -ExecutionPolicy Bypass -File ..\outils\paquet.ps1           # dist\ChevaliersTranslators-0.17.6.zip
 ```
 
 Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness.py vectors .` et
 `python3 outils/lua_harness.py mock . app/target/release/ct-outils`.
 
-## Vérifié avant livraison (0.17.2)
+## Vérifié avant livraison (0.17.6)
 
+- 0.17.6 : test Rust de la ligne posée sur une ligne secrète de WoW (dessinée à sa place réelle,
+  rien sur la ligne de WoW ; ancien addon sans place réelle toujours lu) ; test du choix du modèle
+  de bascule (MiLMMT-46 4B sur la carte, sur le processeur sans place, rien s'il est en échec
+  récent ou absent) ; 156 tests Rust.
+
+- 0.17.5 : premier plan, exclusion des captures et calage sur l'écran compilés pour Windows
+  depuis Linux ; à vérifier en jeu (test ci-dessous).
+
+- 0.17.4 : tests Rust du miroir (description renvoyée à l'identique, texte renvoyé, message d'une
+  autre fenêtre : rien d'envoyé à Windows ; vrai changement ou fenêtres à remontrer : une image ;
+  âges des lignes comparés à 0,5 s près, places de WoW et âges plafonnés) ; harnais : à 30 images
+  par seconde, chaque trame reste au moins 3 images (vérifié en repassant à 2 : le harnais échoue).
+- 0.17.3 : tests Rust de la surveillance (blocage noté au début, toutes les 30 s puis à la
+  reprise ; présence due seulement pour les jeux vus depuis moins de 60 s ; étapes nommées) et du
+  retour du bandeau signalé une seule fois ; harnais : textes renvoyés après un écran de
+  chargement, chat redécrit au changement de zone (une fois en moins de 2 s) et à la résurrection,
+  bandeau toujours immobile au repos.
 - 0.17.2 : test Rust du bandeau qui revient après un écran de chargement (chargement levé, chat
   caché 0,3 s après la disparition du bandeau, pas pour un instant plus court) ; harnais : sortie
   du monde puis retour sans fin d'écran de chargement signalée (chargement levé, trame en attente
@@ -721,7 +827,7 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   6 directions et 192 segments, plus l'ukrainien et le serbe (48 segments) ; empreinte du pack
   dans `outils/packs/europe.sha256`.
 - Compilation Windows vérifiée depuis Linux (`cargo check --target x86_64-pc-windows-gnu`).
-- 149 tests Rust sous Linux : dont, en 0.17.1, la langue de lecture (client de WoW ou langue de
+- 154 tests Rust sous Linux : dont, en 0.17.1, la langue de lecture (client de WoW ou langue de
   Windows absente de WoW), les noms anglais du jeu pour ces lecteurs, Trad:AUTO qui garde la langue
   de l'interlocuteur étranger, le modèle retiré remplacé (choix gardé, ancien fichier effacé une
   fois le nouveau installé), le pack de chaque langue (SalamandraTA 7B pour l'ukrainien
@@ -820,13 +926,23 @@ Sous Linux (vérification) : `cargo test --release`, `python3 outils/lua_harness
   « Version installée » masqué par son bouton, langue gardée d'une ouverture à l'autre ; aucune
   erreur JavaScript.
 
-## Test de la 0.17.2 (PowerShell)
+## Test de la 0.17.6 (PowerShell)
 
 Voir la réponse de livraison pour les commandes à copier-coller. Points à vérifier :
 
 | Point | Attendu |
 | --- | --- |
-| Version | fenêtre de l'application et `/chevaliers` : 0.17.2 ; GitHub : la compilation de `v0.17.2` passe (le pack Europe est déjà publié) |
+| Version | fenêtre de l'application et `/chevaliers` : 0.17.6 ; GitHub : la compilation de `v0.17.6` passe |
+| Raid | en raid, alertes de boss et messages du chef de raid : plus de lignes superposées ni de trous ; messages étrangers traduits, les autres redessinés tels quels |
+| Bascule de langue | modèle EuroLLM 1.7B actif (WoW très chargé), message polonais : journal « PL -> FR : … bascule sur MiLMMT-46 4B … », message traduit ; une minute plus tard : « retour sur EuroLLM 1.7B » |
+| Avec NARE | NARE lancé : chat traduit, bulles et cache du bandeau visibles au-dessus de sa surcouche ; traduction normale |
+| Premier plan | navigateur ouvert et actif devant WoW : il n'est pas recouvert par le chat ; retour dans WoW : chat traduit en tête |
+| Capture d'écran | outil Capture de Windows sur tout l'écran : le chat traduit n'y apparaît pas (normal) ; touche de capture de WoW : inchangée |
+| Pas de clignotement | Nare coupé (ou Chevaliers Translators en exception), en ville, rester 2 min sans bouger : le chat traduit et le bandeau ne clignotent jamais ; Gestionnaire des tâches : `ChevaliersTranslators.exe` presque à 0 % de processeur au repos |
+| Messages en rafale | en ville (canal Commerce), messages traduits sans trou ; journal : pas (ou très peu) de « [bandeau] N trame(s) manquée(s) » |
+| Changement de zone | traverser plusieurs zones, prendre un portail, mourir et ressusciter : le chat traduit revient à chaque fois ; journal : « [miroir] chat traduit caché : bandeau absent… » puis « [miroir] chat traduit réaffiché » à chaque écran de chargement |
+| Avis « pas actif » | application lancée, `/reload` plusieurs fois (et juste après un écran de chargement) : jamais le panneau « n'est pas actif » ; la traduction redémarre seule |
+| Journal de surveillance | `%LOCALAPPDATA%\ChevaliersTranslators\journal` : chercher « [surveillance] », « capture du bandeau bloquée » ou « fenêtre fermée ( » ; les envoyer s'il y en a |
 | Écran de chargement | portail ou pierre de foyer : le chat traduit disparaît dès l'écran de chargement (moins d'une demi-seconde) et revient dès l'arrivée ; journal : « [contexte] écran de chargement » puis « [contexte] en jeu… » ou « fin de l'écran de chargement (bandeau revenu) » |
 | Mort en instance | mourir en donjon, libérer l'esprit : à l'arrivée au cimetière, le chat traduit est là tout de suite (messages de groupe traduits) ; de même en revenant dans l'instance |
 | Pack Europe | lancement de l'application : bulle « … MiLMMT-46 4B 1,84 Go… » ; fin du téléchargement : journal « [modèles] TranslateGemma 4B (remplacé par MiLMMT-46 4B) : ancien fichier effacé » ; fenêtre des modèles : MiLMMT-46 4B en jaune, SalamandraTA 7B « pour une autre langue » |

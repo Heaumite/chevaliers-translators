@@ -672,6 +672,42 @@ pub fn first_install_room(dedicated: u64, others: u64) -> u64 {
     dedicated.saturating_sub(others).saturating_sub(catalog::WOW_VRAM_REFERENCE)
 }
 
+/// Détour (0.17.6) : le modèle actif ne sait pas traduire une langue reçue (EuroLLM 1.7B : 6
+/// langues) ; un modèle qui la traduit est chargé le temps qu'il en faut, puis le modèle d'avant
+/// revient après `DETOUR_STAY` sans message dans une telle langue.
+struct Detour {
+    home: Option<usize>,
+    target: usize,
+    last_need: Instant,
+}
+
+const DETOUR_STAY: Duration = Duration::from_secs(60);
+/// Modèle de détour qui n'a pas pu se charger : pas réessayé avant ce délai.
+const DETOUR_BAN: Duration = Duration::from_secs(600);
+
+/// Étape de la chaîne pour traduire `src` -> `tgt` à la place de l'étape `cur` : la première
+/// (dans l'ordre de la chaîne) installée, qui traduit cette paire, et qui tient dans la mémoire
+/// vidéo libre (celle du modèle actif comprise, il est déchargé) si elle va sur la carte.
+pub fn detour_target(
+    plan: &Plan,
+    cur: usize,
+    src: &str,
+    tgt: &str,
+    installed: &dyn Fn(&Candidate) -> bool,
+    free: Option<u64>,
+    banned: &dyn Fn(&str) -> bool,
+) -> Option<usize> {
+    (0..plan.chain.len()).find(|&p| {
+        p != cur
+            && plan.step(p).is_some_and(|c| {
+                c.model.langs.covers(src, tgt)
+                    && installed(c)
+                    && !banned(&c.label())
+                    && (c.place != Place::Gpu || free.is_none_or(|f| c.footprint <= f))
+            })
+    })
+}
+
 /// Mémoire vidéo libre en comptant celle du modèle chargé (s'il est sur la carte).
 fn available(plan: &Plan, running: Option<&Running>, free: u64) -> u64 {
     free + running.and_then(|r| plan.step(r.pos)).filter(|c| c.place == Place::Gpu).map_or(0, |c| c.footprint)
@@ -709,6 +745,8 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
     let mut lat: VecDeque<f64> = VecDeque::new();
     // Mémoire vidéo surveillée pendant le jeu (0.12.6).
     let mut vram_at = Instant::now();
+    let mut detour: Option<Detour> = None;
+    let mut detour_failed: HashMap<String, Instant> = HashMap::new();
     let say = |s: String| {
         let _ = ev.send(Event::Status(s));
     };
@@ -755,6 +793,7 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
                 Control::Replan => replan = true,
             }
             if replan {
+                detour = None;
                 let free = bench::vram_sample().map(|(f, _, _)| available(&plan, running.as_ref(), f));
                 plan = plan_with_choice(&cfg, Some(&key)).0;
                 let best = gov.best_fit(&gov_steps(&plan, &installed), free, Instant::now());
@@ -823,6 +862,14 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
                     }
                     Err((f, why)) => {
                         let c = plan.step(p).unwrap();
+                        // Modèle de détour qui ne se charge pas : retour au modèle d'avant, détour
+                        // pas réessayé avant 10 min.
+                        if detour.as_ref().is_some_and(|d| d.target == p) {
+                            detour_failed.insert(c.label(), Instant::now());
+                            pos = detour.take().and_then(|d| d.home);
+                            say(format!("{} : {why} ; détour abandonné, retour au modèle d'avant", c.label()));
+                            continue;
+                        }
                         let mut again = String::new();
                         if f == Failure::Memory {
                             // Saturation au chargement : mis de côté un moment, pas interdit.
@@ -903,6 +950,7 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
                 for (_, w) in busy.drain() {
                     queue.push_front(w.job);
                 }
+                detour = None;
                 let c = plan.step(p).unwrap();
                 let why = format!("le serveur de traduction s'est arrêté ({st})");
                 note(c, Failure::Crash, &why);
@@ -916,6 +964,7 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
         let m = median(&lat);
         if lat.len() == 10 && m > catalog::MAX_LATENCY {
             if let Some(r) = running.take() {
+                detour = None;
                 let c = plan.step(r.pos).unwrap();
                 note(c, Failure::Slow, &format!("latence médiane {m:.2} s;latence={m:.2}"));
                 drop_choice(&key, c);
@@ -987,6 +1036,7 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
                     )),
                 };
                 if let Some((t, msg)) = change {
+                    detour = None;
                     say(msg);
                     if running.take().is_some() {
                         for (_, w) in busy.drain() {
@@ -1007,6 +1057,61 @@ fn worker(cfg: Config, jobs: Receiver<Job>, ev: Sender<Event>) {
         for k in overdue(&queue, now, expected, next_wave, wave_busy, gap).into_iter().rev() {
             let j = queue.remove(k).unwrap();
             done(j.id, Err("trop ancien".into()), 0.0, false);
+        }
+        // Détour (0.17.6) : langue que le modèle actif ne sait pas traduire (hors combat) ; retour
+        // au modèle d'avant une minute après le dernier message dans une telle langue.
+        if let Some(r) = running.as_ref() {
+            let active = plan.step(r.pos).map(|c| c.model);
+            let home_model = match &detour {
+                Some(d) => d.home.and_then(|h| plan.step(h)).map(|c| c.model),
+                None => active,
+            };
+            let unsupported = |m: &catalog::Model| {
+                queue.iter().chain(busy.values().map(|w| &w.job)).find(|j| !m.langs.covers(j.ask.src, j.ask.tgt)).map(|j| (j.ask.src, j.ask.tgt))
+            };
+            let need = home_model.and_then(unsupported);
+            match detour.as_mut() {
+                None => {
+                    if let (Some((src, tgt)), false) = (need, in_combat()) {
+                        detour_failed.retain(|_, t| t.elapsed() < DETOUR_BAN);
+                        let free = bench::vram_sample().map(|(f, _, _)| available(&plan, Some(r), f));
+                        let banned = |l: &str| detour_failed.contains_key(l);
+                        if let Some(q) = detour_target(&plan, r.pos, src, tgt, &installed, free, &banned) {
+                            let from = plan.step(r.pos).map(|c| c.label()).unwrap_or_default();
+                            say(format!(
+                                "{} -> {} : {from} ne traduit pas cette langue ; bascule sur {} le temps de ces messages, puis retour",
+                                src.to_uppercase(),
+                                tgt.to_uppercase(),
+                                step_label(&plan, q)
+                            ));
+                            detour = Some(Detour { home: Some(r.pos), target: q, last_need: now });
+                            running = None;
+                            for (_, w) in busy.drain() {
+                                queue.push_front(w.job);
+                            }
+                            lat.clear();
+                            pos = Some(q);
+                            continue;
+                        }
+                    }
+                }
+                Some(d) => {
+                    if need.is_some() {
+                        d.last_need = now;
+                    } else if now.saturating_duration_since(d.last_need) >= DETOUR_STAY && busy.is_empty() {
+                        let home = d.home;
+                        detour = None;
+                        say(format!(
+                            "plus de message dans une langue que le modèle d'avant ne traduit pas : retour sur {}",
+                            home.map(|h| step_label(&plan, h)).unwrap_or_else(|| "le modèle d'avant".into())
+                        ));
+                        running = None;
+                        lat.clear();
+                        pos = home;
+                        continue;
+                    }
+                }
+            }
         }
         let Some(r) = running.as_ref() else {
             // Premier modèle pas encore choisi : la file attend (il est chargé au tour suivant).
@@ -1193,6 +1298,31 @@ mod tests {
         // Acronymes traduits par le dictionnaire (0.12.4), le reste par la mémoire.
         assert_eq!(w.text(), "Vends |cffa335ee|Hitem:2::::|h[Épée]|h|r pas cher, MP");
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_language_the_active_model_cannot_translate_switches_to_one_that_can() {
+        // 0.17.6 : EuroLLM 1.7B (6 langues) actif, message polonais : MiLMMT-46 4B, d'abord sur
+        // la carte s'il y tient, sinon sur le processeur ; rien si aucun modèle ne convient.
+        use crate::plan::{estimate, tests_support::pc, Conditions};
+        assert!(catalog::Langs::Low.covers("de", "fr") && !catalog::Langs::Low.covers("pl", "fr"));
+        assert!(catalog::Langs::All.covers("pl", "fr"));
+        let h = pc("AMD Radeon RX 6950 XT", 0x1002, 16, 8);
+        let p = estimate(&h, &|_| None, &catalog::Trials::new(), Conditions { size: Some((3840, 1600)), ..Conditions::worst() });
+        let label = |i: Option<usize>| i.and_then(|i| p.step(i)).map(|c| format!("{}/{}", c.model.id, c.place.code()));
+        let low = (0..p.chain.len()).find(|&i| p.step(i).is_some_and(|c| c.model.id == "eurollm-1.7b" && c.place == Place::Gpu)).unwrap();
+        let all = |_: &Candidate| true;
+        let never = |_: &str| false;
+        let gpu = detour_target(&p, low, "pl", "fr", &all, Some(16 * crate::hw::GIB), &never);
+        assert_eq!(label(gpu).as_deref(), Some("milmmt-46-4b/gpu"));
+        // Pas la place sur la carte : sur le processeur.
+        assert_eq!(label(detour_target(&p, low, "pl", "fr", &all, Some(crate::hw::GIB), &never)).as_deref(), Some("milmmt-46-4b/cpu"));
+        // Modèle de détour en échec récent : écarté.
+        let banned = |l: &str| l.contains("MiLMMT");
+        assert_eq!(detour_target(&p, low, "pl", "fr", &all, Some(crate::hw::GIB), &banned), None);
+        // Seul EuroLLM installé : pas de détour.
+        let only_low = |c: &Candidate| c.model.id == "eurollm-1.7b";
+        assert_eq!(detour_target(&p, low, "pl", "fr", &only_low, None, &never), None);
     }
 
     #[test]

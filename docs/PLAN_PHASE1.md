@@ -228,3 +228,24 @@ miroir oubliées après un `/reload`.
 instance comprise) : chargement levé aussi à l'entrée dans le monde, contexte envoyé en priorité et
 répété, fin du chargement déduite du retour du bandeau ; chat caché 0,3 s après la disparition du
 bandeau (1,2 s avant).
+
+**0.17.3 (23/11)** : garde-fous du chat traduit (redessiné et remis au-dessus de WoW toutes les
+30 s et après chaque écran de chargement, fenêtres cachées par Windows remontrées, chat redécrit
+par l'addon à chaque changement de zone et résurrection, textes renvoyés après un chargement,
+capture bloquée relancée) ; présence écrite par un fil de surveillance indépendant de la boucle
+(plus d'avis « n'est pas actif » quand l'application tourne) ; blocages et fenêtres de WoW perdues
+notés au journal avec l'étape en cours.
+
+**0.17.4 (23/11)** : cause des problèmes de la 0.17.3 trouvée (un autre programme du joueur cachait
+toute fenêtre autre que le jeu) ; redessin toutes les 30 s retiré ; plus aucun redessin sans
+changement (image comparée à la dernière envoyée, description renvoyée à l'identique ignorée, cache
+du bandeau comparé à son contenu) ; trame tenue au moins 3 images, bandeau lu au repos toutes les
+20 ms (au moins deux fois plus vite qu'il n'est écrit).
+
+**0.17.5 (23/11)** : fenêtres « toujours au premier plan » (au-dessus de la surcouche NARE),
+toutes exclues des captures d'écran dès leur création, mises à jour calées sur la composition de
+l'écran (DwmFlush une fois par passage).
+
+**0.17.6 (23/11)** : place réelle des lignes posées sur une ligne secrète de WoW (plus de
+chevauchement en raid) ; bascule automatique sur un modèle qui traduit une langue que le modèle
+actif ne connaît pas (EuroLLM 1.7B : 6 langues), retour une minute après.

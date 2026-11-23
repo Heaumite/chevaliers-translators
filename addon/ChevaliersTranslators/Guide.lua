@@ -18,7 +18,7 @@ local MEDIA = "Interface\\AddOns\\ChevaliersTranslators\\Media\\"
 -- Révision du contenu du guide : un guide changé s'affiche de nouveau une fois (0.15.1).
 CT.GUIDE_REV = 4
 CT.GUIDE_REPO = "https://github.com/Heaumite/chevaliers-translators"
-CT.GUIDE_MUSIC = "https://www.youtube.com/watch?v=KzwXwlVVSvE"
+CT.GUIDE_MUSIC = "https://www.youtube.com/watch?v=yvU-hxWE3VA"
 
 local GOLD = { 0.902, 0.78, 0.494 }
 
@@ -107,7 +107,7 @@ local function BuildGuide()
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
   -- Musique de l'auteur.
-  Label(f, "GameFontNormal", "Guide d'installation de l'addon :", -140, GOLD)
+  Label(f, "GameFontNormal", "Musique de l'auteur de l'addon :", -140, GOLD)
   f.music = LinkBox(f, CT.GUIDE_MUSIC, -162)
   -- Ce que fait l'addon une fois installé.
   local about = Label(f, "GameFontHighlight",

@@ -294,6 +294,21 @@ local function HeightDelta(fs, rows, lineH, spacing, k)
   return max(-127, min(127, d))
 end
 
+-- Bas réel d'une ligne dans la fenêtre de chat, en pixels physiques depuis le bas de la fenêtre
+-- (0.17.6) ; nil si inconnu (valeur secrète). Une ligne secrète laissée à WoW (en raid) a une
+-- hauteur souvent secrète : en la comptant à sa hauteur théorique, l'application dessinait les
+-- lignes du dessus trop bas, sur elle (lignes qui se chevauchent, trous).
+local function LineBottom(fs, frameBottomPx, ph)
+  if not fs.GetBottom then return nil end
+  local ok, b = pcall(fs.GetBottom, fs)
+  if not ok or IsSecret(b) or type(b) ~= "number" then return nil end
+  local ok2, s = pcall(fs.GetEffectiveScale, fs)
+  if not ok2 or IsSecret(s) or type(s) ~= "number" then return nil end
+  local off = b * s * ph / 768 - frameBottomPx
+  if off < 0 or off > 16000 then return nil end
+  return off
+end
+
 local function FontFlagsCode(flags)
   flags = flags or ""
   local code = 0
@@ -365,6 +380,14 @@ local function Describe(i, cf, now)
         e.info, e.base, e.rows = info, max(tonumber(ts) or 0, override), Rows(fs)
         e.hd = HeightDelta(fs, e.rows, lineH, spacing, k)
         e.id = e.gap and 0 or LineId(info)
+        e.fs = fs
+      end
+      -- Place réelle des lignes lisibles posées sur une ligne laissée à WoW (0.17.6).
+      local bpx = b * k
+      for j = 1, n do
+        local e = lines[j]
+        e.pos = nil
+        if j > 1 and not e.gap and lines[j - 1].gap then e.pos = LineBottom(e.fs, bpx, ph or 768) end
       end
       flags = FLAG_VISIBLE + FLAG_ROWS + FLAG_HEIGHTS
       if M.mode == "calage" then flags = flags + FLAG_CALAGE end
@@ -383,7 +406,8 @@ local function Describe(i, cf, now)
       sig = flags * 7 + view.l * 3 + view.b * 5 + view.w * 11 + view.h * 13
         + floor(view.size * 10) * 17 + floor(view.lineH * 10) * 19 + view.fflags * 23 + #path * 29
       for j = 1, n do
-        sig = (sig * 31 + lines[j].id * 37 + floor(lines[j].base * 10) + lines[j].rows * 41 + (lines[j].hd + 128) * 43) % 2147483647
+        sig = (sig * 31 + lines[j].id * 37 + floor(lines[j].base * 10) + lines[j].rows * 41 + (lines[j].hd + 128) * 43
+          + floor((lines[j].pos or -1) * 4) * 47) % 2147483647
       end
     end
   end
@@ -716,6 +740,16 @@ local function SendView(i, cf, now, flags, n, view)
     U16(p, view.k * 1000)
     -- Écart de hauteur de chaque ligne (0.14.4).
     for j = 1, n do U8(p, (lines[j].hd or -128) % 256) end
+    -- Bas réel des lignes posées sur une ligne laissée à WoW (0.17.6) : « P », nombre, puis
+    -- (indice, bas en quarts de pixel) ; autant qu'il en tient dans la trame.
+    local pos = {}
+    for j = 1, n do
+      if lines[j].pos and #p + 2 + 3 * (#pos + 1) <= maxp then pos[#pos + 1] = j end
+    end
+    if #pos > 0 then
+      U8(p, 80); U8(p, #pos)
+      for _, j in ipairs(pos) do U8(p, j - 1); U16(p, min(65534, floor(lines[j].pos * 4 + 0.5))) end
+    end
   end
   CT.Enqueue(CT.FRAME_MVIEW, p, #p)
   M.stats.views = M.stats.views + 1
@@ -760,6 +794,14 @@ end
 -- renvoyer les textes déjà connus de l'application.
 function M:Refresh()
   for _, st in pairs(self.state) do st.at = -100 end
+end
+
+-- Remise à niveau complète (0.17.3) : fenêtres redécrites et textes des lignes affichées renvoyés
+-- au prochain passage. Après un changement de zone, et toutes les 30 s : si l'application a perdu
+-- une partie du chat (trames manquées), il revient au plus tard 30 s après.
+function M:Resync()
+  self:Refresh()
+  for id in pairs(self.textsAt) do self.textsAt[id] = -1000 end
 end
 
 function M:Reset()

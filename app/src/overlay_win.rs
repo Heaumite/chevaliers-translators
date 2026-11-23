@@ -32,7 +32,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     IDC_HAND, MA_NOACTIVATE, PM_REMOVE, SM_CYSCREEN, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_LBUTTONDBLCLK,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WNDCLASSEXW,
     WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, SetWindowPos,
-    GetWindow, GetWindowLongPtrW, GetWindowRect, GWL_EXSTYLE, GW_HWNDNEXT, GW_HWNDPREV, HWND_NOTOPMOST, HWND_TOP,
+    GetWindow, GetWindowLongPtrW, GetWindowRect, GWL_EXSTYLE, GW_HWNDNEXT,
     HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
 };
 
@@ -187,8 +187,12 @@ pub struct Overlay {
     origin: (i32, i32),
     /// Fenêtres exclues des captures d'écran (cache du bandeau).
     covers: Vec<u8>,
-    /// Fenêtre de WoW sous laquelle les nôtres sont rangées (0.17.0).
+    /// Fenêtre de WoW (0.17.0).
     wow: HWND,
+    /// Windows 10 2004 ou suivant : fenêtres exclues des captures dès leur création (0.17.5).
+    exclude: bool,
+    /// Une mise à jour a déjà attendu la composition de l'écran pendant ce passage (0.17.5).
+    synced: bool,
 }
 
 /// Windows 10 version 2004 (build 19041) ou suivant : WDA_EXCLUDEFROMCAPTURE existe (avant, la
@@ -244,11 +248,27 @@ impl Overlay {
                 origin: (0, GetSystemMetrics(SM_CYSCREEN)),
                 covers: Vec::new(),
                 wow: null_mut(),
+                exclude: capture_exclusion_supported(),
+                synced: false,
             })
         }
     }
 
-    fn create(class: &[u16], title: &str, ex_style: u32) -> Result<HWND, String> {
+    /// Fenêtre créée « toujours au premier plan » (0.17.5 : au-dessus des surcouches d'autres
+    /// programmes posées juste au-dessus du jeu) et, une seule fois à sa création, exclue des
+    /// captures d'écran : la lecture du bandeau ne la voit jamais, même posée dessus.
+    fn create(class: &[u16], title: &str, ex_style: u32, exclude: bool) -> Result<HWND, String> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+        let hwnd = Self::create_raw(class, title, ex_style | WS_EX_TOPMOST)?;
+        if exclude {
+            unsafe {
+                SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+            }
+        }
+        Ok(hwnd)
+    }
+
+    fn create_raw(class: &[u16], title: &str, ex_style: u32) -> Result<HWND, String> {
         let title = wide(title);
         let hwnd = unsafe {
             CreateWindowExW(
@@ -278,6 +298,7 @@ impl Overlay {
                 &self.class,
                 &format!("CT miroir {frame}"),
                 WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                self.exclude,
             )?;
             self.wins.insert(frame, Win::new(hwnd));
         }
@@ -291,6 +312,7 @@ impl Overlay {
                 &self.click_class,
                 &format!("CT copie {frame}"),
                 WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                self.exclude,
             )?;
             self.clicks.insert(frame, Win::new(hwnd));
         }
@@ -305,7 +327,25 @@ impl Overlay {
         r
     }
 
+    /// Nouveau passage de la boucle : la prochaine mise à jour attendra la composition de l'écran.
+    pub fn new_pass(&mut self) {
+        self.synced = false;
+    }
+
+    /// Calage sur l'écran (0.17.5) : une fois par passage, juste avant la première mise à jour,
+    /// on attend la fin de la composition en cours (DwmFlush) ; toutes les mises à jour du passage
+    /// tombent au début du rafraîchissement suivant, ensemble.
+    fn sync(&mut self) {
+        if !self.synced {
+            self.synced = true;
+            unsafe {
+                windows_sys::Win32::Graphics::Dwm::DwmFlush();
+            }
+        }
+    }
+
     fn show_inner(&mut self, frame: u8, left: i32, bottom: i32, cv: &Canvas, hits: &[Hit]) -> Result<(), String> {
+        self.sync();
         let top = self.origin.1 - bottom - cv.h as i32;
         let left = self.origin.0 + left;
         self.window(frame)?.present(left, top, cv.w, cv.h, &cv.px)?;
@@ -349,6 +389,7 @@ impl Overlay {
 
     /// Panneau placé en pixels du bureau (coin haut-gauche), sans icône cliquable.
     pub fn show_screen(&mut self, frame: u8, left: i32, top: i32, cv: &Canvas) -> Result<(), String> {
+        self.sync();
         self.window(frame)?.present(left, top, cv.w, cv.h, &cv.px)?;
         if let Some(c) = self.clicks.get_mut(&frame) {
             c.hide();
@@ -366,10 +407,9 @@ impl Overlay {
         }
     }
 
-    /// Range les fenêtres affichées juste au-dessus de WoW dans l'ordre des fenêtres (0.17.0) :
-    /// une autre application passée devant WoW les recouvre comme elle recouvre le jeu. WoW
-    /// « toujours au premier plan » (certains modes plein écran fenêtré) : les nôtres aussi, juste
-    /// au-dessus de lui. Rien n'est touché si elles y sont déjà.
+    /// Fenêtres affichées « toujours au premier plan » (0.17.5 ; de la 0.17.0 à la 0.17.4, juste
+    /// au-dessus de WoW : une surcouche posée au-dessus du jeu les cachait). Une autre application
+    /// active devant WoW n'est pas recouverte : le miroir ne dessine rien sous sa fenêtre.
     // Poignée de fenêtre transmise à Windows, jamais lue par le programme.
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn restack(&mut self, wow: HWND, force: bool) {
@@ -381,46 +421,17 @@ impl Overlay {
         if ours.is_empty() {
             return;
         }
+        // 0.17.5 : « toujours au premier plan », au-dessus des surcouches d'autres programmes
+        // posées juste au-dessus du jeu. Rien n'est touché si elles le sont déjà, sauf fenêtre
+        // neuve ou WoW revenu devant (`force`) : elles repassent alors en tête, une fois.
         unsafe {
-            let topmost = (GetWindowLongPtrW(wow, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0;
-            let mismatch = ours.iter().any(|&w| ((GetWindowLongPtrW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0) != topmost);
-            // Déjà en place : les nôtres sont les fenêtres juste au-dessus de WoW.
-            if !force && !mismatch {
-                let mut h = wow;
-                let mut placed = true;
-                for _ in 0..ours.len() {
-                    h = GetWindow(h, GW_HWNDPREV);
-                    if h.is_null() || !ours.contains(&h) {
-                        placed = false;
-                        break;
-                    }
-                }
-                if placed {
-                    return;
-                }
+            let all_top = ours.iter().all(|&w| (GetWindowLongPtrW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0);
+            if !force && all_top {
+                return;
             }
-            // Première fenêtre au-dessus de WoW qui n'est pas des nôtres : les nôtres se glissent
-            // entre elle et WoW. WoW ordinaire sous une fenêtre « toujours au premier plan » : en
-            // tête des fenêtres ordinaires.
-            let mut above = GetWindow(wow, GW_HWNDPREV);
-            while !above.is_null() && ours.contains(&above) {
-                above = GetWindow(above, GW_HWNDPREV);
-            }
-            let above_topmost = !above.is_null() && (GetWindowLongPtrW(above, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0;
-            let mut after: HWND = if above.is_null() {
-                if topmost { HWND_TOPMOST } else { HWND_TOP }
-            } else if above_topmost && !topmost {
-                HWND_TOP
-            } else {
-                above
-            };
             let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
             for &w in &ours {
-                if !topmost && (GetWindowLongPtrW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST) != 0 {
-                    SetWindowPos(w, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
-                }
-                SetWindowPos(w, after, 0, 0, 0, 0, flags);
-                after = w;
+                SetWindowPos(w, HWND_TOPMOST, 0, 0, 0, 0, flags);
             }
         }
         for w in self.wins.values_mut().chain(self.clicks.values_mut()) {
@@ -435,15 +446,17 @@ impl Overlay {
     pub fn show_cover(&mut self, frame: u8, left: i32, top: i32, cv: &Canvas) -> Result<(), String> {
         use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
         if !self.covers.contains(&frame) {
-            if !capture_exclusion_supported() {
+            if !self.exclude {
                 return Err("Windows trop ancien pour cacher le bandeau (10 version 2004 au moins)".into());
             }
             let w = self.window(frame)?;
+            // Déjà exclue à sa création (0.17.5) ; vérifiée ici : sans exclusion, pas de cache.
             if unsafe { SetWindowDisplayAffinity(w.hwnd, WDA_EXCLUDEFROMCAPTURE) } == 0 {
                 return Err(format!("SetWindowDisplayAffinity refusé ({})", unsafe { windows_sys::Win32::Foundation::GetLastError() }));
             }
             self.covers.push(frame);
         }
+        self.sync();
         self.window(frame)?.present(left, top, cv.w, cv.h, &cv.px)?;
         self.settle();
         Ok(())

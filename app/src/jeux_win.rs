@@ -7,7 +7,8 @@
 //!
 //! Économies (0.15) :
 //!   - capture rapide (toutes les `poll_ms`) seulement quand le bandeau change ; immobile depuis
-//!     1,5 s : toutes les 40 ms (le bandeau garde chaque trame au moins 50 ms) ;
+//!     1,5 s : toutes les 20 ms (0.17.4 ; le bandeau garde chaque trame au moins 50 ms et 3 images,
+//!     il est donc toujours lu au moins deux fois plus vite qu'il n'est écrit) ;
 //!   - zone de capture resserrée sur le bandeau dès qu'il est trouvé (environ 4 fois moins de
 //!     pixels lus), élargie s'il est perdu.
 //!
@@ -20,7 +21,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -35,6 +36,7 @@ use crate::live::{FontSource, Live, ALIVE_TIMEOUT};
 use crate::mirror;
 use crate::overlay_win::Overlay;
 use crate::proto::DecodeError;
+use crate::veille::{self, Phase};
 
 /// Un jeu à traduire.
 #[derive(Clone, Debug)]
@@ -50,8 +52,10 @@ pub struct GameSpec {
     pub label: String,
 }
 
-/// Capture lente quand le bandeau est immobile (ms).
-const IDLE_POLL_MS: u64 = 40;
+/// Capture lente quand le bandeau est immobile (ms). 0.17.4 : 20 ms (avant 40), au moins deux
+/// fois plus vite que l'addon n'écrit (une trame toutes les 50 ms au plus) : la première trame
+/// après un repos est toujours lue, même tenue 50 ms seulement.
+const IDLE_POLL_MS: u64 = 20;
 /// Bandeau immobile depuis ce temps : capture lente.
 const FAST_FOR: Duration = Duration::from_millis(1500);
 /// Image du cache du bandeau renouvelée au plus à cette cadence.
@@ -76,12 +80,15 @@ enum Cap {
 /// le bandeau garde chaque trame au moins 50 ms.
 const HIDDEN_POLL_MS: u64 = 25;
 
-fn spawn_capture(game: usize, hwnd: isize, width: usize, height: usize, poll_ms: u64, tx: Sender<(usize, Cap)>, stop: Arc<AtomicBool>) {
+/// Capture d'un jeu dans son propre fil. `beat` : signe de vie (millisecondes de `veille::ms`),
+/// relu par la boucle principale qui relance une capture bloquée (0.17.3).
+#[allow(clippy::too_many_arguments)]
+fn spawn_capture(game: usize, hwnd: isize, width: usize, height: usize, poll_ms: u64, tx: Sender<(usize, Cap)>, stop: Arc<AtomicBool>, beat: Arc<AtomicU64>) {
     std::thread::spawn(move || {
         // Une erreur interne du fil de capture ne le laisse plus mourir en silence (0.15.1 : le
         // jeu restait sans traduction) : elle remonte comme un échec, et la capture est relancée.
         let tx2 = tx.clone();
-        let run = std::panic::AssertUnwindSafe(move || capture_loop(game, hwnd, width, height, poll_ms, tx, stop));
+        let run = std::panic::AssertUnwindSafe(move || capture_loop(game, hwnd, width, height, poll_ms, tx, stop, beat));
         if let Err(p) = std::panic::catch_unwind(run) {
             let why = p
                 .downcast_ref::<String>()
@@ -93,7 +100,17 @@ fn spawn_capture(game: usize, hwnd: isize, width: usize, height: usize, poll_ms:
     });
 }
 
-fn capture_loop(game: usize, hwnd: isize, width: usize, height: usize, poll_ms: u64, tx: Sender<(usize, Cap)>, stop: Arc<AtomicBool>) {
+#[allow(clippy::too_many_arguments)]
+fn capture_loop(
+    game: usize,
+    hwnd: isize,
+    width: usize,
+    height: usize,
+    poll_ms: u64,
+    tx: Sender<(usize, Cap)>,
+    stop: Arc<AtomicBool>,
+    beat: Arc<AtomicU64>,
+) {
     {
         let target = hwnd as HWND;
         let mut cap = match Capturer::new_for(width, height, target) {
@@ -125,6 +142,7 @@ fn capture_loop(game: usize, hwnd: isize, width: usize, height: usize, poll_ms: 
                 (false, _) => IDLE_POLL_MS.max(poll_ms),
             };
             std::thread::sleep(Duration::from_millis(wait));
+            beat.store(veille::ms(), Ordering::Relaxed);
             if hwnd != 0 && !cap.target_alive() {
                 let _ = tx.send((game, Cap::Fail("fenêtre de WoW fermée".into())));
                 return;
@@ -232,6 +250,8 @@ struct Session {
     token: usize,
     spec: GameSpec,
     stop: Arc<AtomicBool>,
+    /// Signe de vie de sa capture (0.17.3 : une capture bloquée est relancée).
+    cap_beat: Arc<AtomicU64>,
     live: Live,
     overlay: Overlay,
     started: Instant,
@@ -253,19 +273,28 @@ struct Session {
     restore: Option<(Instant, Option<String>, String)>,
     wow_front: bool,
     combat_seen: bool,
+    /// Chat traduit caché parce que le bandeau a disparu de l'image (écran de chargement).
+    hidden_by_banner: bool,
+    /// WoW au premier plan au passage précédent (0.17.5).
+    was_in_front: bool,
     /// Autre fenêtre devant ce jeu (pixels du bureau), relevée toutes les 100 ms.
     over: Option<(i32, i32, i32, i32)>,
     cover: CoverState,
 }
+
+/// Pose du cache du bandeau : gauche, haut, hauteur, couleurs de l'image, fenêtre devant.
+type CoverKey = (i32, i32, usize, Vec<[u8; 3]>, Option<(i32, i32, i32, i32)>);
 
 #[derive(Default)]
 struct CoverState {
     /// Dernière image reçue, et moment.
     strip: Option<(CoverStrip, Instant)>,
     shown_at: Option<Instant>,
-    /// Dernière pose (gauche, haut, image reçue à, fenêtre devant) : rien n'est renvoyé à Windows
-    /// si rien n'a changé.
-    posted: Option<(i32, i32, Instant, Option<(i32, i32, i32, i32)>)>,
+    /// Dernière pose (gauche, haut, hauteur et couleurs de l'image, fenêtre devant) : rien n'est
+    /// renvoyé à Windows si rien n'a changé (0.17.4 : comparée à son contenu, plus à son heure
+    /// d'arrivée ; la même image, renvoyée toutes les 200 ms par la capture, était reposée 5 fois
+    /// par seconde).
+    posted: Option<CoverKey>,
     /// Retraits juste après la pose, pauses (0.16.3 : plus d'abandon sur un changement de fenêtre).
     guard: CoverGuard,
     off: bool,
@@ -329,9 +358,9 @@ impl Session {
         // son bord, ou retiré s'il est entièrement dessous).
         let canvas = place.as_ref().map(|(l, t, s, _)| clip_cover(&cover_canvas(s), *l, *t, self.over));
         match (place, canvas) {
-            (Some((l, t, _, at)), Some(Some(cv))) => {
-                let key = (l, t, at, self.over);
-                if self.cover.shown_at.is_some() && self.cover.posted == Some(key) {
+            (Some((l, t, s, _)), Some(Some(cv))) => {
+                let key = (l, t, s.h, s.row, self.over);
+                if self.cover.shown_at.is_some() && self.cover.posted.as_ref() == Some(&key) {
                     // Même image, même place, déjà posée : rien à refaire.
                 } else {
                     self.cover.posted = Some(key);
@@ -401,6 +430,7 @@ impl Session {
     /// Une passe de la boucle pour ce jeu (frames décodées déjà données à `live`).
     fn step(&mut self, now: Instant, fonts: &mut Option<crate::panel::Fonts>, primary: bool) {
         // Envoi traduit : collage puis Entrée, seulement si ce WoW est devant (boîte de saisie prête).
+        veille::beat(Phase::Send);
         for (id, text) in self.live.sends_due(now, crate::keys_win::keys_held()) {
             if !self.in_front() {
                 crate::say!("[S3] envoi {id} : WoW n'est plus au premier plan, rien n'est collé");
@@ -449,13 +479,18 @@ impl Session {
             return;
         }
         self.last_tick = now;
-        // Fenêtres du miroir, du cache et des bulles rangées juste au-dessus de WoW (0.17.0) ; à
-        // chaque passage : WoW remis devant (retour par Alt+Tab) les recouvre jusque-là.
-        self.overlay.restack(self.window(), false);
+        self.overlay.new_pass();
+        // Fenêtres du miroir, du cache et des bulles « toujours au premier plan » (0.17.5) ; WoW
+        // revenu devant (Alt+Tab, clic) : remises en tête une fois, au-dessus d'une surcouche
+        // d'un autre programme qui se serait placée entre-temps.
+        let in_front = self.in_front();
+        veille::beat(Phase::Stack);
+        let back = in_front && !self.was_in_front;
+        self.was_in_front = in_front;
+        self.overlay.restack(self.window(), back);
         // Caché dès que l'addon ne donne plus signe de vie (déconnexion, écran de chargement,
         // choix du personnage) ou que WoW est fermé ou réduit ; revient avec lui. Une autre
         // application active ne le cache pas : le chat reste sur WoW, sauf sous sa fenêtre.
-        let in_front = self.in_front();
         // Bandeau disparu de l'image (écran de chargement, 0.17.1) : caché après 0,3 s.
         let alive = self.live.last_alive.is_none_or(|t| now.saturating_duration_since(t) < ALIVE_TIMEOUT) && !self.live.banner_gone(now);
         let front = if in_front {
@@ -474,6 +509,14 @@ impl Session {
             } else if !front {
                 self.overlay.hide_all();
                 self.cover.posted = None;
+            }
+            // Journal (0.17.3) : caché par un écran de chargement, puis revenu.
+            if !front && in_front && self.live.banner_gone(now) {
+                self.hidden_by_banner = true;
+                crate::say!("[miroir] chat traduit caché : bandeau absent de l'image (écran de chargement)");
+            } else if front && self.hidden_by_banner {
+                self.hidden_by_banner = false;
+                crate::say!("[miroir] chat traduit réaffiché{}", if combat { " (après le combat ou le verrouillage du chat)" } else { "" });
             }
         }
         if combat != self.combat_seen {
@@ -495,6 +538,7 @@ impl Session {
             // Écran du jeu (et ses changements) au journal : télévision, autre écran, échelle.
             if now.saturating_duration_since(self.screen_checked) >= Duration::from_secs(5) {
                 self.screen_checked = now;
+                veille::beat(Phase::Screen);
                 if let Some((info, tv)) = capture_win::screen_info_of(self.window()) {
                     if self.screen_info.as_deref() != Some(info.as_str()) {
                         crate::say!("[écran] {info}");
@@ -520,7 +564,9 @@ impl Session {
                 self.live.window_over(self.over, self.overlay.origin());
             }
         }
+        veille::beat(Phase::Cover);
         self.update_cover(now);
+        veille::beat(Phase::Panels);
         // L'addon attend l'application (lancée après la connexion) : « /reload » sur le jeu,
         // 20 s, au plus toutes les 3 min.
         let waiting = self.live.waiting_at.is_some_and(|t| now.saturating_duration_since(t) < Duration::from_secs(25))
@@ -657,10 +703,12 @@ impl Session {
             self.overlay.hide(NOTICE);
             self.notice_until = None;
         }
+        veille::beat(Phase::Render);
         let updates = self.live.mirror_tick(now);
         if !self.wow_front || combat {
             return;
         }
+        veille::beat(Phase::Show);
         for u in updates {
             let r = match &u.canvas {
                 Some(cv) => self.overlay.show(u.frame, u.left, u.bottom, cv, &u.hits),
@@ -726,28 +774,31 @@ pub fn run_games(
     let mut looked = Instant::now() - Duration::from_secs(10);
     let mut fonts: Option<crate::panel::Fonts> = None;
     let mut last_presence: Option<Instant> = None;
-    let mut presence_error = false;
+    // Surveillance (0.17.3) : présence écrite par un fil à part, blocages notés au journal.
+    let _veille = veille::Guard::start();
     crate::say!("En jeu : la traduction démarre seule à la connexion (WoW déjà ouvert : /reload). Maj+Entrée : envoi traduit.");
     loop {
         let now = Instant::now();
         // Jeux ouverts ou fermés (chaque seconde).
         if now.saturating_duration_since(looked) >= Duration::from_secs(1) {
             looked = now;
+            veille::beat(Phase::Games);
             let wanted = games();
             // Fermés : session finie (fenêtres du miroir retirées, capture arrêtée, traductions en
             // cours oubliées). Une fenêtre de WoW = une session de traduction liée à elle.
-            let mut closed: Vec<usize> = Vec::new();
+            let mut closed: Vec<(usize, isize)> = Vec::new();
             sessions.retain(|s| {
                 let keep = wanted.iter().any(|w| w.hwnd == s.spec.hwnd);
                 if !keep {
-                    closed.push(s.game);
+                    closed.push((s.game, s.spec.hwnd));
                 }
                 keep
             });
-            for g in &closed {
-                crate::say!("[WoW {g}] fenêtre fermée : sa traduction s'arrête");
-                if let Some(h) = &hub {
-                    h.borrow_mut().leave(*g);
+            for (g, h) in &closed {
+                // Journal (0.17.3) : fenêtre vraiment fermée, ou encore là mais cachée ou renommée.
+                crate::say!("{} [WoW {g}] fenêtre fermée ({}) : sa traduction s'arrête", veille::clock(), capture_win::window_state(*h));
+                if let Some(hub) = &hub {
+                    hub.borrow_mut().leave(*g);
                 }
             }
             if !closed.is_empty() {
@@ -762,7 +813,8 @@ pub fn run_games(
                 let token = next_token;
                 next_token += 1;
                 let stop = Arc::new(AtomicBool::new(false));
-                spawn_capture(token, spec.hwnd, width, height, poll_ms, tx.clone(), stop.clone());
+                let cap_beat = Arc::new(AtomicU64::new(veille::ms()));
+                spawn_capture(token, spec.hwnd, width, height, poll_ms, tx.clone(), stop.clone(), cap_beat.clone());
                 let mut live = Live::new(spec.addons.clone());
                 live.game = game;
                 live.enable_mirror(spec.fonts.clone(), demo, opts);
@@ -791,6 +843,7 @@ pub fn run_games(
                     token,
                     spec,
                     stop,
+                    cap_beat,
                     live,
                     overlay,
                     started: now,
@@ -812,6 +865,8 @@ pub fn run_games(
                     restore: None,
                     wow_front: true,
                     combat_seen: false,
+                    hidden_by_banner: false,
+                    was_in_front: false,
                     over: None,
                     cover: CoverState::default(),
                 });
@@ -820,12 +875,14 @@ pub fn run_games(
         // Trames des captures (attente courte : fenêtres et collages restent vifs).
         let mut got: Vec<(usize, Cap)> = Vec::new();
         let wait = if sessions.is_empty() { 100 } else { poll_ms.max(4) };
+        veille::beat(Phase::Wait);
         match rx.recv_timeout(Duration::from_millis(wait)) {
             Ok(m) => got.push(m),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Err("fils de capture arrêtés".into()),
         }
         got.extend(rx.try_iter());
+        veille::beat(Phase::Frames);
         let now = Instant::now();
         let many = sessions.len() > 1;
         let mut failed: Vec<(usize, String)> = Vec::new();
@@ -887,30 +944,46 @@ pub fn run_games(
                 h.borrow_mut().leave(s.game);
             }
         }
+        // Capture bloquée (0.17.3 : plus d'image du bandeau, chat traduit jamais réaffiché) :
+        // relancée dans un nouveau fil ; l'ancien, s'il repart, s'arrête et n'est plus écouté.
+        for s in sessions.iter_mut().filter(|s| s.ready) {
+            let quiet = veille::ms().saturating_sub(s.cap_beat.load(Ordering::Relaxed));
+            if quiet < veille::CAPTURE_STUCK.as_millis() as u64 {
+                continue;
+            }
+            if strict {
+                return Err("capture du bandeau bloquée".into());
+            }
+            crate::say!("{} [WoW {}] capture du bandeau bloquée depuis {} s : relancée", veille::clock(), s.game, quiet / 1000);
+            s.stop.store(true, Ordering::Relaxed);
+            s.stop = Arc::new(AtomicBool::new(false));
+            s.cap_beat = Arc::new(AtomicU64::new(veille::ms()));
+            s.token = next_token;
+            next_token += 1;
+            s.ready = false;
+            s.started = now;
+            spawn_capture(s.token, s.spec.hwnd, width, height, poll_ms, tx.clone(), s.stop.clone(), s.cap_beat.clone());
+        }
         for s in sessions.iter_mut() {
             if !fresh.contains(&s.game) {
                 s.live.idle(now);
             }
         }
         // Messages des fenêtres de ce fil (miroirs, icône près de l'horloge), même sans jeu.
+        veille::beat(Phase::Windows);
         Overlay::pump_thread();
+        veille::beat(Phase::Keep);
         if !keep() {
             return Ok(());
         }
-        // Présence de l'application, relue par l'addon à chaque connexion et /reload (une fois
-        // par dossier, plusieurs jeux pouvant partager une version).
-        if last_presence.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(2)) {
+        // Présence de l'application, relue par l'addon à chaque connexion et /reload : écrite
+        // toutes les 2 s par le fil de surveillance (0.17.3), dans les dossiers des jeux traduits
+        // (encore 60 s après leur dernière session : capture relancée, fenêtre perdue un instant).
+        veille::beat(Phase::Presence);
+        if last_presence.is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(1)) {
             last_presence = Some(now);
-            let mut dirs: Vec<&PathBuf> = sessions.iter().filter_map(|s| s.live.addons_dir()).collect();
-            dirs.sort();
-            dirs.dedup();
-            for d in dirs {
-                if let Err(e) = crate::install::write_live_everywhere(d) {
-                    if !presence_error {
-                        crate::say!("[présence] {e}");
-                        presence_error = true;
-                    }
-                }
+            for d in sessions.iter().filter_map(|s| s.live.addons_dir()) {
+                veille::claim(d);
             }
         }
         // Fenêtre de WoW active : ses traductions passent devant celles des autres jeux.

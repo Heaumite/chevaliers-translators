@@ -36,7 +36,18 @@ pub enum Langs {
     All,
 }
 
+/// Langues du pack low (EuroLLM 1.7B).
+pub const LOW_LANGS: [&str; 6] = ["fr", "en", "es", "it", "de", "ru"];
+
 impl Langs {
+    /// Ce jeu de langues traduit-il de `src` vers `tgt` (0.17.6) ?
+    pub fn covers(self, src: &str, tgt: &str) -> bool {
+        match self {
+            Langs::All => true,
+            Langs::Low => LOW_LANGS.contains(&src) && LOW_LANGS.contains(&tgt),
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Langs::Low => "6 langues : français, anglais, espagnol, italien, allemand, russe",

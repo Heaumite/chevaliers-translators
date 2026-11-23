@@ -10,7 +10,7 @@ local ADDON, CT = ...
 
 -- Version des fichiers Lua (le .toc n'est relu qu'au démarrage du jeu : après une mise à jour et
 -- un /reload, il donnerait encore l'ancienne). Vérifiée contre l'application par un test.
-CT.VERSION = "0.17.2"
+CT.VERSION = "0.17.6"
 
 local floor = math.floor
 local format = string.format
@@ -404,11 +404,13 @@ local function WatchContext(now)
 end
 
 -- Fin du chargement : signalée encore 3 fois (une trame peinte pendant que l'écran de chargement
--- s'efface peut ne pas être vue), et le chat miroir est redécrit tout de suite.
+-- s'efface peut ne pas être vue), et le chat miroir est remis à niveau tout de suite (0.17.3 :
+-- fenêtres redécrites et textes des lignes affichées renvoyés, ceux peints pendant l'écran de
+-- chargement n'ayant pas été vus par l'application).
 local function LoadingOver()
   if not chatOn then return end
   SendContextNow()
-  if CT.Mirror and CT.Mirror.Refresh then CT.Mirror:Refresh() end
+  if CT.Mirror and CT.Mirror.Resync then CT.Mirror:Resync() end
   if C_Timer and C_Timer.After then
     for _, d in ipairs({ 0.5, 1.5, 3 }) do
       C_Timer.After(d, function() if chatOn and not CT.loading then SendContextNow() end end)
@@ -416,11 +418,29 @@ local function LoadingOver()
   end
 end
 
+-- Changements de zone sans écran de chargement, résurrection (0.17.3) : contexte et fenêtres du
+-- chat redécrits tout de suite (au plus toutes les 2 s : les sous-zones changent souvent en ville).
+local ZONE_EVENTS = { ZONE_CHANGED_NEW_AREA = true, ZONE_CHANGED = true, ZONE_CHANGED_INDOORS = true,
+  PLAYER_ALIVE = true, PLAYER_UNGHOST = true }
+local zoneAt = -10
+local function ZoneChanged()
+  local now = GetTime()
+  if not chatOn or CT.loading or now - zoneAt < 2 then return end
+  zoneAt = now
+  SendContextNow()
+  if CT.Mirror and CT.Mirror.Refresh then CT.Mirror:Refresh() end
+  CT.zoneRefreshes = (CT.zoneRefreshes or 0) + 1
+end
 local loadWatch = CreateFrame("Frame")
-for _, ev in ipairs({ "PLAYER_LEAVING_WORLD", "LOADING_SCREEN_ENABLED", "LOADING_SCREEN_DISABLED", "PLAYER_ENTERING_WORLD" }) do
+for _, ev in ipairs({ "PLAYER_LEAVING_WORLD", "LOADING_SCREEN_ENABLED", "LOADING_SCREEN_DISABLED", "PLAYER_ENTERING_WORLD",
+  "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "PLAYER_ALIVE", "PLAYER_UNGHOST" }) do
   pcall(loadWatch.RegisterEvent, loadWatch, ev)
 end
 loadWatch:SetScript("OnEvent", function(_, event)
+  if ZONE_EVENTS[event] then
+    ZoneChanged()
+    return
+  end
   local was = CT.loading
   if event == "PLAYER_LEAVING_WORLD" or event == "LOADING_SCREEN_ENABLED" then
     CT.loading = true
@@ -441,11 +461,14 @@ driver:SetScript("OnUpdate", function()
   local now = GetTime()
   if chatOn then
     WatchBacklog(now)
-    if CT.Mirror and CT.Mirror.mode and CT.Mirror.mode ~= "off" then WatchContext(now) end
+    if CT.Mirror and CT.Mirror.mode and CT.Mirror.mode ~= "off" then
+      WatchContext(now)
+    end
   end
   -- Cadence planifiée : l'attente n'est pas arrondie à l'image suivante, la moyenne
-  -- tient le nombre de trames demandé. Chaque trame reste au moins 2 images à l'écran.
-  if now < nextSwap or ticks < 2 then return end
+  -- tient le nombre de trames demandé. Chaque trame reste au moins 50 ms et au moins 3 images à
+  -- l'écran (0.17.4 ; avant 2) : la capture ne tombe jamais sur une image en train de changer.
+  if now < nextSwap or ticks < 3 then return end
   if CT.Banner.cols == 0 then return end
   local item = NextItem()
   if item then
